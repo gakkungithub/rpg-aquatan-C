@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>あくあたんジェネレーター ver.2</title>
+    <script
+      src="https://code.jquery.com/jquery-3.6.0.min.js"
+      integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+      crossorigin="anonymous"
+    ></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+    <script src="aquagen.js"></script>
+    <style>
+      #inputform {
+        display: flex;
+        flex-wrap: wrap;
+      }
+
+      #inputform div {
+        padding: 0 0.4em;
+      }
+
+      canvas {
+        image-rendering: pixelated;
+      }
+
+      #output {
+        width: 256px;
+      }
+
+      #preview {
+        width: 128px;
+      }
+    </style>
+  </head>
+  <body>
+    <form>
+      <div id="inputform">
+        <div>
+          <label>背景を透明</label>
+          <input id="bg_trans" type="checkbox" />
+        </div>
+      </div>
+      <button type="reset">リセット</button>
+    </form>
+
+    <canvas id="output" width="128" height="128"></canvas>
+    <canvas id="preview" width="32" height="32"></canvas>
+    <p>歩いているあくあたんをクリックで向きが変わるよ</p>
+    <div>
+      <label for="preview_interval">アニメーション周期</label>
+      <input type="number" id="preview_interval" value="250" />
+    </div>
+    <div>
+      <label for="gif_zoom">GIF倍率</label>
+      <input type="number" id="gif_zoom" value="1" />
+    </div>
+
+    <button id="download">ダウンロード</button>
+    <button id="gif_download">GIFダウンロード</button>
+  </body>
+</html>
