@@ -3,7 +3,19 @@
 マップデータの生成, デバッグシステム(サーバ)とRPGシステム(クライアント)の通信処理を一度にまとめて行えるようにしました.
 
 ## コマンド
-python rpg-aquatan-C.py [-p 実行ファイル名] [-c cファイル名]
+python rpg-aquatan-C.py [-p PROGRAM] [-c CFILE]
+
+Options:
+
+  -p, --program    実行するプログラムの名前を指定します（例: compiled_binary）
+  
+  -c, --cfiles     使用する C ソースファイルを指定します（例: source.c）
+
+例:
+
+  python rpg-aquatan-C.py -p myprogram -c main.c
+  
+  python rpg-aquatan-C.py --program myprogram --cfiles main.c
 
 将来cファイル名は複数選べるようにしますが, 現在は一つだけしか受け付けていません.
 
