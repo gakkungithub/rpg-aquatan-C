@@ -1297,9 +1297,9 @@ class Map:
         x, y = int(data["x"]), int(data["y"])
         mapchip = int(data["mapchip"])
         sequence = list(data["sequence"])
-        fromTo = data.get("fromTo", (0,0))
         type = data.get("autoType", "")
-        auto = AutoEvent((x, y), mapchip, sequence, fromTo, type)
+        fromTo = data.get("fromTo", (0,0))
+        auto = AutoEvent((x, y), mapchip, sequence, type, fromTo)
         self.events.append(auto)
 
 
@@ -1501,7 +1501,7 @@ class Player(Character):
         self.dest = {}
         self.place_label = "away"
         self.automove = []
-        self.automoveFromTo: list[tuple[int, int]] = []
+        self.automoveFromTo: list[tuple[str, list[int | None]]] = []
         self.waitingMove = None
         self.moveHistory = []
         self.move5History = []
@@ -1550,7 +1550,7 @@ class Player(Character):
                     self.place_label = event.place_label
                 elif isinstance(event, AutoEvent):  # AutoEvent
 #                    print(f"append_automove({event.sequence})")
-                    self.append_automove(event.sequence, event.fromTo)
+                    self.append_automove(event.sequence, type=event.type, fromTo=event.fromTo)
                     return
         elif self.waitingMove is not None:
 #                print(f"waitingMove:{self.waitingMove}")
@@ -1607,7 +1607,8 @@ class Player(Character):
                         MSGWND.set("ここから先は進入できません!!")
                     else:
                         automoveFromTo = self.get_next_automoveFromTo()
-                        self.sender.send_event({"fromTo": automoveFromTo})
+                        type, fromTo = automoveFromTo
+                        self.sender.send_event({"type": type, "fromTo": fromTo})
                         automoveResult = self.sender.receive_json()
                         if automoveResult and automoveResult['status'] == "ng":
                             MSGWND.set(automoveResult['message'])
@@ -1683,11 +1684,11 @@ class Player(Character):
         """自動移動に付随してfromTo情報を取得"""
         self.automoveFromTo.pop(0)
 
-    def append_automove(self, ch, fromTo=None):
+    def append_automove(self, ch, type='', fromTo=None):
         """自動移動に追加する"""
         self.automove.extend(ch)
         if fromTo:
-            self.automoveFromTo.append(tuple(fromTo))
+            self.automoveFromTo.append((type, fromTo))
 
     def search(self, mymap):
         """足もとに宝箱があるか調べる"""
@@ -2256,12 +2257,12 @@ class StatusWindow(Window):
 class AutoEvent():
     """自動イベント"""
 
-    def __init__(self, pos, mapchip, sequence, fromTo, type):
+    def __init__(self, pos, mapchip, sequence, type, fromTo):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.sequence = sequence  # 移動シーケンス
+        self.type = type # if, while, forで種類分け
         self.fromTo = fromTo
-        self.type = type # if, whileで種類分け
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
 

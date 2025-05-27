@@ -305,10 +305,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 if not isCorrectVars:
                     continue
 
-            #そのあと(もしくは変数に変更がない場合)は今の処理を確認する
-            try:
+            # 特定のステップは最後のステップ実行を発動させないようにする
+            isSkip = False
+
+            # そのあと(もしくは変数に変更がない場合)は今の処理を確認する
+            while True:
                 # JSONが複数回に分かれて送られてくる可能性があるためパース
                 data = conn.recv(1024)
+                # ここは後々変える
                 if not data:
                     break
                 buffer += data.decode()
@@ -321,7 +325,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         send_data = json.dumps({"message": "NG行動をしました!!"})
                     conn.sendall(send_data.encode('utf-8'))
-                    continue
                 elif (ngname := event.get('funcChange', None)) is not None:
                     if func_crnt_name != func_name:
                         # func_event = [event['roomname']]
@@ -329,25 +332,102 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
                         #     continue
                         func_crnt_name = func_name
+                        break
                     else:
                         send_data = json.dumps({"message": "NG行動をしました!!"})
                         conn.sendall(send_data.encode('utf-8'))
-                elif (ngname := event.get('fromTo', None)) is not None:
-                    if event['fromTo'][0] is not None and event['fromTo'][0] + beginLine == line_number:
-                        send_data = json.dumps({"message": "", "status": "ok"})
-                        conn.sendall(send_data.encode('utf-8'))
-                    elif event['fromTo'][1] is not None and event['fromTo'][1] + beginLine == line_number:
-                        send_data = json.dumps({"message": "", "status": "ok"})
-                        conn.sendall(send_data.encode('utf-8'))
+                elif (fromTo := event.get('fromTo', None)) is not None:
+                    type = event.get('type', '')
+                    if type == 'if':
+                        errorCnt_if = 0
+                        line_number_track = []
+                        while True:
+                            # まず、if文でどの行まで辿ったかを確かめる
+                            if fromTo[:len(line_number_track)] == line_number_track:
+                                crntFromTo = fromTo[len(line_number_track):]
+                            # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                            else:
+                                errorCnt_if += 1
+                                send_data = json.dumps({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                conn.sendall(send_data.encode('utf-8'))
+                                while True:
+                                    data = conn.recv(1024)
+                                    # ここは後々変える
+                                    if not data:
+                                        break
+                                    buffer += data.decode()
+                                    event = json.loads(buffer)
+                                    print(f"[受信イベント] {event}")
+                                    buffer = ""
+                                    if type := event.get('type', '') != 'if':
+                                        errorCnt_if += 1
+                                        send_data = json.dumps({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                        conn.sendall(send_data.encode('utf-8'))
+                                    elif fromTo := event.get('fromTo', None) is None:
+                                        errorCnt_if += 1
+                                        send_data = json.dumps({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                        conn.sendall(send_data.encode('utf-8'))
+                                    else:
+                                        break
+                                continue
+                            while True:
+                                if crntFromTo[0] + beginLine != line_number:
+                                    errorCnt_if += 1
+                                    send_data = json.dumps({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                    conn.sendall(send_data.encode('utf-8'))
+                                    while True:
+                                        data = conn.recv(1024)
+                                        # ここは後々変える
+                                        if not data:
+                                            break
+                                        buffer += data.decode()
+                                        event = json.loads(buffer)
+                                        print(f"[受信イベント] {event}")
+                                        buffer = ""
+                                        if (type := event.get('type', '')) != 'if':
+                                            errorCnt_if += 1
+                                            send_data = json.dumps({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            conn.sendall(send_data.encode('utf-8'))
+                                        elif (fromTo := event.get('fromTo', None)) is None:
+                                            errorCnt_if += 1
+                                            send_data = json.dumps({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            conn.sendall(send_data.encode('utf-8'))
+                                        else:
+                                            break
+                                    break
+                                line_number_track.append(crntFromTo.pop(0))
+                                if not crntFromTo:
+                                    break
+                                step_conditionally(frame)
+
+                                print(f"{func_name} at {file_name}:{line_number}")
+
+                                # プロセスの状態を更新
+                                state = process.GetState()
+
+                                frame = thread.GetFrameAtIndex(0)
+
+                                line_entry = frame.GetLineEntry()
+                                file_name = line_entry.GetFileSpec().GetFilename()
+                                line_number = line_entry.GetLine()
+                                func_name = frame.GetFunctionName()
+
+                            # crntFromToが空 = 行番が完全一致
+                            if not crntFromTo:
+                                send_data = json.dumps({"message": "", "status": "ok"})
+                                conn.sendall(send_data.encode('utf-8'))
+                                isSkip = True
+                                break
+                    elif type == 'while':
+                        pass
                     else:
-                        send_data = json.dumps({"message": "ここから先は進入できません!!", "status": "ng"})
-                        conn.sendall(send_data.encode('utf-8'))
-                        continue
+                        pass
                 #特に何も実行しない場合
                 else:
-                    pass            
-            except json.JSONDecodeError:
-                pass  # まだ完全なJSONが届いていない場合は待つ
+                    break
+            
+            if isSkip:
+                continue
             
             step_conditionally(frame)
 

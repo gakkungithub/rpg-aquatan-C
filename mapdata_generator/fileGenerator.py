@@ -19,7 +19,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
 
     #経路の一方通行情報
     for exit in exitInfo:
-        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "fromTo": exit[2] ,"autoType": exit[3], "sequence": exit[4]})
+        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4]})
 
     #ゴールの案内人の情報
     for warpChara in warpCharaInfo:

@@ -234,20 +234,23 @@ class GenBitMap:
         else:
             print("generation failed: try again!! 6")
 
-    def setOneWay(self, pos, dy, dx, condition_move, autoType):
+    def setOneWay(self, pos, dy, dx, condition_move):
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
+        
+        autoType, line_track = condition_move
+
         #left
         if dx == -1:
-            self.exit_info.append((pos, 7, condition_move, autoType, "l"))
+            self.exit_info.append((pos, 7, autoType, line_track, "l"))
         #up
         elif dy == -1:
-            self.exit_info.append((pos, 6, condition_move, autoType, "u"))
+            self.exit_info.append((pos, 6, autoType, line_track, "u"))
         #right
         elif dx == 1:
-            self.exit_info.append((pos, 7, condition_move, autoType, "r"))
+            self.exit_info.append((pos, 7, autoType, line_track, "r"))
         #down
         elif dy == 1:
-            self.exit_info.append((pos, 6, condition_move, autoType, "d"))
+            self.exit_info.append((pos, 6, autoType, line_track, "d"))
 
     def startTracking(self):
         self.setEdgeInfo()
@@ -322,7 +325,7 @@ class GenBitMap:
                     if crntRoomID == toNodeID:
                         self.setWarpZone(crntRoomID, toNodeID, 158)
                     else:
-                        self.createPath(crntRoomID, toNodeID, 'ifTrue')
+                        self.createPath(crntRoomID, toNodeID)
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'diamond':
                     nodeIDs.append(toNodeID)
@@ -349,14 +352,14 @@ class GenBitMap:
             for toNodeID in self.getEdgeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
-                    self.createPath(nodeID, toNodeID, 'whileTrue')
+                    self.createPath(nodeID, toNodeID)
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
                     self.setWarpZone(nodeID, toNodeID, 158)
                     nodeIDs.append(toNodeID)
             if nodeIDs:
                 #whileの領域に入る
-                self.createPath(crntRoomID, nodeID, 'whileIn')
+                self.createPath(crntRoomID, nodeID)
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
                 self.trackAST(nodeIDs[1], nodeIDs[1])
 
@@ -406,7 +409,7 @@ class GenBitMap:
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         else:
-            #switch構文でワープゾーンを繋げるところを繋げる
+            #switch構文でワープゾーンを繋げる
             if crntRoomID != nodeID:
                 if nodeID in self.roomSize_info[self.func_name]:
                     self.createRoom(nodeID)
@@ -475,8 +478,7 @@ class GenBitMap:
             self.eventMap = new_eventMap
             return self.findRoomArea(roomSize, (new_height, new_width), kernel)
 
-    def createPath(self, startNodeID, goalNodeID, autoType):
-        print(autoType)
+    def createPath(self, startNodeID, goalNodeID):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
 
@@ -499,7 +501,7 @@ class GenBitMap:
                     #出口側が曲がることはないうえに、一方通行パネルの位置が被ることは無い
                     if ((gy-1 <= path[i][0] < gy+gheight+1 and gx-1 <= path[i][1] < gx+gwidth+1) and
                         not (gy <= path[i-1][0] < gy+gheight and gx <= path[i-1][1] < gx+gwidth)):
-                        self.setOneWay(path[i-1], path[i][0]-path[i-1][0], path[i][1]-path[i-1][1], self.condition_move[goalNodeID], autoType)
+                        self.setOneWay(path[i-1], path[i][0]-path[i-1][0], path[i][1]-path[i-1][1], self.condition_move[goalNodeID])
                         setExit = True
         
         check_map[sy:sy+sheight, sx:sx+swidth] = 1
