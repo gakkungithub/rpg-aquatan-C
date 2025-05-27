@@ -94,7 +94,7 @@ class GenBitMap:
         self.func_warp = {}
         self.warpChara_info = []
         self.exit_info = []
-        self.condition_move = condition_move
+        self.condition_move: list[tuple[str, list[int | None]]] = condition_move
 
     def setMapChip(self, pname):
         wallFlags = np.zeros(8, dtype=int)
@@ -193,7 +193,8 @@ class GenBitMap:
                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
                 warpTo = (int(gy+y), int(gx+x))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
-                self.warp_info.append((warpFrom, warpTo, mapChipNum))
+                c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
+                self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo))
             else:
                 print("generation failed: try again!! 1")
         else:

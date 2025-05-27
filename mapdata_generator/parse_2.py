@@ -567,8 +567,8 @@ class ASTtoFlowChart:
 
         # --- 条件True時の処理ノード ---
         trueNodeID = self.createNode("", 'circle')
-        self.condition_move[f'"{condNodeID}"'] = ['while', [None, cond_cursor.location.line - self.funcBeginLine]]
-        self.condition_move[f'"{trueNodeID}"'] = ['while', [cond_cursor.location.line - self.funcBeginLine, cond_cursor.location.line - self.funcBeginLine + 1]]
+        self.condition_move[f'"{condNodeID}"'] = ('whileIn', [cond_cursor.location.line - self.funcBeginLine])
+        self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line - self.funcBeginLine, cond_cursor.location.line - self.funcBeginLine + 1])
         # 次のノードがwhileのtrueかを確認するためにエッジにラベルをつけておく(falseも同じ)
         self.createEdge(condNodeID, trueNodeID, "true")
         self.createRoomSizeEstimate(trueNodeID)
@@ -584,6 +584,7 @@ class ASTtoFlowChart:
 
         # --- ループを閉じる処理 ---
         loop_back_node = self.createNode("", 'parallelogram')  # 再評価への中継点
+
         self.createEdge(body_end, loop_back_node)
         self.createEdge(loop_back_node, condNodeID)
 
@@ -591,7 +592,7 @@ class ASTtoFlowChart:
         endNodeID = self.createNode("", 'doublecircle')
         self.createEdge(condNodeID, endNodeID, "false")
         self.createRoomSizeEstimate(endNodeID)
-        self.condition_move[f'"{endNodeID}"'] = [None, cond_cursor.location.line - self.funcBeginLine]
+        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line - self.funcBeginLine, None])
 
         return endNodeID
 

@@ -325,19 +325,25 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         send_data = json.dumps({"message": "NG行動をしました!!"})
                     conn.sendall(send_data.encode('utf-8'))
-                elif (ngname := event.get('funcChange', None)) is not None:
-                    if func_crnt_name != func_name:
-                        # func_event = [event['roomname']]
-                        # if func_event != func_name:
-                        #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
-                        #     continue
+                elif func_crnt_name != func_name:
+                    if (funcChange := event.get('funcChange', None)) is not None:
+                    # func_event = [event['roomname']]
+                    # if func_event != func_name:
+                    #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
+                    #     continue
                         func_crnt_name = func_name
                         break
                     else:
                         send_data = json.dumps({"message": "NG行動をしました!!"})
-                        conn.sendall(send_data.encode('utf-8'))
+                    conn.sendall(send_data.encode('utf-8'))
                 elif (fromTo := event.get('fromTo', None)) is not None:
                     type = event.get('type', '')
+                    # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
+                    # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
+                    if fromTo[0] + beginLine != line_number:
+                        send_data = json.dumps({"message": "ここから先は進入できません!!", "status": "ng"})
+                        conn.sendall(send_data.encode('utf-8'))
+                        continue
                     if type == 'if':
                         errorCnt_if = 0
                         line_number_track = []
@@ -418,8 +424,80 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 conn.sendall(send_data.encode('utf-8'))
                                 isSkip = True
                                 break
-                    elif type == 'while':
-                        pass
+                    # region while構文のfromTo #まず条件文に入るか戻ってくるかの確認
+                    elif type == 'whileIn':
+                        send_data = json.dumps({"message": "", "status": "ok"})
+                        conn.sendall(send_data.encode('utf-8'))
+
+                        # その次に条件が真かどうかを確かめる
+                        step_conditionally(frame)
+
+                        print(f"{func_name} at {file_name}:{line_number}")
+
+                        # プロセスの状態を更新
+                        state = process.GetState()
+
+                        frame = thread.GetFrameAtIndex(0)
+
+                        line_entry = frame.GetLineEntry()
+                        file_name = line_entry.GetFileSpec().GetFilename()
+                        crnt_line_number = line_entry.GetLine()
+                        func_name = frame.GetFunctionName()
+
+                        if func_name is None or file_name is None:
+                            break
+
+                        vars_changed = varsTracker.trackStart(frame)
+
+                        # stdout_output, stderr_output = get_all_stdvalue(process)
+                        # if stdout_output:
+                        #     print("[STDOUT]")
+                        #     print(stdout_output)
+
+                        # if stderr_output:
+                        #     print("[STDERR]")
+                        #     print(stderr_output)
+
+                        # if state == lldb.eStateExited:
+                        #     print("program terminated")
+                        #     break
+                        # elif state == lldb.eStateCrashed:
+                        #     print("program crashed")
+                        #     break
+                        # elif state == lldb.eStateStopped:
+                        #     if ((stop_reason := thread.GetStopReason()) != lldb.eStopReasonPlanComplete):
+                        #         print("Stop reason:", stop_reason)
+                        #         break
+                        #     print(f"change in state: {state}")
+
+                        while True:
+                            data = conn.recv(1024)
+                            # ここは後々変える
+                            if not data:
+                                break
+                            buffer += data.decode()
+                            event = json.loads(buffer)
+                            print(f"[受信イベント] {event}")
+                            buffer = ""
+
+                            if (fromTo := event.get('fromTo', None)) is not None:
+                                type = event.get('type', '')
+                                if type == 'whileTrue':
+                                    if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
+                                        line_number = crnt_line_number
+                                        send_data = json.dumps({"message": "", "status": "ok"})
+                                        conn.sendall(send_data.encode('utf-8'))
+                                        break
+                                elif type == 'whileFalse':
+                                    if fromTo[0] + beginLine == crnt_line_number and fromTo[1] is None:
+                                        line_number = crnt_line_number
+                                        send_data = json.dumps({"message": "", "status": "ok"})
+                                        conn.sendall(send_data.encode('utf-8'))
+                                        break
+                            send_data = json.dumps({"message": "NG行動をしました!!", "status": "ng"})
+                            conn.sendall(send_data.encode('utf-8'))
+                        break
+                    # endregion 
                     else:
                         pass
                 #特に何も実行しない場合

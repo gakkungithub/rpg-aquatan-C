@@ -1274,8 +1274,10 @@ class Map:
         x, y = int(data["x"]), int(data["y"])
         mapchip = int(data["mapchip"])
         dest_map = data["dest_map"]
+        type = data.get("warpType", "")
+        fromTo = data.get("fromTo", [0,0])
         dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
-        move = MoveEvent((x, y), mapchip, dest_map, (dest_x, dest_y))
+        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y))
         self.events.append(move)
 
     def create_plpath_j(self, data):
@@ -1298,7 +1300,7 @@ class Map:
         mapchip = int(data["mapchip"])
         sequence = list(data["sequence"])
         type = data.get("autoType", "")
-        fromTo = data.get("fromTo", (0,0))
+        fromTo = data.get("fromTo", [0,0])
         auto = AutoEvent((x, y), mapchip, sequence, type, fromTo)
         self.events.append(auto)
 
@@ -1530,22 +1532,42 @@ class Player(Character):
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent):  # MoveEventなら
-                    dest_map = event.dest_map
-                    dest_x = event.dest_x
-                    dest_y = event.dest_y
-                    # region command
-                    from_map = mymap.name
-                    self.move5History.append({'mapname': from_map, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':False})
-                    if len(self.move5History) > 5:
-                        self.move5History.pop(0)
-                    # endregion
-                    # 暗転
-                    DIMWND.setdf(200)
-                    DIMWND.show()
-                    mymap.create(dest_map)  # 移動先のマップで再構成
-                    self.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                    mymap.add_chara(self)  # マップに再登録
-                    self.fp.write("jump, " + dest_map + "," + str(self.x)+", " + str(self.y) + "\n")
+                    self.sender.send_event({"type": event.type, "fromTo": event.fromTo})
+                    moveResult = self.sender.receive_json()
+                    if moveResult and moveResult['status'] == "ok":
+                        dest_map = event.dest_map
+                        dest_x = event.dest_x
+                        dest_y = event.dest_y
+
+                        # region command
+                        from_map = mymap.name
+                        self.move5History.append({'mapname': from_map, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':False})
+                        if len(self.move5History) > 5:
+                            self.move5History.pop(0)
+                        # endregion
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        mymap.create(dest_map)  # 移動先のマップで再構成
+                        self.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        mymap.add_chara(self)  # マップに再登録
+                        self.fp.write("jump, " + dest_map + "," + str(self.x)+", " + str(self.y) + "\n")
+                    else:
+                        if self.prevPos[1][1] - self.prevPos[0][1] == 1:
+                            self.vx, self.vy = 0, -self.speed
+                            self.moving = True
+                        elif self.prevPos[1][0] - self.prevPos[0][0] == -1:
+                            self.vx, self.vy = self.speed, 0
+                            self.moving = True
+                        elif self.prevPos[1][0] - self.prevPos[0][0] == 1:
+                            self.vx, self.vy = -self.speed, 0
+                            self.moving = True
+                        else:
+                            self.vx, self.vy = 0, self.speed
+                            self.moving = True
+                                                    
+                        self.prevPos = [None, self.prevPos[0]]
+                        MSGWND.set(moveResult['message'])
                 elif isinstance(event, PlacesetEvent):  # PlacesetEventなら
                     self.place_label = event.place_label
                 elif isinstance(event, AutoEvent):  # AutoEvent
@@ -2350,10 +2372,12 @@ class CharaMoveItemsEvent(CharaMoveEvent):
 class MoveEvent():
     """移動イベント"""
 
-    def __init__(self, pos, mapchip, dest_map, dest_pos):
+    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.dest_map = dest_map  # 移動先マップ名
+        self.type: str = type
+        self.fromTo: list[int | None] = fromTo
         self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))

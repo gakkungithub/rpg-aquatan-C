@@ -10,7 +10,8 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
     characters = []
     #ワープの情報
     for warp in warpInfo:
-        events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], 
+        print(warp)
+        events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": warp[4],
                        "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0]})
         
     #アイテムの情報
