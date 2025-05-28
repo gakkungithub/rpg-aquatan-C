@@ -6,7 +6,7 @@
 # 1 "<built-in>" 2
 # 1 "/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C/data/whilestatement/whilestatement.c" 2
 int main(){
-    int i = 3, j = 4;
+    int i = 0, j = 4;
     while(i--){
         j += 2;
     }

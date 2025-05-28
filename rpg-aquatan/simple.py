@@ -414,6 +414,7 @@ def main():
                 if MSGWND.is_visible:
                     break
                 atxt = CMNDWND.draw(screen, font)
+
                 #atxt=txtbox.tbox(screen,font,0,SCR_HEIGHT,SCR_WIDTH,TXTBOX_HEIGHT,20)
                 cmd = ""
                 if atxt is None:
@@ -421,6 +422,7 @@ def main():
                 parts = atxt.split(' ', 1)
                 cmd = parts[0]
                 atxt = parts[1] if len(parts) > 1 else ''
+
                 if cmd == "":
                     continue
                 elif cmd == "undo":
@@ -2869,6 +2871,8 @@ class CommandWindow(Window):
                             self.txt += "."
                         elif event.key == K_COMMA:
                             self.txt += ","
+                        elif event.key == K_MINUS:
+                            self.txt += "-"
                         else:
                             for i in range(10):  # 0-9
                                 if event.key == 48 + i:

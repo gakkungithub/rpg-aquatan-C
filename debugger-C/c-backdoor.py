@@ -418,6 +418,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             # crntFromToが空 = 行番が完全一致
                             if not crntFromTo:
                                 event_sender({"message": "", "status": "ok"})
+                                vars_changed = varsTracker.trackStart(frame)
+                                vars_checker(vars_changed)
                                 isSkip = True
                                 break
                     # region while構文のfromTo #まず条件文に入るか戻ってくるかの確認
@@ -433,6 +435,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             return
 
                         vars_changed = varsTracker.trackStart(frame)
+                        vars_checker(vars_changed)
 
                         # get_std_outputs, state_checkerを入れるかは後々考える
 
@@ -448,7 +451,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         event_sender({"message": "", "status": "ok"})
                                         break
                                 elif type == 'whileFalse':
-                                    if fromTo[0] + beginLine == crnt_line_number and fromTo[1] is None:
+                                    if fromTo[0] + beginLine == line_number and fromTo[1] is None:
                                         line_number = crnt_line_number
                                         event_sender({"message": "", "status": "ok"})
                                         break
