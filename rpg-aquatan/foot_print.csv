@@ -1,5 +1,4 @@
-start,whilestatement,13, 13
-itemget, whilestatement,13, 15,i
-itemget, whilestatement,10, 15,j
-jump, whilestatement,8, 4
-end, whilestatement,8, 4
+start,whilestatement,7, 5
+itemget, whilestatement,5, 4,j
+itemget, whilestatement,7, 9,i
+end, whilestatement,12, 6
