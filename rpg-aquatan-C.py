@@ -18,7 +18,13 @@ subprocess.run(["python3.13", "c-flowchart.py", "-p", programname, "-c", ", ".jo
 programpath = f"{DATA_DIR}/{programname}/{programname}"
 result = subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
-server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env={"PYTHONPATH": "/opt/homebrew/Cellar/llvm/20.1.3/libexec/python3.13/site-packages:$PYTHONPATH"})
+env = os.environ.copy()
+
+env["PYTHONPATH"] = os.path.abspath("modules") + (
+    ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
+)
+
+server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
 
 inifilepath = f"{programpath}.ini"
 print(inifilepath)
