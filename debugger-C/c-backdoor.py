@@ -456,7 +456,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         event_sender({"message": "", "status": "ok"})
                                         break
                                 elif type == 'whileFalse':
-                                    if fromTo[0] + beginLine == line_number and fromTo[1] is None:
+                                    if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
                                         line_number = crnt_line_number
                                         event_sender({"message": "", "status": "ok"})
                                         break

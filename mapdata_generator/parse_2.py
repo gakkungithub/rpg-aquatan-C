@@ -160,6 +160,8 @@ class ASTtoFlowChart:
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         for cr in cursor.get_children():
+            if self.condition_move.get(f'"{nodeID}"', None) and self.condition_move[f'"{nodeID}"'][1][-1] is None:
+                self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line - self.funcBeginLine
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
         return nodeID
@@ -614,19 +616,28 @@ class ASTtoFlowChart:
         startNodeID = self.createNode("", 'circle')
         #ここで部屋情報を作る
         self.createRoomSizeEstimate(startNodeID)
-        self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cursor.location.line - self.funcBeginLine + 1])
-        endNodeID = self.createNode("", 'circle')
         
+        endNodeID = self.createNode("", 'circle')
+
         self.createEdge(nodeID, startNodeID)
+
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+                cr_in = list(cr.get_children())
+                if len(cr_in):
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cr_in[0].location.line - self.funcBeginLine])
+                    start_cr = cr_in[0]
+                else:
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cursor.location.line - self.funcBeginLine])
+                    start_cr = cursor
                 nodeID = self.parse_comp_stmt(cr, startNodeID)
             else:
+                # self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
                 if nodeID is None:
                     return None
                 condNodeID = self.get_exp(cr, 'diamond')
-                self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line - self.funcBeginLine, None])
+                self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line - self.funcBeginLine, start_cr.location.line - self.funcBeginLine])
                 self.createEdgeForLoop(endNodeID, condNodeID)
                 self.createEdge(nodeID, condNodeID)
                 self.createEdge(condNodeID, startNodeID, "True")
