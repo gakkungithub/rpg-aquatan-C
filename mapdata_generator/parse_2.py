@@ -182,7 +182,7 @@ class ASTtoFlowChart:
         elif cr.kind == clang.cindex.CursorKind.RETURN_STMT:
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.createNode("return", 'lpromoter')
+            returnNodeID = self.createNode(f"{cr.location.line - self.funcBeginLine}", 'lpromoter')
             self.createEdge(returnNodeID, self.get_exp(value_cursor))
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None

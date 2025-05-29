@@ -30,9 +30,9 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
             characters.append({"type": type, "name": "15001", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
         elif type == "CHARARETURN":
             if otherInfo[0] == "main":
-                characters.append({"type": type, "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname})
+                characters.append({"type": type, "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": otherInfo[1]})
             else:
-                characters.append({"type": type, "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {otherInfo[0]} の終わりです!!", "dest_map": pname})
+                characters.append({"type": type, "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {otherInfo[0]} の終わりです!!", "dest_map": pname, "line": otherInfo[1]})
 
     filename = f'{DATA_DIR}/{pname}/{pname}.json'
     with open(filename, 'w') as f:

@@ -182,25 +182,6 @@ def get_instructions_for_current_line(frame, target):
     
     return result
 
-def step_conditionally(frame):
-    thread = frame.GetThread()
-    process = thread.GetProcess()
-    target = process.GetTarget()
-
-    # 現在の命令アドレス
-    pc_addr = frame.GetPCAddress()
-
-    # 現在の命令を取得（必要な数だけ、ここでは1つ）
-    instructions = target.ReadInstructions(pc_addr, 1)
-
-    inst = instructions[0]
-    
-    mnemonic = inst.GetMnemonic(target)
-
-    print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
-
-    thread.StepInto()
-
 def handle_client(conn: socket.socket, addr: tuple[str, int]):
     def vars_checker(vars_changed):
         if vars_changed:
@@ -276,6 +257,44 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 
+    def step_conditionally(frame):
+        thread = frame.GetThread()
+        process = thread.GetProcess()
+        target = process.GetTarget()
+
+        # 現在の命令アドレス
+        pc_addr = frame.GetPCAddress()
+
+        # 現在の命令を取得（必要な数だけ、ここでは1つ）
+        instructions = target.ReadInstructions(pc_addr, 1)
+
+        instructions1 = target.ReadInstructions(pc_addr, 10)
+        for inst_temp in instructions1:
+            if inst_temp.GetMnemonic(target) == 'ret':
+                thread.StepOut()
+                errorCnt_ret = 0
+                while True:
+                    if (event := event_reciever()):
+                        ret_line = event.get('return', None)
+                        if ret_line and ret_line + beginLine == line_number:
+                            event_sender({"message": f"コードの末尾に達しました!! 戻り値は {thread.GetStopReturnValue().GetValue()} です!!", "status": "ok"})
+                            break
+                        else:
+                            errorCnt_ret += 1
+                            event_sender({"message": "違うキャラクターに話しています!!", "status": "ng"})
+                    else:
+                        errorCnt_ret += 1
+                        event_sender({"message": f"NG行動をしました!! {"ヒント: returnキャラに話しかけてみましょう!!" if errorCnt_ret >= 3 else ""}", "status": "ng"})
+                return
+
+        inst = instructions[0]
+        
+        mnemonic = inst.GetMnemonic(target)
+
+        print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
+
+        thread.StepInto()
+
     def get_next_state():
         # プロセスの状態を更新
         state = process.GetState()
@@ -288,7 +307,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         func_name = frame.GetFunctionName()
 
         if func_name is None or file_name is None:
-            return False
+            # state_checker(state)
+            return None
         
         print(f"{func_name} at {file_name}:{line_number}")
         return state, frame, file_name, line_number, func_name
@@ -303,20 +323,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             print("[STDERR]")
             print(stderr_output)
     
-    def state_checker(state):
-        if state == lldb.eStateExited:
-            print("program terminated")
-            return True
-        elif state == lldb.eStateCrashed:
-            print("program crashed")
-            return True
-        elif state == lldb.eStateStopped:
-            if ((stop_reason := thread.GetStopReason()) != lldb.eStopReasonPlanComplete):
-                print("Stop reason:", stop_reason)
-                return True
-            print(f"change in state: {state}")
+    # def state_checker(state):
+    #     if state == lldb.eStateExited:
+    #         print("program terminated")
+    #         return True
+    #     elif state == lldb.eStateCrashed:
+    #         print("program crashed")
+    #         return True
+    #     elif state == lldb.eStateStopped:
+    #         if ((stop_reason := thread.GetStopReason()) != lldb.eStopReasonPlanComplete):
+    #             print("Stop reason:", stop_reason)
+    #             return True
+    #         print(f"change in state: {state}")
         
-        return False
+    #     return False
 
     print(f"[接続] {addr} が接続しました")
 
@@ -477,9 +497,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             vars_changed = varsTracker.trackStart(frame)
 
             get_std_outputs()
-
-            if state_checker(state): 
-                return
 
 def start_server(host='localhost', port=9999):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

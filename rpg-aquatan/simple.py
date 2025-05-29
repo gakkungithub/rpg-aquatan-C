@@ -679,14 +679,19 @@ def main():
                                 parts1 = parts[1].split(" ",1)
                                 PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                             elif isinstance(chara, CharaReturn):
-                                PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
-                                if len(PLAYER.move5History) > 5:
-                                    PLAYER.move5History.pop(0)
-                                PLAYER.waitingMove = chara
-                                PLAYER.set_waitingMove_return()
-                                if len(PLAYER.itembag.items) != 1:
-                                    PLAYER.itembag.items.pop()
-                                PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                                # ここでreturnの是非を確かめる (キャラ分けは行数で行う)
+                                sender.send_event({"return": chara.line})
+                                returnResult = sender.receive_json()
+                                if returnResult['status'] == 'ok':
+                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
+                                    if len(PLAYER.move5History) > 5:
+                                        PLAYER.move5History.pop(0)
+                                    PLAYER.waitingMove = chara
+                                    PLAYER.set_waitingMove_return()
+                                    if len(PLAYER.itembag.items) != 1:
+                                        PLAYER.itembag.items.pop()
+                                    PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                                MSGWND.set(returnResult['message'])
                     else:
                         MSGWND.set("そのほうこうには　だれもいない。")
         if msgwincount > MSGWAIT:
@@ -1234,7 +1239,8 @@ class Map:
         direction = int(data["dir"])
         movetype = int(data["movetype"])
         message = data["message"]
-        chara = CharaReturn(name, (x, y), direction, movetype, message)
+        line = data["line"]
+        chara = CharaReturn(name, (x, y), direction, movetype, message, line)
         #print(chara)
         self.charas.append(chara)
 
@@ -2315,9 +2321,13 @@ class AutoEvent():
 # 
 
 class CharaReturn(Character):
+    def __init__(self, name, pos, direction, movetype, message, line):
+        super().__init__(name, pos, direction, movetype, message)
+        self.line = line
+        
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
-            f"{self.direction:d},{self.movetype:d},{self.message:s}"
+            f"{self.direction:d},{self.movetype:d},{self.message:s},{self.line:d}"
 
 #                                                                                                                                                                    
 #   ,ad8888ba,  88                                           88b           d88                                    88888888888                                        

@@ -224,14 +224,19 @@ class GenBitMap:
             print("generation failed: try again!! 5")        
 
     #話しかけると戻るキャラの設定
-    def setCharaReturn(self, roomNodeID):
+    def setCharaReturn(self, roomNodeID, line):
         gy, gx, gheight, gwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             pos = (int(gy+y), int(gx+x))
             self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            self.warpChara_info.append(("CHARARETURN", pos, self.func_name))
+            # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
+            if line == "":
+                line_ret = None
+            else:
+                line_ret = int(line)
+            self.warpChara_info.append(("CHARARETURN", pos, self.func_name, line_ret))
         else:
             print("generation failed: try again!! 6")
 
@@ -386,7 +391,7 @@ class GenBitMap:
         
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
-            self.setCharaReturn(crntRoomID)
+            self.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID))
         
         #while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram':

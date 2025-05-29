@@ -1,5 +1,6 @@
-start,whilestatement,12, 12
-itemget, whilestatement,12, 11,j
-itemget, whilestatement,15, 12,i
-jump, whilestatement,29, 15
-end, whilestatement,29, 15
+start,whilestatement,11, 3
+itemget, whilestatement,10, 6,i
+itemget, whilestatement,12, 6,j
+jump, whilestatement,21, 12
+moveout, whilestatement,23, 12
+end, whilestatement,23, 12
