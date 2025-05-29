@@ -507,6 +507,7 @@ class GenBitMap:
                     #出口側が曲がることはないうえに、一方通行パネルの位置が被ることは無い
                     if ((gy-1 <= path[i][0] < gy+gheight+1 and gx-1 <= path[i][1] < gx+gwidth+1) and
                         not (gy <= path[i-1][0] < gy+gheight and gx <= path[i-1][1] < gx+gwidth)):
+                        print(self.getNodeLabel(goalNodeID))
                         self.setOneWay(path[i-1], path[i][0]-path[i-1][0], path[i][1]-path[i-1][1], self.condition_move[goalNodeID])
                         setExit = True
         

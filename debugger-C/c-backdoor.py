@@ -322,21 +322,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         if stderr_output:
             print("[STDERR]")
             print(stderr_output)
-    
-    # def state_checker(state):
-    #     if state == lldb.eStateExited:
-    #         print("program terminated")
-    #         return True
-    #     elif state == lldb.eStateCrashed:
-    #         print("program crashed")
-    #         return True
-    #     elif state == lldb.eStateStopped:
-    #         if ((stop_reason := thread.GetStopReason()) != lldb.eStopReasonPlanComplete):
-    #             print("Stop reason:", stop_reason)
-    #             return True
-    #         print(f"change in state: {state}")
-        
-    #     return False
 
     print(f"[接続] {addr} が接続しました")
 
@@ -478,7 +463,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event_sender({"message": "NG行動をしました!!", "status": "ng"})
                         break
                     # endregion 
+                    elif type == 'doWhileIn':
+                        event_sender({"message": "", "status": "ok"})
+                        while True:
+                            step_conditionally(frame)
+
+                            if (next_state := get_next_state()):
+                                state, frame, file_name, line_number, func_name = next_state
+                            else:
+                                return
                     else:
+                        event_sender({"message": "まだこの条件構文には対応していません!!"})
                         pass
                 #特に何も実行しない場合
                 else:
