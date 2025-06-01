@@ -277,8 +277,8 @@ def main():
     #current_place = OMZN_STATUS.current_place()
     # 並列処理の接続開始はこれの前、データの送受信処理はこれ以降に書くことになる。
 
-    # main関数開始時の処理を送信する(今は何もない想定でパスする)。
-    sender.send_event({"pass": "begin"})
+    # # main関数開始時の処理を送信する(今は何もない想定でパスする)。
+    # sender.send_event({"pass": "begin"})
 
     while True:
         messages = []

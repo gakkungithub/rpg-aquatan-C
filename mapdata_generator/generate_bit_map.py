@@ -94,6 +94,7 @@ class GenBitMap:
         self.func_warp = {}
         self.warpChara_info = []
         self.exit_info = []
+        self.line_info: dict[str, set[int]] = {}
         self.condition_move: list[tuple[str, list[int | None]]] = condition_move
 
     def setMapChip(self, pname):
@@ -147,6 +148,7 @@ class GenBitMap:
 
         fg.writeMapIni(pname, self.initPos, self.set_gvar())
         fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info)
+        fg.writeLineFile(pname, self.line_info)
 
         plt.imshow(self.floorMap, cmap='gray', interpolation='nearest')
         plt.title(pname)
@@ -177,7 +179,7 @@ class GenBitMap:
                     for warpFuncInfo in funcWarp[1]:
                         self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
     
-    def setWarpZone(self, startNodeID, goalNodeID, mapChipNum):
+    def setWarpZone(self, startNodeID, goalNodeID, mapChipNum, diamondNodeID=None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -194,7 +196,11 @@ class GenBitMap:
                 warpTo = (int(gy+y), int(gx+x))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
+                # doWhileTrueについては上書きする (ノードが共有されているので)
+                if diamondNodeID:
+                    c_move_type, c_move_fromTo = self.condition_move[diamondNodeID]
                 self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo))
+                self.line_info[self.func_name].add(c_move_fromTo[0])
             else:
                 print("generation failed: try again!! 1")
         else:
@@ -258,6 +264,8 @@ class GenBitMap:
         elif dy == 1:
             self.exit_info.append((pos, 6, autoType, line_track, "d"))
 
+        self.line_info[self.func_name].add(line_track[0])
+
     def startTracking(self):
         self.setEdgeInfo()
         self.func_name = "main"
@@ -291,6 +299,8 @@ class GenBitMap:
     def trackFuncAST(self, refInfo):
         nodeID = refInfo["start"]
         self.createRoom(nodeID)
+
+        self.line_info[self.func_name] = set()
         
         #関数呼び出しのワープ情報を更新
         if self.func_name in self.func_warp:
@@ -329,7 +339,7 @@ class GenBitMap:
                 if self.getNodeShape(toNodeID) == 'circle':
                     #do_whileの同じノードに返って来る用
                     if crntRoomID == toNodeID:
-                        self.setWarpZone(crntRoomID, toNodeID, 158)
+                        self.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
                     else:
                         self.createPath(crntRoomID, toNodeID)
                     nodeIDs.insert(0, toNodeID)

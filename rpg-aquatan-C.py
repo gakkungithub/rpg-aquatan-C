@@ -24,7 +24,7 @@ env["PYTHONPATH"] = os.path.abspath("modules") + (
     ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
 )
 
-server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
+server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
 
 inifilepath = f"{programpath}.ini"
 print(inifilepath)

@@ -8,9 +8,9 @@ DATA_DIR = BASE_DIR + '/data'
 def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
     events = []
     characters = []
+
     #ワープの情報
     for warp in warpInfo:
-        print(warp)
         events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": warp[4],
                        "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0]})
         
@@ -35,6 +35,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
                 characters.append({"type": type, "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {otherInfo[0]} の終わりです!!", "dest_map": pname, "line": otherInfo[1]})
 
     filename = f'{DATA_DIR}/{pname}/{pname}.json'
+
     with open(filename, 'w') as f:
         fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": 503, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
         json.dump(fileContent, f) 
@@ -63,3 +64,12 @@ def writeMapIni(pname, initPos, gvarString):
     filename = f'{DATA_DIR}/{pname}/{pname}.ini'
     with open(filename, 'w') as f:
         config.write(f)
+
+def writeLineFile(pname, line_info):
+    filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
+
+    line_info_serializable = {
+        k: list(v) for k, v in line_info.items()
+    }
+    with open(filename, 'w') as f:
+        json.dump(line_info_serializable, f)

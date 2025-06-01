@@ -97,8 +97,7 @@ class ASTtoFlowChart:
         output_dir = f'{DATA_DIR}/{programname}'
         os.makedirs(output_dir, exist_ok=True)
         print(self.condition_move)
-        # with open(f'{output_dir}/{tu_bname}_DIFL.json', 'w') as f:
-        #     json.dump(self.firstDeclVars, f)
+        
         self.dot.render(f'{output_dir}/{programname}', format='dot')
         gv_dot_path = f'{output_dir}/{programname}'
         if os.path.exists(gv_dot_path):
@@ -633,7 +632,6 @@ class ASTtoFlowChart:
                     start_cr = cursor
                 nodeID = self.parse_comp_stmt(cr, startNodeID)
             else:
-                # self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
                 if nodeID is None:
                     return None
                 condNodeID = self.get_exp(cr, 'diamond')
