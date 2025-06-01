@@ -107,6 +107,10 @@ TXTBOX_HEIGHT = 40
 SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT)
 TXTBOX_RECT = Rect(0, SCR_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
+## JK add here!!
+MIN_MAP_SIZE = 300
+MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
+
 cmd = "aquatan"
 # time [ms]
 INTERVAL = 100
@@ -244,6 +248,11 @@ def main():
 
     CMNDWND = CommandWindow(TXTBOX_RECT)
     CMNDWND.show()
+
+    ## JK add here!!
+    MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
+    MMAPWND.show()
+
     # endregion
 
     clock = pygame.time.Clock()
@@ -349,6 +358,10 @@ def main():
         STATUSWND.draw(screen)
         ITEMWND.draw(screen)
         BTNWND.draw(screen)
+
+        ## JK add here!!
+        MMAPWND.draw(screen)
+
         show_info(screen, PLAYER, clock, current_date, sunrize, sunset, light_mode, start_time)
         pygame.display.update()
 
@@ -409,7 +422,14 @@ def main():
                     cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
             # endregion
             
-            ## keydown event
+            # region keydown event
+            ## open map
+            if event.type == KEYDOWN and event.key == K_m:
+                if MMAPWND.is_visible:
+                    MMAPWND.hide()
+                else:
+                    MMAPWND.show()
+
             if event.type == KEYDOWN and event.key == K_c:
                 if MSGWND.is_visible:
                     break
@@ -694,6 +714,7 @@ def main():
                                 MSGWND.set(returnResult['message'])
                     else:
                         MSGWND.set("そのほうこうには　だれもいない。")
+            # endregion
         if msgwincount > MSGWAIT:
             # 5秒ほったらかし
             if MSGWND.is_visible:
@@ -722,7 +743,11 @@ def get_exp_value(expList):
 class EventSender:
     def __init__(self, host='localhost', port=9999):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, port))
+        try:
+            self.sock.connect((host, port))
+        except Exception as e:
+            print(f"Error connecting to {host}:{port} -> {e}")
+            raise
 
     def send_event(self, event):
         self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
@@ -2906,6 +2931,61 @@ class CommandWindow(Window):
         Window.blit(self, screen)
         return result
 
+
+
+                                                                                                                                                               
+# 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
+# 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
+# 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 
+# 88 `8b     d8' 88 88 8b,dPPYba,  88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88  `8b   d8'  88 88 88P'   `"8a 88 88  `8b   d8'  88 ""     `Y8 88P'    "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88   `8b d8'   88 88 88       88 88 88   `8b d8'   88 ,adPPPPP88 88       d8  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88    `888'    88 88 88       88 88 88    `888'    88 88,    ,88 88b,   ,a8"   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88     `8'     88 88 88       88 88 88     `8'     88 `"8bbdP"Y8 88`YbbdP"'     `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                  88                                                                                           
+#                                                                  88                                                                                           
+
+
+## JK add here!!
+class MiniMapWindow(Window, Map):
+    """"ミニマップウィンドウ"""
+    tile_num = 60
+    offset_x = 0
+    offset_y = 0
+    border = 20
+    radius = 0
+    RED = (255, 0, 0)
+
+    def __init__(self, rect, name):
+        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE - self.border
+        self.offset_y = self.border
+        self.radius = MIN_MAP_SIZE / self.tile_num
+        Window.__init__(self, rect)
+        Map.__init__(self, name)
+        self.hide()
+
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        Window.blit(self, screen)
+        for y in range(0,self.tile_num):
+            for x in range(0,self.tile_num):
+                if 0 <= y < self.row and 0 <= x < self.col:
+                    tile = self.map[y][x]
+                else:
+                    tile = self.default
+                if tile >= 489 and 535 >= tile:
+                    continue
+                pos_x = x * MIN_MAP_SIZE/ self.tile_num + self.offset_x
+                pos_y = y * MIN_MAP_SIZE / self.tile_num + self.offset_y
+                image = pygame.transform.scale(self.images[tile], (int(MIN_MAP_SIZE / self.tile_num), int(MIN_MAP_SIZE / self.tile_num)))
+                screen.blit(image, (pos_x, pos_y))
+        
+        # Playerの場所を表示　赤丸
+        px = PLAYER.x * MIN_MAP_SIZE/ self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+        py = PLAYER.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+        pygame.draw.circle(screen, self.RED, (px, py), self.radius)
     
 if __name__ == "__main__":
     main()
