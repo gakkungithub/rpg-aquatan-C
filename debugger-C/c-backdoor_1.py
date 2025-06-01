@@ -279,7 +279,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 while True:
                     if (event := event_reciever()):
                         ret_line = event.get('return', None)
-                        if ret_line and ret_line + beginLine == line_number:
+                        if ret_line and ret_line + beginLine == crnt_line_number:
                             event_sender({"message": f"コードの末尾に達しました!! 戻り値は {thread.GetStopReturnValue().GetValue()} です!!", "status": "ok"})
                             break
                         else:
@@ -484,6 +484,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                         continue
                 
+            print('here')
             step_conditionally(frame)
 
             if (next_state := get_next_state()):
