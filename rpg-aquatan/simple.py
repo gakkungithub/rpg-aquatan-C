@@ -108,8 +108,14 @@ SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT)
 TXTBOX_RECT = Rect(0, SCR_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
 ## JK add here!!
+## ミニマップの表示座標を設定する
 MIN_MAP_SIZE = 300
 MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
+
+## デバッグコードの表示座標を設定する
+MIN_CODE_SIZE_Y = 600
+MCODE_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_CODE_SIZE_Y)
+
 
 cmd = "aquatan"
 # time [ms]
@@ -249,10 +255,12 @@ def main():
     CMNDWND = CommandWindow(TXTBOX_RECT)
     CMNDWND.show()
 
-    ## JK add here!!
+    ## ミニマップを作る
     MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
     MMAPWND.show()
 
+    ## コードウィンドウを作る
+    CODEWND = CodeWindow(MCODE_RECT, mapname)
     # endregion
 
     clock = pygame.time.Clock()
@@ -361,6 +369,7 @@ def main():
 
         ## JK add here!!
         MMAPWND.draw(screen)
+        CODEWND.draw(screen)
 
         show_info(screen, PLAYER, clock, current_date, sunrize, sunset, light_mode, start_time)
         pygame.display.update()
@@ -427,6 +436,9 @@ def main():
             if event.type == KEYDOWN and event.key == K_m:
                 if MMAPWND.is_visible:
                     MMAPWND.hide()
+                    CODEWND.show()
+                elif CODEWND.is_visible:
+                    CODEWND.hide()
                 else:
                     MMAPWND.show()
 
@@ -2987,5 +2999,54 @@ class MiniMapWindow(Window, Map):
         py = PLAYER.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
         pygame.draw.circle(screen, self.RED, (px, py), self.radius)
     
+
+
+class CodeWindow(Window, Map):
+    """デバッグコードウィンドウ"""
+    FONT_SIZE = 16
+    HIGHLIGHT_COLOR = (255, 255, 100)
+    TEXT_COLOR = (255, 255, 255)
+    BG_COLOR = (30, 30, 30)
+
+    def __init__(self, rect, name, highlight_lines=None):
+        Window.__init__(self, rect)
+        Map.__init__(self, name)
+        self.font = pygame.font.SysFont("monospace", self.FONT_SIZE)
+        self.c_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", name.lower(), name.lower() + ".c")
+        self.lines = self.load_code_lines()
+        self.hide()
+
+    def load_code_lines(self):
+        """Cファイルからコードを読み込む"""
+        if not os.path.exists(self.c_file_path):
+            return ["// File not found"]
+        with open(self.c_file_path, 'r') as f:
+            return f.readlines()
+
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        Window.blit(self, screen)
+
+        x_offset = SCR_WIDTH - MIN_MAP_SIZE
+        y_offset = 20
+
+        for i, line in enumerate(self.lines):
+            rendered_line = self.font.render(line.rstrip(), True, self.TEXT_COLOR)
+
+            # if (i + 1) in self.highlight_lines:
+            #     # ハイライト背景描画
+            #     bg_rect = pygame.Rect(
+            #         x_offset - 5,
+            #         y_offset,
+            #         self.rect.width - 20,
+            #         self.FONT_SIZE + 4
+            #     )
+            #     pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
+
+            screen.blit(rendered_line, (x_offset, y_offset))
+            y_offset += self.FONT_SIZE + 4
+  
 if __name__ == "__main__":
     main()

@@ -153,7 +153,6 @@ class GenBitMap:
         plt.imshow(self.floorMap, cmap='gray', interpolation='nearest')
         plt.title(pname)
         plt.savefig(f'{DATA_DIR}/{pname}/bm_{pname}.png')
-        plt.show()
 
     def setItemBox(self, roomNodeID, itemName):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
