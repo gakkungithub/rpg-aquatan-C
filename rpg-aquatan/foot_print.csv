@@ -1,5 +1,4 @@
-start,do_while,7, 11
-itemget, do_while,7, 13,j
-itemget, do_while,7, 8,i
-jump, do_while,9, 3
-end, do_while,12, 6
+start,do_while,4, 12
+itemget, do_while,7, 12,j
+itemget, do_while,6, 14,i
+end, do_while,4, 10
