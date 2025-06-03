@@ -1,2 +1,5 @@
-start,ifstatement,5, 4
-end, ifstatement,5, 4
+start,ifstatement,13, 8
+itemget, ifstatement,12, 8,j
+itemget, ifstatement,16, 11,i
+jump, ifstatement,11, 18
+moveout, ifstatement,11, 18

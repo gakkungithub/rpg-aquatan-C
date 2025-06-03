@@ -35,7 +35,6 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
         self.roomSize_info = {}
         self.expNode_info = {}
-        self.firstDeclVars : dict[str, list[str]] = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
         self.funcBeginLine = 1
         self.funcNum = 0
@@ -141,15 +140,6 @@ class ASTtoFlowChart:
                     argNodeID = self.createNode(argname, 'cylinder')
                     self.createEdge(nodeID, argNodeID)
                     nodeID = argNodeID
-                #最初の行で変数の初期化が行われている場合、この情報を取得し、デバッガーのstep機能で使う
-                children = list(cr.get_children())
-                cr_check = children[0] if children else None
-                if cr_check.kind == clang.cindex.CursorKind.DECL_STMT:
-                    self.firstDeclVars[self.scanning_func] = []
-                    for cr_var in cr_check.get_children():
-                        #とりあえずスカラー変数だけ
-                        if cr_var.kind == clang.cindex.CursorKind.VAR_DECL:
-                            self.firstDeclVars[self.scanning_func].append(cr_var.spelling)
                 nodeID = self.parse_comp_stmt(cr, nodeID)
                 self.createRoomSizeEstimate(None)
         if nodeID:

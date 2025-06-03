@@ -195,7 +195,7 @@ class GenBitMap:
                 warpTo = (int(gy+y), int(gx+x))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
-                # doWhileTrueについては上書きする (ノードが共有されているので)
+                # doWhileTrue, ifEndについては上書きする
                 if diamondNodeID:
                     c_move_type, c_move_fromTo = self.condition_move[diamondNodeID]
                 self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo))
@@ -402,11 +402,19 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'lpromoter':
             self.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID))
         
-        #while文とfor文のワープ元である部屋のIDを取得する
+        # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram':
             if loopBackID:
                 self.setWarpZone(crntRoomID, loopBackID, 158)
                 loopBackID = None
+
+        # if文の終点でワープゾーンを作る
+        elif self.getNodeShape(nodeID) == 'terminator':
+            toNodeID = self.getEdgeInfo(nodeID)[0]
+            self.createRoom(toNodeID)
+            self.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
+            nodeID = toNodeID
+            crntRoomID = nodeID
 
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':
@@ -516,7 +524,6 @@ class GenBitMap:
                     #出口側が曲がることはないうえに、一方通行パネルの位置が被ることは無い
                     if ((gy-1 <= path[i][0] < gy+gheight+1 and gx-1 <= path[i][1] < gx+gwidth+1) and
                         not (gy <= path[i-1][0] < gy+gheight and gx <= path[i-1][1] < gx+gwidth)):
-                        print(self.getNodeLabel(goalNodeID))
                         self.setOneWay(path[i-1], path[i][0]-path[i-1][0], path[i][1]-path[i-1][1], self.condition_move[goalNodeID])
                         setExit = True
         

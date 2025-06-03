@@ -271,24 +271,29 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         # 現在の命令を取得（必要な数だけ、ここでは1つ）
         instructions = target.ReadInstructions(pc_addr, 1)
 
-        instructions1 = target.ReadInstructions(pc_addr, 10)
-        for inst_temp in instructions1:
-            if inst_temp.GetMnemonic(target) == 'ret':
-                thread.StepOut()
-                errorCnt_ret = 0
-                while True:
-                    if (event := event_reciever()):
-                        ret_line = event.get('return', None)
-                        if ret_line and ret_line + beginLine == crnt_line_number:
-                            event_sender({"message": f"コードの末尾に達しました!! 戻り値は {thread.GetStopReturnValue().GetValue()} です!!", "status": "ok"})
-                            break
-                        else:
-                            errorCnt_ret += 1
-                            event_sender({"message": "違うキャラクターに話しています!!", "status": "ng"})
-                    else:
-                        errorCnt_ret += 1
-                        event_sender({"message": f"NG行動をしました!! {"ヒント: returnキャラに話しかけてみましょう!!" if errorCnt_ret >= 3 else ""}", "status": "ng"})
-                return
+        # instructions1 = target.ReadInstructions(pc_addr, 10)
+        # print(instructions1)
+        # for inst_temp in instructions1:
+        #     if inst_temp.GetMnemonic(target) == 'ret':
+        #         # 1命令前のフレーム状態で情報を取得
+        #         current_line = frame.GetLineEntry().GetLine()
+        #         variables = {var.GetName(): var.GetValue() for var in frame.GetVariables(True, True, False, True)}
+
+        #         print(f"[INFO] return 前の行: {current_line}")
+        #         print("[INFO] 変数の状態:")
+        #         for name, value in variables.items():
+        #             print(f"  {name} = {value}")
+
+        #         # ret を実行させる（ステップインストラクション）
+        #         thread.StepInstruction(False)  # Trueなら call 命令をステップイン、Falseならステップオーバー
+
+        #         # ret 実行後に戻り値を取得（これはすでに書かれているとおり）
+        #         return_value = thread.GetStopReturnValue()
+        #         if return_value.IsValid():
+        #             return return_value.GetValue()
+        #         else:
+        #             print('here')
+        #             return None
 
         inst = instructions[0]
         
@@ -309,6 +314,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         line_number = line_entry.GetLine()
         func_name = frame.GetFunctionName()
 
+        print(line_number)
+
         if func_name is None or file_name is None:
             # state_checker(state)
             return None
@@ -326,6 +333,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             print("[STDERR]")
             print(stderr_output)
 
+
     print(f"[接続] {addr} が接続しました")
 
     func_crnt_name = "main"
@@ -337,13 +345,29 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                 line_data = json.load(f)
         else:
+            while True:
+                if (event := event_reciever()) is None:
+                    continue
+                if (retValue := event.get('return', None)) is not None:
+                    event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                    break
+                else:
+                    event_sender({"message": "NG行動をしました!!", "status": "ng"})
             return
 
         step_conditionally(frame)
-
+        
         if (next_state := get_next_state()):
             state, frame, file_name, crnt_line_number, func_name = next_state
         else:
+            while True:
+                if (event := event_reciever()) is None:
+                    continue
+                if (retValue := event.get('return', None)) is not None:
+                    event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                    break
+                else:
+                    event_sender({"message": "NG行動をしました!!", "status": "ng"})
             return
 
         vars_changed = varsTracker.trackStart(frame)
@@ -352,8 +376,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         vars_checker(vars_changed)
 
+        print(line_data)
         # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
-        while process.GetState() == lldb.eStateStopped:
+        while process.GetState() == lldb.eStateStopped: 
 
             if line_data.get(func_name, None) and line_number - beginLine in line_data[func_name]:
             # JSONが複数回に分かれて送られてくる可能性があるためパース
@@ -380,10 +405,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     type = event.get('type', '')
                     # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
-                    if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
+                    if len(fromTo) >= 2 and fromTo[:2] == [line_number - beginLine, crnt_line_number - beginLine]:
                         if type == 'if':
                             errorCnt_if = 0
-                            line_number_track = fromTo
+                            line_number_track = fromTo[:2]
                             while True:
                                 # まず、if文でどの行まで辿ったかを確かめる
                                 if fromTo[:len(line_number_track)] == line_number_track:
@@ -415,6 +440,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         line_number = crnt_line_number
                                         state, frame, file_name, crnt_line_number, func_name = next_state
                                     else:
+                                        while True:
+                                            if (event := event_reciever()) is None:
+                                                continue
+                                            if (retValue := event.get('return', None)) is not None:
+                                                event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                                                break
+                                            else:
+                                                event_sender({"message": "NG行動をしました!!", "status": "ng"})
                                         return
 
                                     if crntFromTo[0] + beginLine != crnt_line_number:
@@ -438,7 +471,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if not crntFromTo:
                                     event_sender({"message": "", "status": "ok"})
                                     vars_changed = varsTracker.trackStart(frame)
-                                    # vars_checker(vars_changed)
+                                    vars_checker(vars_changed)
+                                    print(line_number, crnt_line_number)
                                     break
                         elif type == 'doWhileIn':
                             event_sender({"message": "", "status": "ok"})
@@ -447,8 +481,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                             continue
-                    elif fromTo == [line_number - beginLine]:
-                        if type == 'whileIn':
+                    elif len(fromTo) == 1 and fromTo == [line_number - beginLine]:
+                        if type == 'ifEnd':
+                            event_sender({"message": "", "status": "ok"})
+                        elif type == 'whileIn':
                             event_sender({"message": "", "status": "ok"})
 
                             # その次に条件が真かどうかを確かめる
@@ -458,6 +494,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 line_number = crnt_line_number
                                 state, frame, file_name, crnt_line_number, func_name = next_state
                             else:
+                                while True:
+                                    if (event := event_reciever()) is None:
+                                        continue
+                                    if (retValue := event.get('return', None)) is not None:
+                                        event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                                        break
+                                    else:
+                                        event_sender({"message": "NG行動をしました!!", "status": "ng"})
                                 return
 
                             vars_changed = varsTracker.trackStart(frame)
@@ -484,13 +528,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                         continue
                 
-            print('here')
             step_conditionally(frame)
 
             if (next_state := get_next_state()):
                 line_number = crnt_line_number
                 state, frame, file_name, crnt_line_number, func_name = next_state
             else:
+                while True:
+                    if (event := event_reciever()) is None:
+                        continue
+                    if (retValue := event.get('return', None)) is not None:
+                        event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                        break
+                    else:
+                        event_sender({"message": "NG行動をしました!!", "status": "ng"})
                 return
 
             vars_changed = varsTracker.trackStart(frame)
@@ -502,6 +553,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
 def start_server(host='localhost', port=9999):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
         s.bind((host, port))
         s.listen()
         print(f"[サーバ起動] {host}:{port} で待機中...")
