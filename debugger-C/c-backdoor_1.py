@@ -420,10 +420,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     while True:
                                         if (event := event_reciever()) is None:
                                             break
-                                        if type := event.get('type', '') != 'if':
+                                        if (type := event.get('type', '')) != 'if':
                                             errorCnt_if += 1
                                             event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        elif fromTo := event.get('fromTo', None) is None:
+                                        elif (fromTo := event.get('fromTo', None)) is None:
                                             errorCnt_if += 1
                                             event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                         else:
@@ -455,7 +455,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                         while True:
                                             if (event := event_reciever()) is None:
-                                                break
+                                                continue
                                             if (type := event.get('type', '')) != 'if':
                                                 errorCnt_if += 1
                                                 event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
@@ -464,7 +464,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                             else:
                                                 break
-                                        continue
+                                        line_number_track.append(crnt_line_number - beginLine)
+                                        break
                                     line_number_track.append(crntFromTo.pop(0))
 
                                 # crntFromToが空 = 行番が完全一致
