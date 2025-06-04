@@ -105,7 +105,7 @@ BUTTON_WIDTH = 50
 PATH = 'foot_print.csv'
 TXTBOX_HEIGHT = 40
 SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT)
-TXTBOX_RECT = Rect(0, SCR_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
+TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
 ## JK add here!!
 ## ミニマップの表示座標を設定する
@@ -2931,7 +2931,7 @@ class CommandWindow(Window):
                                     break
             txtg = font.render(self.txt, True, (255,255,255))
             self.blit(screen)
-            screen.blit(txtg, [5, SCR_HEIGHT+txtg.get_height() // 2])
+            screen.blit(txtg, [5, SCR_HEIGHT-TXTBOX_HEIGHT+txtg.get_height() // 2])
             pygame.display.update()  # 描画反映
         return self.txt
 
