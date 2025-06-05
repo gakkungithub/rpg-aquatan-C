@@ -97,7 +97,7 @@ class GenBitMap:
         self.line_info: dict[str, set[int]] = {}
         self.condition_move: list[tuple[str, list[int | None]]] = condition_move
 
-    def setMapChip(self, pname):
+    def setMapChip(self, pname, isUniversal):
         wallFlags = np.zeros(8, dtype=int)
         height, width = self.floorMap.shape
         bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
@@ -147,7 +147,7 @@ class GenBitMap:
         self.setFuncWarp()
 
         fg.writeMapIni(pname, self.initPos, self.set_gvar())
-        fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info)
+        fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info, isUniversal)
         fg.writeLineFile(pname, self.line_info)
 
         plt.imshow(self.floorMap, cmap='gray', interpolation='nearest')

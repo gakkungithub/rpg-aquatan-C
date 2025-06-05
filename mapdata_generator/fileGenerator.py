@@ -1,13 +1,16 @@
 import json
 import configparser
 import os 
+import random
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/data'
 
-def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
+def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo, isUniversal):
     events = []
     characters = []
+
+    universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
 
     #ワープの情報
     for warp in warpInfo:
@@ -27,7 +30,10 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo):
         type, pos, *otherInfo = warpChara
         if type == "CHARAMOVEITEMS":
             warpTo, vars, funcName, arguments = otherInfo
-            characters.append({"type": type, "name": "15001", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
+            ## キャラの色をでランダムにする
+            color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+            
+            characters.append({"type": type, "name": str(color), "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
         elif type == "CHARARETURN":
             if otherInfo[0] == "main":
                 characters.append({"type": type, "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": otherInfo[1]})
