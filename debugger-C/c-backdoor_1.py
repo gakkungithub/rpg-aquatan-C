@@ -345,6 +345,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 if (event := event_reciever()) is None:
                     continue
                 if (retValue := event.get('return', None)) is not None:
+                    line_number = crnt_line_number
                     event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
                     break
                 else:
@@ -360,6 +361,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 if (event := event_reciever()) is None:
                     continue
                 if (retValue := event.get('return', None)) is not None:
+                    line_number = crnt_line_number
                     event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
                     break
                 else:
@@ -440,6 +442,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             if (event := event_reciever()) is None:
                                                 continue
                                             if (retValue := event.get('return', None)) is not None:
+                                                line_number = crnt_line_number
                                                 event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
                                                 break
                                             else:
@@ -495,6 +498,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if (event := event_reciever()) is None:
                                         continue
                                     if (retValue := event.get('return', None)) is not None:
+                                        line_number = crnt_line_number
                                         event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
                                         break
                                     else:
@@ -537,6 +541,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if (event := event_reciever()) is None:
                         continue
                     if (retValue := event.get('return', None)) is not None:
+                        line_number = crnt_line_number
                         event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
                         break
                     else:
