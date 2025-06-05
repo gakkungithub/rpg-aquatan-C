@@ -104,7 +104,7 @@ BUTTON_WINDOW = None
 BUTTON_WIDTH = 50
 PATH = 'foot_print.csv'
 TXTBOX_HEIGHT = 40
-SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT)
+SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
 TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
 ## JK add here!!
@@ -215,7 +215,10 @@ def main():
     # このevalはast.literal_evalを使った方が良いかもしれません
     items = eval(config.get("game", "items"))
 
-    sender = EventSender()
+    ## コードウィンドウを作る
+    CODEWND = CodeWindow(MCODE_RECT, mapname)
+
+    sender = EventSender(CODEWND)
     PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
     # endregion
 
@@ -259,8 +262,6 @@ def main():
     MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
     MMAPWND.show()
 
-    ## コードウィンドウを作る
-    CODEWND = CodeWindow(MCODE_RECT, mapname)
     # endregion
 
     clock = pygame.time.Clock()
@@ -742,42 +743,7 @@ def get_exp_value(expList):
     else:
         value = 1
     return value
-        
-# 88888888888                                        ad88888ba                                  88                        
-# 88                                          ,d    d8"     "8b                                 88                        
-# 88                                          88    Y8,                                         88                        
-# 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM `Y8aaaaa,    ,adPPYba, 8b,dPPYba,   ,adPPYb,88  ,adPPYba, 8b,dPPYba,  
-# 88""""" `8b     d8' a8P_____88 88P'   `"8a  88      `"""""8b, a8P_____88 88P'   `"8a a8"    `Y88 a8P_____88 88P'   "Y8  
-# 88       `8b   d8'  8PP""""""" 88       88  88            `8b 8PP""""""" 88       88 8b       88 8PP""""""" 88          
-# 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
-# 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
 
-class EventSender:
-    def __init__(self, host='localhost', port=9999):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self.sock.connect((host, port))
-        except Exception as e:
-            print(f"Error connecting to {host}:{port} -> {e}")
-            raise
-
-    def send_event(self, event):
-        self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
-
-    def receive_json(self):
-        buffer = ""
-        while True:
-            data = self.sock.recv(1024)
-            if not data:
-                return None  # 接続が閉じられた
-            buffer += data.decode()
-            try:
-                return json.loads(buffer)
-            except json.JSONDecodeError:
-                continue  # JSONがまだ完全でないので続けて待つ
-        
-    def close(self):
-        self.sock.close()
 #                                                                                                                                                                                         
 #                                                                                       88                                                                                                
 #                          ,d                                                           ""                                                                                         ,d     
@@ -3001,10 +2967,20 @@ class MiniMapWindow(Window, Map):
     
 
 
+                                                                                                                                   
+#   ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
+# d8'                                88           "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,   ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                    
 class CodeWindow(Window, Map):
     """デバッグコードウィンドウ"""
     FONT_SIZE = 16
-    HIGHLIGHT_COLOR = (255, 255, 100)
+    HIGHLIGHT_COLOR = (0, 0, 255)
     TEXT_COLOR = (255, 255, 255)
     BG_COLOR = (30, 30, 30)
 
@@ -3014,6 +2990,7 @@ class CodeWindow(Window, Map):
         self.font = pygame.font.SysFont("monospace", self.FONT_SIZE)
         self.c_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
+        self.linenum = self.load_first_code_line()
         self.hide()
 
     def load_code_lines(self):
@@ -3022,6 +2999,15 @@ class CodeWindow(Window, Map):
             return ["// File not found"]
         with open(self.c_file_path, 'r') as f:
             return f.readlines()
+
+    def load_first_code_line(self):
+        for idx, line in enumerate(self.lines):
+            if line.strip() and not line.strip().startswith('//') and not line.strip().startswith('#'):
+                return idx + 1  # 行番号として返す
+        return 1  # fallback
+    
+    def update_code_line(self, linenum):
+        self.linenum = linenum
 
     def draw(self, screen):
         if not self.is_visible:
@@ -3032,21 +3018,62 @@ class CodeWindow(Window, Map):
         x_offset = SCR_WIDTH - MIN_MAP_SIZE
         y_offset = 20
 
+        # iは行数なので、これと現在の行数-1が合致した場合光かがやかせる
         for i, line in enumerate(self.lines):
             rendered_line = self.font.render(line.rstrip(), True, self.TEXT_COLOR)
 
-            # if (i + 1) in self.highlight_lines:
-            #     # ハイライト背景描画
-            #     bg_rect = pygame.Rect(
-            #         x_offset - 5,
-            #         y_offset,
-            #         self.rect.width - 20,
-            #         self.FONT_SIZE + 4
-            #     )
-            #     pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
+            if (i + 1) == self.linenum:
+                # ハイライト背景描画
+                bg_rect = pygame.Rect(
+                    x_offset - 5,
+                    y_offset,
+                    self.rect.width - 20,
+                    self.FONT_SIZE + 4
+                )
+                pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
 
             screen.blit(rendered_line, (x_offset, y_offset))
             y_offset += self.FONT_SIZE + 4
+
+# 88888888888                                        ad88888ba                                  88                        
+# 88                                          ,d    d8"     "8b                                 88                        
+# 88                                          88    Y8,                                         88                        
+# 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM `Y8aaaaa,    ,adPPYba, 8b,dPPYba,   ,adPPYb,88  ,adPPYba, 8b,dPPYba,  
+# 88""""" `8b     d8' a8P_____88 88P'   `"8a  88      `"""""8b, a8P_____88 88P'   `"8a a8"    `Y88 a8P_____88 88P'   "Y8  
+# 88       `8b   d8'  8PP""""""" 88       88  88            `8b 8PP""""""" 88       88 8b       88 8PP""""""" 88          
+# 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
+# 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
+
+class EventSender:
+    def __init__(self, code_window: CodeWindow, host='localhost', port=9999):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.code_window = code_window
+        try:
+            self.sock.connect((host, port))
+        except Exception as e:
+            print(f"Error connecting to {host}:{port} -> {e}")
+            raise
+
+    def send_event(self, event):
+        self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
+
+    def receive_json(self):
+        buffer = ""
+        while True:
+            data = self.sock.recv(1024)
+            if not data:
+                return None  # 接続が閉じられた
+            buffer += data.decode()
+            try:
+                msg = json.loads(buffer)
+                if "line" in msg:
+                    self.code_window.update_code_line(msg["line"])
+                return msg
+            except json.JSONDecodeError:
+                continue  # JSONがまだ完全でないので続けて待つ
+        
+    def close(self):
+        self.sock.close()
   
 if __name__ == "__main__":
     main()

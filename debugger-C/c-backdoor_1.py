@@ -257,6 +257,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         return event
     
     def event_sender(msgJson):
+        if msgJson["status"] == "ok":
+            msgJson["line"] = line_number
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 
@@ -387,9 +389,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
                 if (ngname := event.get('ng', None)) is not None:
                     if ngname == "notEnter":
-                        event_sender({"message": "ここから先は進入できません!!"})
+                        event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                     else:
-                        event_sender({"message": "NG行動をしました!!"})
+                        event_sender({"message": "NG行動をしました!!", "status": "ng"})
                     continue
                 elif func_crnt_name != func_name:
                     if (funcChange := event.get('funcChange', None)) is not None:
@@ -399,7 +401,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     #     continue
                         func_crnt_name = func_name
                     else:
-                        event_sender({"message": "NG行動をしました!!"})
+                        event_sender({"message": "NG行動をしました!!", "status": "ng"})
                         continue
                 elif (fromTo := event.get('fromTo', None)) is not None:
                     type = event.get('type', '')
@@ -528,6 +530,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                         continue
+                else:
+                    pass
                 
             step_conditionally(frame)
 

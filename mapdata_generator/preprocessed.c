@@ -6,6 +6,7 @@
 # 1 "<built-in>" 2
 # 1 "/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C/data/ifstatement/ifstatement.c" 2
 int main() {
+
   int i = 3, j = 4;
   if (i == 4) {
     j *= 2;
