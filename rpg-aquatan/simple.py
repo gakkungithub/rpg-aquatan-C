@@ -525,6 +525,8 @@ def main():
                     cmd = "\0"
                     atxt = "\0"
                 elif cmd == "itemset":
+                    ## suit for integer item
+                    ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
                     try:
                         parts = atxt.split(' ', 1)
                         itemname = parts[0]
@@ -533,6 +535,16 @@ def main():
                         if item is None:
                             item = PLAYER.itembag.find(itemname)
                         if item:
+                            current_value = item.get_value()
+                            if value == "++":
+                                value = str(int(current_value) + 1)
+                            elif value == "--":
+                                value = str(int(current_value) - 1)
+                            elif value.startswith("+"):
+                                value = str(int(current_value) + int(value[1:]))
+                            elif value.startswith("-"):
+                                value = str(int(current_value) - int(value[1:]))
+
                             sender.send_event({"itemset": [itemname, value]})
                             itemsetResult = sender.receive_json()
                             if itemsetResult is not None:
@@ -2871,30 +2883,45 @@ class CommandWindow(Window):
                 if event.type == QUIT:
                     sys.exit()
                 elif event.type == KEYDOWN:
-                    if event.key in (K_ESCAPE, K_RETURN):
+                    if event.key == K_RETURN:
+                        isEnd = True
+                    elif event.key == K_ESCAPE:
+                        self.txt = ""
                         isEnd = True
                     elif event.key in (K_LEFT, K_BACKSPACE):
-                        if len(self.txt) >= 1:
-                            self.txt = self.txt[:-1]
-                    elif event.key == K_SPACE:
-                        if len(self.txt) < self.MAX_LEN:
-                            self.txt += " "
+                        self.txt = self.txt[:-1]
+
+                    elif event.key == K_SPACE and len(self.txt) < self.MAX_LEN:
+                        self.txt += " "
+
                     elif len(self.txt) < self.MAX_LEN:
-                        if event.key == K_PERIOD:
-                            self.txt += "."
-                        elif event.key == K_COMMA:
-                            self.txt += ","
-                        elif event.key == K_MINUS:
-                            self.txt += "-"
-                        else:
-                            for i in range(10):  # 0-9
-                                if event.key == 48 + i:
-                                    self.txt += str(i)
-                                    break
-                            for char in 'abcdefghijklmnopqrstuvwxyz':
-                                if event.key == getattr(pygame, f'K_{char}'):
-                                    self.txt += char
-                                    break
+                        shift_held = event.mod & (KMOD_LSHIFT | KMOD_RSHIFT)
+
+                        key_char_map = {
+                            K_PERIOD: ">" if shift_held else ".",
+                            K_COMMA: "<" if shift_held else ",",
+                            K_MINUS: "_" if shift_held else "-",
+                            K_EQUALS: "+" if shift_held else "=",
+                            K_1: "!" if shift_held else "1",
+                            K_2: "@" if shift_held else "2",
+                            K_3: "#" if shift_held else "3",
+                            K_4: "$" if shift_held else "4",
+                            K_5: "%" if shift_held else "5",
+                            K_6: "^" if shift_held else "6",
+                            K_7: "&" if shift_held else "7",
+                            K_8: "*" if shift_held else "8",
+                            K_9: "(" if shift_held else "9",
+                            K_0: ")" if shift_held else "0",
+                        }
+
+                        # 数字・記号キーの入力処理
+                        if event.key in key_char_map:
+                            self.txt += key_char_map[event.key]
+
+                        # アルファベットキー（大文字・小文字対応）
+                        elif K_a <= event.key <= K_z:
+                            char = chr(event.key)
+                            self.txt += char.upper() if shift_held else char
             txtg = font.render(self.txt, True, (255,255,255))
             self.blit(screen)
             screen.blit(txtg, [5, SCR_HEIGHT-TXTBOX_HEIGHT+txtg.get_height() // 2])
