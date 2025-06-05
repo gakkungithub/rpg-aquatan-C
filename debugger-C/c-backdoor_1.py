@@ -217,10 +217,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         print(f'your variables were incorrect!!\ncorrect variables: {vars_changed}')
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
-                            send_data = json.dumps({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
                         else:
-                            send_data = json.dumps({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
-                        conn.sendall(send_data.encode('utf-8'))
+                            event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
                         continue
                     if itemValue != varsTracker.getValue(item):
                         errorCnt += 1
@@ -228,21 +227,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
                             item_values_str = ', '.join(f"{name} は {varsTracker.getValue(name)}" for name in list(set(vars_changed) - set(vars_event)))
-                            send_data = json.dumps({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
                         else:
-                            send_data = json.dumps({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
-                        conn.sendall(send_data.encode('utf-8'))
+                            event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
                         continue
-                    send_data = json.dumps({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
-                    conn.sendall(send_data.encode('utf-8'))
+                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(vars_changed):
                         print("you changed correct vars")
                         break
                 else:
                     errorCnt += 1
-                    send_data = json.dumps({"message": "異なる行動をしようとしています!!", "status": "ng"})
-                    conn.sendall(send_data.encode('utf-8'))
+                    event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"})
                     continue
 
     def event_reciever():
@@ -258,6 +254,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     
     def event_sender(msgJson):
         if msgJson["status"] == "ok":
+            print(line_number)
             msgJson["line"] = line_number
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
@@ -316,8 +313,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         line_number = line_entry.GetLine()
         func_name = frame.GetFunctionName()
 
-        print(line_number)
-
         if func_name is None or file_name is None:
             # state_checker(state)
             return None
@@ -343,7 +338,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     with conn:
         if (next_state := get_next_state()):
             state, frame, file_name, line_number, func_name = next_state
-            beginLine = line_number - 1
             with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                 line_data = json.load(f)
         else:
@@ -382,7 +376,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
         while process.GetState() == lldb.eStateStopped: 
 
-            if line_data.get(func_name, None) and line_number - beginLine in line_data[func_name]:
+            if line_data.get(func_name, None) and line_number in line_data[func_name]:
             # JSONが複数回に分かれて送られてくる可能性があるためパース
                 if (event := event_reciever()) is None:
                     continue
@@ -407,7 +401,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     type = event.get('type', '')
                     # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
-                    if len(fromTo) >= 2 and fromTo[:2] == [line_number - beginLine, crnt_line_number - beginLine]:
+                    if len(fromTo) >= 2 and fromTo[:2] == [line_number, crnt_line_number]:
                         if type == 'if':
                             errorCnt_if = 0
                             line_number_track = fromTo[:2]
@@ -452,7 +446,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 event_sender({"message": "NG行動をしました!!", "status": "ng"})
                                         return
 
-                                    if crntFromTo[0] + beginLine != crnt_line_number:
+                                    if crntFromTo[0] != crnt_line_number:
                                         errorCnt_if += 1
                                         event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                         while True:
@@ -466,7 +460,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                             else:
                                                 break
-                                        line_number_track.append(crnt_line_number - beginLine)
+                                        line_number_track.append(crnt_line_number)
                                         break
                                     line_number_track.append(crntFromTo.pop(0))
 
@@ -484,7 +478,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                             continue
-                    elif len(fromTo) == 1 and fromTo == [line_number - beginLine]:
+                    elif len(fromTo) == 1 and fromTo == [line_number]:
                         if type == 'ifEnd':
                             event_sender({"message": "", "status": "ok"})
                         elif type == 'whileIn':
@@ -519,7 +513,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if (fromTo := event.get('fromTo', None)) is not None:
                                     type = event.get('type', '')
                                     if type in ['whileTrue', 'whileFalse']:
-                                        if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
+                                        if fromTo == [line_number, crnt_line_number]:
                                             event_sender({"message": "", "status": "ok"})
                                             break
                                 event_sender({"message": "NG行動をしました!!", "status": "ng"})

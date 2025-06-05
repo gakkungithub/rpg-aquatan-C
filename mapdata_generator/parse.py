@@ -119,7 +119,7 @@ class ASTtoFlowChart:
                 self.scanning_func = func_name
 
                 #関数の条件文の行遷移情報を取得する(これの合致で)
-                self.funcBeginLine = cursor.location.line
+                self.funcBeginLine = cursor.location.line - 1
 
                 self.func_info[func_name] = {"start": f'"{nodeID}"', "refs": set()}
                 #関数の最初の部屋情報を作る
