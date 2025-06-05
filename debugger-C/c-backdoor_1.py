@@ -205,11 +205,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
                         continue
-                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
+                    
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(vars_changed):
                         print("you selected correct vars")
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
                         break
+                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok", "getting": True})
+
                 elif (itemset := event.get('itemset', None)) is not None:
                     item, itemValue = itemset
                     if item not in vars_changed:
@@ -231,11 +234,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
                         continue
-                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(vars_changed):
                         print("you changed correct vars")
+                        event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
                         break
+                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok", "getting": True})
                 else:
                     errorCnt += 1
                     event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"})
@@ -253,9 +257,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         return event
     
     def event_sender(msgJson):
-        if msgJson["status"] == "ok":
-            print(line_number)
-            msgJson["line"] = line_number
+        if msgJson["status"] == "ok" and not msgJson.get("getting", None):
+            msgJson["line"] = crnt_line_number
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 

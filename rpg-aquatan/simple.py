@@ -3001,9 +3001,12 @@ class CodeWindow(Window, Map):
             return f.readlines()
 
     def load_first_code_line(self):
+        cnt = 0
         for idx, line in enumerate(self.lines):
             if line.strip() and not line.strip().startswith('//') and not line.strip().startswith('#'):
-                return idx + 1  # 行番号として返す
+                cnt += 1
+                if cnt == 2:
+                    return idx + 1  # 行番号として返す
         return 1  # fallback
     
     def update_code_line(self, linenum):
