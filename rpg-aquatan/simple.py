@@ -2900,23 +2900,23 @@ class CommandWindow(Window):
                     elif len(self.txt) < self.MAX_LEN:
                         shift_held = bool(pygame.key.get_mods() & (KMOD_LSHIFT | KMOD_RSHIFT))
                         capslock_on = bool(event.mod & KMOD_CAPS)
-                        print(bool(shift_held ^ capslock_on))
+                        isUpper = shift_held | capslock_on
 
                         key_char_map = {
-                            K_PERIOD: ">" if shift_held else ".",
-                            K_COMMA: "<" if shift_held else ",",
-                            K_MINUS: "_" if shift_held else "-",
-                            K_EQUALS: "+" if shift_held else "=",
-                            K_1: "!" if shift_held else "1",
-                            K_2: "@" if shift_held else "2",
-                            K_3: "#" if shift_held else "3",
-                            K_4: "$" if shift_held else "4",
-                            K_5: "%" if shift_held else "5",
-                            K_6: "^" if shift_held else "6",
-                            K_7: "&" if shift_held else "7",
-                            K_8: "*" if shift_held else "8",
-                            K_9: "(" if shift_held else "9",
-                            K_0: ")" if shift_held else "0",
+                            K_PERIOD: ">" if isUpper else ".",
+                            K_COMMA: "<" if isUpper else ",",
+                            K_MINUS: "_" if isUpper else "-",
+                            K_EQUALS: "+" if isUpper else "=",
+                            K_1: "!" if isUpper else "1",
+                            K_2: "@" if isUpper else "2",
+                            K_3: "#" if isUpper else "3",
+                            K_4: "$" if isUpper else "4",
+                            K_5: "%" if isUpper else "5",
+                            K_6: "^" if isUpper else "6",
+                            K_7: "&" if isUpper else "7",
+                            K_8: "*" if isUpper else "8",
+                            K_9: "(" if isUpper else "9",
+                            K_0: ")" if isUpper else "0",
                         }
 
                         # 数字・記号キーの入力処理
@@ -2926,7 +2926,7 @@ class CommandWindow(Window):
                         # アルファベットキー（大文字・小文字対応）
                         elif K_a <= event.key <= K_z:
                             char = chr(event.key)
-                            self.txt += char.upper() if shift_held | capslock_on else char
+                            self.txt += char.upper() if isUpper else char
             txtg = font.render(self.txt, True, (255,255,255))
             self.blit(screen)
             screen.blit(txtg, [5, SCR_HEIGHT-TXTBOX_HEIGHT+txtg.get_height() // 2])
