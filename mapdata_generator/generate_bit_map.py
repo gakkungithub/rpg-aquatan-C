@@ -237,7 +237,7 @@ class GenBitMap:
             pos = (int(gy+y), int(gx+x))
             self.eventMap[pos[0], pos[1]] = self.ISEVENT
             # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
-            if line == "":
+            if line == '""':
                 line_ret = None
             else:
                 line_ret = int(line)
@@ -400,6 +400,7 @@ class GenBitMap:
         
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
+            # returnノードに行数ラベルをつけて、それで行数を確認する
             self.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID))
         
         # while文とfor文のワープ元である部屋のIDを取得する

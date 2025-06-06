@@ -2895,7 +2895,9 @@ class CommandWindow(Window):
                         self.txt += " "
 
                     elif len(self.txt) < self.MAX_LEN:
-                        shift_held = event.mod & (KMOD_LSHIFT | KMOD_RSHIFT)
+                        shift_held = bool(pygame.key.get_mods() & (KMOD_LSHIFT | KMOD_RSHIFT))
+                        capslock_on = bool(event.mod & KMOD_CAPS)
+                        print(bool(shift_held ^ capslock_on))
 
                         key_char_map = {
                             K_PERIOD: ">" if shift_held else ".",
@@ -2921,7 +2923,7 @@ class CommandWindow(Window):
                         # アルファベットキー（大文字・小文字対応）
                         elif K_a <= event.key <= K_z:
                             char = chr(event.key)
-                            self.txt += char.upper() if shift_held else char
+                            self.txt += char.upper() if shift_held ^ capslock_on else char
             txtg = font.render(self.txt, True, (255,255,255))
             self.blit(screen)
             screen.blit(txtg, [5, SCR_HEIGHT-TXTBOX_HEIGHT+txtg.get_height() // 2])
