@@ -531,6 +531,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
                         continue
+                elif event.get('item', None) or event.get('itemset', None):
+                    event_sender({"message": "NG行動をしました!!", "status": "ng"})
+                    continue
                 else:
                     pass
                 
