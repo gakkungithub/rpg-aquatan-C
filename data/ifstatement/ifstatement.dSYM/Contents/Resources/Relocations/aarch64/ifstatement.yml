@@ -1,6 +1,6 @@
 ---
 triple:          'arm64-apple-darwin'
-binary-path:     '/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C/data/ifstatement/ifstatement'
+binary-path:     '/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C-1/data/ifstatement/ifstatement'
 relocations:
   - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100003F20, symSize: 0x88 }
   - { offsetInCU: 0x33, offset: 0x33, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100003F20, symSize: 0x88 }

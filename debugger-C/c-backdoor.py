@@ -9,6 +9,9 @@ import socket
 import json
 from collections import Counter
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = BASE_DIR + '/data'
+
 def get_all_stdvalue(process):
     stdout_output = ""
     stderr_output = ""
@@ -183,6 +186,10 @@ def get_instructions_for_current_line(frame, target):
     return result
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]):
+    class ProgramFinished(Exception):
+        print("プログラムは正常に終了しました")
+        pass
+
     def vars_checker(vars_changed):
         if vars_changed:
             # 変数が合致していればstepinを実行して次に進む
@@ -202,11 +209,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
                         continue
-                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
+                    
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(vars_changed):
                         print("you selected correct vars")
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
                         break
+                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok", "getting": True})
+
                 elif (itemset := event.get('itemset', None)) is not None:
                     item, itemValue = itemset
                     if item not in vars_changed:
@@ -214,10 +224,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         print(f'your variables were incorrect!!\ncorrect variables: {vars_changed}')
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
-                            send_data = json.dumps({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
                         else:
-                            send_data = json.dumps({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
-                        conn.sendall(send_data.encode('utf-8'))
+                            event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
                         continue
                     if itemValue != varsTracker.getValue(item):
                         errorCnt += 1
@@ -225,21 +234,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
                             item_values_str = ', '.join(f"{name} は {varsTracker.getValue(name)}" for name in list(set(vars_changed) - set(vars_event)))
-                            send_data = json.dumps({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
                         else:
-                            send_data = json.dumps({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
-                        conn.sendall(send_data.encode('utf-8'))
+                            event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
                         continue
-                    send_data = json.dumps({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
-                    conn.sendall(send_data.encode('utf-8'))
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(vars_changed):
                         print("you changed correct vars")
+                        event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
                         break
+                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok", "getting": True})
                 else:
                     errorCnt += 1
-                    send_data = json.dumps({"message": "異なる行動をしようとしています!!", "status": "ng"})
-                    conn.sendall(send_data.encode('utf-8'))
+                    event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"})
                     continue
 
     def event_reciever():
@@ -254,10 +261,23 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         return event
     
     def event_sender(msgJson):
+        if msgJson["status"] == "ok" and not msgJson.get("getting", None):
+            msgJson["line"] = crnt_line_number
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 
     def step_conditionally(frame):
+        # プロセスの状態を更新
+        if isEnd:
+            while True:
+                if (event := event_reciever()) is None:
+                    continue
+                if (retValue := event.get('return', None)) is not None:
+                    event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok"})
+                    raise ProgramFinished()
+                else:
+                    event_sender({"message": "NG行動をしました1!!", "status": "ng"})
+
         thread = frame.GetThread()
         process = thread.GetProcess()
         target = process.GetTarget()
@@ -268,24 +288,29 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         # 現在の命令を取得（必要な数だけ、ここでは1つ）
         instructions = target.ReadInstructions(pc_addr, 1)
 
-        instructions1 = target.ReadInstructions(pc_addr, 10)
-        for inst_temp in instructions1:
-            if inst_temp.GetMnemonic(target) == 'ret':
-                thread.StepOut()
-                errorCnt_ret = 0
-                while True:
-                    if (event := event_reciever()):
-                        ret_line = event.get('return', None)
-                        if ret_line and ret_line + beginLine == line_number:
-                            event_sender({"message": f"コードの末尾に達しました!! 戻り値は {thread.GetStopReturnValue().GetValue()} です!!", "status": "ok"})
-                            break
-                        else:
-                            errorCnt_ret += 1
-                            event_sender({"message": "違うキャラクターに話しています!!", "status": "ng"})
-                    else:
-                        errorCnt_ret += 1
-                        event_sender({"message": f"NG行動をしました!! {"ヒント: returnキャラに話しかけてみましょう!!" if errorCnt_ret >= 3 else ""}", "status": "ng"})
-                return
+        # instructions1 = target.ReadInstructions(pc_addr, 10)
+        # print(instructions1)
+        # for inst_temp in instructions1:
+        #     if inst_temp.GetMnemonic(target) == 'ret':
+        #         # 1命令前のフレーム状態で情報を取得
+        #         current_line = frame.GetLineEntry().GetLine()
+        #         variables = {var.GetName(): var.GetValue() for var in frame.GetVariables(True, True, False, True)}
+
+        #         print(f"[INFO] return 前の行: {current_line}")
+        #         print("[INFO] 変数の状態:")
+        #         for name, value in variables.items():
+        #             print(f"  {name} = {value}")
+
+        #         # ret を実行させる（ステップインストラクション）
+        #         thread.StepInstruction(False)  # Trueなら call 命令をステップイン、Falseならステップオーバー
+
+        #         # ret 実行後に戻り値を取得（これはすでに書かれているとおり）
+        #         return_value = thread.GetStopReturnValue()
+        #         if return_value.IsValid():
+        #             return return_value.GetValue()
+        #         else:
+        #             print('here')
+        #             return None
 
         inst = instructions[0]
         
@@ -296,7 +321,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         thread.StepInto()
 
     def get_next_state():
-        # プロセスの状態を更新
         state = process.GetState()
 
         frame = thread.GetFrameAtIndex(0)
@@ -308,6 +332,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         if func_name is None or file_name is None:
             # state_checker(state)
+            print('here')
             return None
         
         print(f"{func_name} at {file_name}:{line_number}")
@@ -323,232 +348,225 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             print("[STDERR]")
             print(stderr_output)
 
-    print(f"[接続] {addr} が接続しました")
+    try:
+        print(f"[接続] {addr} が接続しました")
 
-    func_crnt_name = "main"
-
-    vars_changed = None
-        
-    with conn:
-        if (next_state := get_next_state()):
-            state, frame, file_name, line_number, func_name = next_state
-            beginLine = line_number - 1
-        else:
-            return
-        
-        # 特定のステップは最後のステップ実行を発動させないようにする
-        isSkip = False
-
-        # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
-        while process.GetState() == lldb.eStateStopped:
-            # 変数は前回の処理で変更されていたら見る
-            vars_checker(vars_changed)
-
-            # ここで次のステップに進む
-
-            # そのあと(もしくは変数に変更がない場合)は今の処理を確認する
-            while True:
-                # JSONが複数回に分かれて送られてくる可能性があるためパース
-                if (event := event_reciever()) is None:
-                    break
-
-                if (ngname := event.get('ng', None)) is not None:
-                    if ngname == "notEnter":
-                        event_sender({"message": "ここから先は進入できません!!"})
-                    else:
-                        event_sender({"message": "NG行動をしました!!"})
-                elif func_crnt_name != func_name:
-                    if (funcChange := event.get('funcChange', None)) is not None:
-                    # func_event = [event['roomname']]
-                    # if func_event != func_name:
-                    #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
-                    #     continue
-                        func_crnt_name = func_name
-                        break
-                    else:
-                        event_sender({"message": "NG行動をしました!!"})
-                    isSkip = False
-                elif (fromTo := event.get('fromTo', None)) is not None:
-                    type = event.get('type', '')
-                    # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
-                    # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
-                    if fromTo[0] + beginLine != line_number:
-                        event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
-                        continue
-                    if type == 'if':
-                        errorCnt_if = 0
-                        line_number_track = []
-                        while True:
-                            # まず、if文でどの行まで辿ったかを確かめる
-                            if fromTo[:len(line_number_track)] == line_number_track:
-                                crntFromTo = fromTo[len(line_number_track):]
-                            # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
-                            else:
-                                errorCnt_if += 1
-                                event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                while True:
-                                    if (event := event_reciever()) is None:
-                                        break
-                                    if type := event.get('type', '') != 'if':
-                                        errorCnt_if += 1
-                                        event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                    elif fromTo := event.get('fromTo', None) is None:
-                                        errorCnt_if += 1
-                                        event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                    else:
-                                        break
-                                continue
-                            while True:
-                                if crntFromTo[0] + beginLine != line_number:
-                                    errorCnt_if += 1
-                                    event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                    while True:
-                                        if (event := event_reciever()) is None:
-                                            break
-                                        if (type := event.get('type', '')) != 'if':
-                                            errorCnt_if += 1
-                                            event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        elif (fromTo := event.get('fromTo', None)) is None:
-                                            errorCnt_if += 1
-                                            event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        else:
-                                            break
-                                    break
-                                line_number_track.append(crntFromTo.pop(0))
-                                if not crntFromTo:
-                                    break
-                                step_conditionally(frame)
-
-                                if (next_state := get_next_state()):
-                                    state, frame, file_name, line_number, func_name = next_state
-                                else:
-                                    return
-
-                            # crntFromToが空 = 行番が完全一致
-                            if not crntFromTo:
-                                event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame)
-                                # vars_checker(vars_changed)
-                                break
-                    # region while構文のfromTo #まず条件文に入るか戻ってくるかの確認
-                    elif type == 'whileIn':
-                        event_sender({"message": "", "status": "ok"})
-
-                        # その次に条件が真かどうかを確かめる
-                        step_conditionally(frame)
-
-                        if (next_state := get_next_state()):
-                            state, frame, file_name, crnt_line_number, func_name = next_state
-                        else:
-                            return
-
-                        vars_changed = varsTracker.trackStart(frame)
-                        vars_checker(vars_changed)
-
-                        # get_std_outputs, state_checkerを入れるかは後々考える
-
-                        while True:
-                            if (event := event_reciever()) is None:
-                                break
-
-                            if (fromTo := event.get('fromTo', None)) is not None:
-                                type = event.get('type', '')
-                                if type == 'whileTrue':
-                                    if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
-                                        line_number = crnt_line_number
-                                        event_sender({"message": "", "status": "ok"})
-                                        break
-                                elif type == 'whileFalse':
-                                    if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
-                                        line_number = crnt_line_number
-                                        event_sender({"message": "", "status": "ok"})
-                                        break
-                            event_sender({"message": "NG行動をしました!!", "status": "ng"})
-                        break
-                    # endregion 
-                    # region dowhile構文のfromTo #
-                    elif type == 'doWhileIn':
-                        event_sender({"message": "", "status": "ok"})
-
-                        # その次に条件が真かどうかを確かめる
-                        step_conditionally(frame)
-
-                        if (next_state := get_next_state()):
-                            state, frame, file_name, crnt_line_number, func_name = next_state
-                        else:
-                            return
-
-                        vars_changed = varsTracker.trackStart(frame)
-                        vars_checker(vars_changed)
-
-                        # get_std_outputs, state_checkerを入れるかは後々考える
-
-                        while True:
-                            if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
-                                line_number = crnt_line_number
-                                event_sender({"message": "", "status": "ok"})
-                                break
-                            event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
-                            # 一方通行の行数が違う時は新たにデータを取る
-                            while True:
-                                if (event := event_reciever()) is not None:
-                                    if (fromTo := event.get('fromTo', None)) is not None:
-                                        if (type := event.get('type', '')) == 'doWhileIn':
-                                            break
-                                event_sender({"message": "NG行動をしました!!", "status": "ng"})
-                    elif type in ['doWhlieTrue', 'doWhileFalse']:
-                        event_sender({"message": "", "status": "ok"})
-
-                        # その次に条件が真かどうかを確かめる
-                        step_conditionally(frame)
-
-                        if (next_state := get_next_state()):
-                            state, frame, file_name, crnt_line_number, func_name = next_state
-                        else:
-                            return
-
-                        vars_changed = varsTracker.trackStart(frame)
-                        vars_checker(vars_changed)
-
-                        # get_std_outputs, state_checkerを入れるかは後々考える
-
-                        while True:
-                            if fromTo == [line_number - beginLine, crnt_line_number - beginLine]:
-                                line_number = crnt_line_number
-                                event_sender({"message": "", "status": "ok"})
-                                break
-                            event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
-                            # 一方通行の行数が違う時は新たにデータを取る
-                            while True:
-                                if (event := event_reciever()) is not None:
-                                    if (fromTo := event.get('fromTo', None)) is not None:
-                                        if (type := event.get('type', '')) in ['doWhileTrue', 'doWhileFalse']:
-                                            break
-                                event_sender({"message": "NG行動をしました!!", "status": "ng"})
-                    else:
-                        event_sender({"message": "まだこの条件構文には対応していません!!", "status": "ng"})
-                    isSkip = True
-                    break
-                #特に何も実行しない場合
-                else:
-                    break
+        func_crnt_name = "main"
             
-            if isSkip:
-                continue
-            
-            step_conditionally(frame)
+        with conn:
+            isEnd = False
 
             if (next_state := get_next_state()):
                 state, frame, file_name, line_number, func_name = next_state
+                with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
+                    line_data = json.load(f)
             else:
-                return
+                isEnd = True
+
+            step_conditionally(frame)
+            
+            if (next_state := get_next_state()):
+                state, frame, file_name, crnt_line_number, func_name = next_state
+            else:
+                isEnd = True
 
             vars_changed = varsTracker.trackStart(frame)
 
             get_std_outputs()
 
+            vars_checker(vars_changed)
+
+            # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
+            while process.GetState() == lldb.eStateStopped: 
+
+                if line_data.get(func_name, None) and line_number in line_data[func_name]:
+                # JSONが複数回に分かれて送られてくる可能性があるためパース
+                    if (event := event_reciever()) is None:
+                        continue
+
+                    if (ngname := event.get('ng', None)) is not None:
+                        if ngname == "notEnter":
+                            event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
+                        else:
+                            event_sender({"message": "NG行動をしました2!!", "status": "ng"})
+                        continue
+                    elif func_crnt_name != func_name:
+                        if (funcChange := event.get('funcChange', None)) is not None:
+                        # func_event = [event['roomname']]
+                        # if func_event != func_name:
+                        #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
+                        #     continue
+                            func_crnt_name = func_name
+                        else:
+                            event_sender({"message": "NG行動をしました3!!", "status": "ng"})
+                            continue
+                    elif (fromTo := event.get('fromTo', None)) is not None:
+                        type = event.get('type', '')
+                        # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
+                        # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
+                        if len(fromTo) >= 2 and fromTo[:2] == [line_number, crnt_line_number]:
+                            if type == 'if':
+                                errorCnt_if = 0
+                                line_number_track = fromTo[:2]
+                                while True:
+                                    # まず、if文でどの行まで辿ったかを確かめる
+                                    if fromTo[:len(line_number_track)] == line_number_track:
+                                        crntFromTo = fromTo[len(line_number_track):]
+                                    # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                                    else:
+                                        errorCnt_if += 1
+                                        event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                        while True:
+                                            if (event := event_reciever()) is None:
+                                                break
+                                            if (type := event.get('type', '')) != 'if':
+                                                errorCnt_if += 1
+                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            elif (fromTo := event.get('fromTo', None)) is None:
+                                                errorCnt_if += 1
+                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            else:
+                                                break
+                                        continue
+                                    while True:
+                                        # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
+                                        if not crntFromTo:
+                                            break
+
+                                        step_conditionally(frame)
+
+                                        if (next_state := get_next_state()):
+                                            line_number = crnt_line_number
+                                            state, frame, file_name, crnt_line_number, func_name = next_state
+                                        else:
+                                            isEnd = True
+
+                                        if crntFromTo[0] != crnt_line_number:
+                                            errorCnt_if += 1
+                                            event_sender({"message": f"ここから先は進入できません!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            while True:
+                                                if (event := event_reciever()) is None:
+                                                    continue
+                                                if (type := event.get('type', '')) != 'if':
+                                                    errorCnt_if += 1
+                                                    event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                                elif (fromTo := event.get('fromTo', None)) is None:
+                                                    errorCnt_if += 1
+                                                    event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                                else:
+                                                    break
+                                            line_number_track.append(crnt_line_number)
+                                            break
+                                        line_number_track.append(crntFromTo.pop(0))
+
+                                    # crntFromToが空 = 行番が完全一致
+                                    if not crntFromTo:
+                                        event_sender({"message": "", "status": "ok"})
+                                        vars_changed = varsTracker.trackStart(frame)
+                                        vars_checker(vars_changed)
+                                        print(line_number, crnt_line_number)
+                                        break
+                            elif type == 'doWhileIn':
+                                event_sender({"message": "", "status": "ok"})
+                            elif type in ['doWhileTrue', 'doWhileFalse']:
+                                event_sender({"message": "", "status": "ok"})
+                            else:
+                                event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
+                                continue
+                        elif len(fromTo) == 1 and fromTo == [line_number]:
+                            if type == 'ifEnd':
+                                event_sender({"message": "", "status": "ok"})
+                            elif type == 'whileIn':
+                                event_sender({"message": "", "status": "ok"})
+
+                                # その次に条件が真かどうかを確かめる
+                                step_conditionally(frame)
+
+                                if (next_state := get_next_state()):
+                                    line_number = crnt_line_number
+                                    state, frame, file_name, crnt_line_number, func_name = next_state
+                                else:
+                                    isEnd = True
+
+                                vars_changed = varsTracker.trackStart(frame)
+                                vars_checker(vars_changed)
+
+                                # get_std_outputs, state_checkerを入れるかは後々考える
+
+                                while True:
+                                    if (event := event_reciever()) is None:
+                                        break
+
+                                    if (fromTo := event.get('fromTo', None)) is not None:
+                                        type = event.get('type', '')
+                                        if type in ['whileTrue', 'whileFalse']:
+                                            if fromTo == [line_number, crnt_line_number]:
+                                                event_sender({"message": "", "status": "ok"})
+                                                break
+                                    event_sender({"message": "NG行動をしました4!!", "status": "ng"})
+                            elif type == 'forIn':
+                                event_sender({"message": "", "status": "ok"})
+
+                                # その次に条件が真かどうかを確かめる
+                                step_conditionally(frame)
+
+                                if (next_state := get_next_state()):
+                                    line_number = crnt_line_number
+                                    state, frame, file_name, crnt_line_number, func_name = next_state
+                                else:
+                                    isEnd = True
+
+                                vars_changed = varsTracker.trackStart(frame)
+                                vars_checker(vars_changed)
+
+                                # get_std_outputs, state_checkerを入れるかは後々考える
+
+                                while True:
+                                    print(line_number, crnt_line_number)
+                                    if (event := event_reciever()) is None:
+                                        break
+
+                                    if (fromTo := event.get('fromTo', None)) is not None:
+                                        type = event.get('type', '')
+                                        if type in ['forTrue', 'forFalse']:
+                                            if fromTo == [line_number, crnt_line_number]:
+                                                event_sender({"message": "", "status": "ok"})
+                                                break
+                                    event_sender({"message": "NG行動をしました5!!", "status": "ng"})
+                            else:
+                                event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
+                                continue
+                        else:
+                            event_sender({"message": "ここから先は進入できません!!", "status": "ng"})
+                            continue
+                    elif event.get('item', None) or event.get('itemset', None):
+                        event_sender({"message": "NG行動をしました6!!", "status": "ng"})
+                        continue
+                    else:
+                        pass
+                    
+                print('here')
+                step_conditionally(frame)
+
+                if (next_state := get_next_state()):
+                    line_number = crnt_line_number
+                    state, frame, file_name, crnt_line_number, func_name = next_state
+                else:
+                    isEnd = True
+
+                vars_changed = varsTracker.trackStart(frame)
+
+                get_std_outputs()
+
+                # 変数は前回の処理で変更されていたら見る
+                vars_checker(vars_changed)
+    except:
+        pass
+
 def start_server(host='localhost', port=9999):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
         s.bind((host, port))
         s.listen()
         print(f"[サーバ起動] {host}:{port} で待機中...")
@@ -563,7 +581,6 @@ def start_server(host='localhost', port=9999):
 args = get_command_line_args()
 
 varsTracker = VarsTracker()
-
 
 
 # region lldbの初期設定
