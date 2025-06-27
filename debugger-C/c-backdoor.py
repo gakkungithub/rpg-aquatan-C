@@ -332,7 +332,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         if func_name is None or file_name is None:
             # state_checker(state)
-            print('here')
             return None
         
         print(f"{func_name} at {file_name}:{line_number}")
@@ -379,7 +378,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped: 
 
-                if line_data.get(func_name, None) and line_number in line_data[func_name]:
+                if line_data.get(func_name, None) and line_number in line_data[func_name] and not isEnd:
                 # JSONが複数回に分かれて送られてくる可能性があるためパース
                     if (event := event_reciever()) is None:
                         continue
@@ -479,18 +478,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             elif type == 'whileIn':
                                 event_sender({"message": "", "status": "ok"})
 
-                                # その次に条件が真かどうかを確かめる
-                                step_conditionally(frame)
-
-                                if (next_state := get_next_state()):
-                                    line_number = crnt_line_number
-                                    state, frame, file_name, crnt_line_number, func_name = next_state
-                                else:
-                                    isEnd = True
-
-                                vars_changed = varsTracker.trackStart(frame)
-                                vars_checker(vars_changed)
-
                                 # get_std_outputs, state_checkerを入れるかは後々考える
 
                                 while True:
@@ -506,18 +493,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     event_sender({"message": "NG行動をしました4!!", "status": "ng"})
                             elif type == 'forIn':
                                 event_sender({"message": "", "status": "ok"})
-
-                                # その次に条件が真かどうかを確かめる
-                                step_conditionally(frame)
-
-                                if (next_state := get_next_state()):
-                                    line_number = crnt_line_number
-                                    state, frame, file_name, crnt_line_number, func_name = next_state
-                                else:
-                                    isEnd = True
-
-                                vars_changed = varsTracker.trackStart(frame)
-                                vars_checker(vars_changed)
 
                                 # get_std_outputs, state_checkerを入れるかは後々考える
 
@@ -545,7 +520,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         pass
                     
-                print('here')
                 step_conditionally(frame)
 
                 if (next_state := get_next_state()):
