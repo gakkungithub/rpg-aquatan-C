@@ -15,8 +15,6 @@ for cname, tu in translation_units.items():
     fchart = ASTtoFlowChart()
     fchart.createErrorInfo(tu.diagnostics)
     fchart.write_ast(tu, programname)
-    # for cr in tu.cursor.get_children():
-    #     fchart.write_ast_tree(cr)
 
 genBitMap = GenBitMap(programname, fchart.func_info, fchart.gvar_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move)
 genBitMap.startTracking()

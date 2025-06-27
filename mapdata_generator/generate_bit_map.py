@@ -69,7 +69,7 @@ class AStarFixed(AStar):
                     neighbors.append(TileFixed(x, y))
 
         return neighbors
-    
+
 
 class GenBitMap:
     ISEVENT = 1
@@ -84,9 +84,9 @@ class GenBitMap:
         self.expNode_info = expNode_info
         self.roomSize_info = roomSize_info
         self.floorMap = None
+        self.roomsMap = None
         self.eventMap = None
         self.room_info = {}
-        self.path_info = {}
         self.gotoRoom_list = gotoRoom_list
         self.warp_info = []
         self.treasure_info = []
@@ -142,12 +142,17 @@ class GenBitMap:
                     bitMap_padded[i, j] = mcID.getFloorChipID(wallFlags)
 
         self.floorMap = bitMap_padded[1:height+1, 1:width+1]
-        self.floorMap = np.where(self.floorMap == 0, 390, self.floorMap)
+
+        defaultMapChips = [503, 113, 343, 160, 32]
+        self.floorMap = np.where(self.floorMap == 0, 390, self.floorMap) # gray thick brick
+        # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
+        # self.floorMap = np.where(self.floorMap == 0, 402, self.floorMap) # gray thin brick
+        # self.floorMap = np.where(self.floorMap == 0, 31, self.floorMap) # dungeon_floor
 
         self.setFuncWarp()
 
         fg.writeMapIni(pname, self.initPos, self.set_gvar())
-        fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info, isUniversal)
+        fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info, isUniversal, defaultMapChips[0])
         fg.writeLineFile(pname, self.line_info)
 
         plt.imshow(self.floorMap, cmap='gray', interpolation='nearest')
@@ -186,13 +191,13 @@ class GenBitMap:
         zero_elements = np.argwhere(self.eventMap[sy+1:sy+sheight-1, sx+1:sx+swidth-1] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            warpFrom = (int(sy+y), int(sx+x))
+            warpFrom = (int(sy+y+1), int(sx+x+1))
             self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
             #次に遷移先を設定する
             zero_elements = np.argwhere(self.eventMap[gy+1:gy+gheight-1, gx+1:gx+gwidth-1] == 0)
             if zero_elements.size > 0:
                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-                warpTo = (int(gy+y), int(gx+x))
+                warpTo = (int(gy+y+1), int(gx+x+1))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
                 # doWhileTrue, ifEndについては上書きする
@@ -211,7 +216,7 @@ class GenBitMap:
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             self.eventMap[py+y, px+x] = self.ISEVENT
-            self.initPos =  (int(py+y), int(px+x))
+            self.initPos =  (int(py+y+1), int(px+x+1))
         else:
             print("generation failed: try again!! 0")
 
@@ -270,6 +275,7 @@ class GenBitMap:
         self.func_name = "main"
         refInfo = self.func_info.pop(self.func_name)
         self.floorMap = np.ones((20,20))
+        self.roomsMap = np.ones((20,20))
         self.eventMap = np.zeros((20,20))
         self.trackFuncAST(refInfo)
 
@@ -348,7 +354,8 @@ class GenBitMap:
                     self.setWarpZone(crntRoomID, toNodeID, 158)
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
-                    self.setWarpZone(crntRoomID, toNodeID, 158)
+                    self.createPath(crntRoomID, toNodeID)
+                    # self.setWarpZone(crntRoomID, toNodeID, 158)
                     nodeIDs.append(toNodeID)
                 else:
                     print("unknown node appeared")
@@ -370,7 +377,8 @@ class GenBitMap:
                     self.createPath(nodeID, toNodeID)
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
-                    self.setWarpZone(nodeID, toNodeID, 158)
+                    self.createPath(nodeID, toNodeID)
+                    # self.setWarpZone(nodeID, toNodeID, 158)
                     nodeIDs.append(toNodeID)
             if nodeIDs:
                 #whileの領域に入る
@@ -477,6 +485,11 @@ class GenBitMap:
             self.room_info[nodeID] = self.findRoomArea((height, width), (mapHeight, mapWidth), kernel)
 
     def findRoomArea(self, roomSize, mapSize, kernel):
+        def expand_map(original, map_size, new_shape, fill_value):
+            new_map = np.full(new_shape, fill_value, dtype=original.dtype)
+            new_map[:map_size[0], :map_size[1]] = original
+            return new_map
+        
         candidate_squares = []
         convolved = ndimage.convolve(self.floorMap, kernel, mode='constant', cval=0)
         for i in range(1, mapSize[0]-roomSize[0]-self.PADDING2):
@@ -488,50 +501,101 @@ class GenBitMap:
             w = list(range(len(candidate_squares), 0, -1))
             i, j = random.choices(candidate_squares, weights=w)[0]
             self.floorMap[i+self.PADDING:i+self.PADDING+roomSize[0], j+self.PADDING:j+self.PADDING+roomSize[1]] = 0
+            self.roomsMap[i+self.PADDING:i+self.PADDING+roomSize[0], j+self.PADDING:j+self.PADDING+roomSize[1]] = 0            
+
             return (i+self.PADDING,j+self.PADDING,roomSize[0],roomSize[1])
         else:
-            #まずfloorMapのサイズを更新
+            # 拡張サイズの計算
             new_height = mapSize[0] + 20
             new_width = mapSize[1] + 20
-            new_bitMap = np.ones((new_height, new_width))
-            new_bitMap[:mapSize[0], :mapSize[1]] = self.floorMap
-            self.floorMap = new_bitMap
-            #そしてeventMapを更新する
-            new_eventMap = np.zeros(self.floorMap.shape)
-            new_eventMap[:mapSize[0], :mapSize[1]] = self.eventMap
-            self.eventMap = new_eventMap
+            new_shape = (new_height, new_width)
+
+            # 各マップを更新
+            self.floorMap = expand_map(self.floorMap, mapSize, new_shape, fill_value=1)
+            self.roomsMap = expand_map(self.roomsMap, mapSize, new_shape, fill_value=1)
+            self.eventMap = expand_map(self.eventMap, mapSize, new_shape, fill_value=0)
             return self.findRoomArea(roomSize, (new_height, new_width), kernel)
 
     def createPath(self, startNodeID, goalNodeID):
+        def random_edge_point(ty, lx, height, width):
+            h, w = self.floorMap.shape
+            candidates = []
+
+            # top edge (y = ty)
+            for x in range(lx, lx + width):
+                if (0 <= ty-1 < h and 0 <= x < w and self.floorMap[ty, x] != 0 and
+                    self.roomsMap[ty, x-1] != 0 and self.roomsMap[ty-1, x] != 0 and self.roomsMap[ty, x+1] != 0):
+                    candidates.append((ty, x))
+
+            # bottom edge (y = ty + height - 1)
+            for x in range(lx, lx + width):
+                y = ty + height
+                if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
+                    self.roomsMap[y, x-1] != 0 and self.roomsMap[y+1, x] != 0 and self.roomsMap[y, x+1] != 0):
+                    candidates.append((y, x))
+
+            # left edge (x = lx)
+            for y in range(ty, ty + height):
+                if (0 <= y < h and 0 <= lx-1 < w and self.floorMap[y, lx] != 0 and
+                    self.roomsMap[y-1, lx] != 0 and self.roomsMap[y, lx-1] != 0 and self.roomsMap[y+1, lx] != 0):
+                    candidates.append((y, lx))
+
+            # right edge (x = lx + width - 1)
+            for y in range(ty, ty + height):
+                x = lx + width
+                if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and
+                    self.roomsMap[y-1, x] != 0 and self.roomsMap[y, x+1] != 0 and self.roomsMap[y+1, x] != 0):
+                    candidates.append((y, x))
+
+            if not candidates:
+                return None
+
+            return random.choice(candidates)
+
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
 
-        room_reversed = self.floorMap
+        room_reversed = self.roomsMap
         room_reversed[sy:sy+sheight, sx:sx+swidth] = 1
         room_reversed[gy:gy+gheight, gx:gx+gwidth] = 1
         check_map = 1 - room_reversed
 
-        start = (sy - 1 + random.randint(1, sheight), sx - 1 + random.randint(1, swidth))
+        start = random_edge_point(sy, sx, sheight, swidth)
         goal = (gy - 1 + random.randint(1, gheight), gx - 1 + random.randint(1, gwidth))
 
-        setExit = False
-        if (path := AStarFixed(check_map).search(start, goal)):
-            check_map[path[0][0], path[0][1]] = 1
-            for i in range(1, len(path)):
-                check_map[path[i][0], path[i][1]] = 1
+        if start is None or goal is None:
+            self.setWarpZone(startNodeID, goalNodeID, 158) 
+            check_map[sy:sy+sheight, sx:sx+swidth] = 1
+            check_map[gy:gy+gheight, gx:gx+gwidth] = 1
+            self.roomsMap = 1 - check_map
 
-                #出口のための一方通行パネルを設置する
-                if setExit is False:
-                    #出口側が曲がることはないうえに、一方通行パネルの位置が被ることは無い
-                    if ((gy-1 <= path[i][0] < gy+gheight+1 and gx-1 <= path[i][1] < gx+gwidth+1) and
-                        not (gy <= path[i-1][0] < gy+gheight and gx <= path[i-1][1] < gx+gwidth)):
-                        self.setOneWay(path[i-1], path[i][0]-path[i-1][0], path[i][1]-path[i-1][1], self.condition_move[goalNodeID])
-                        setExit = True
-        
+        check_map[start] = 0
+        check_map[goal] = 0
+
+        setExit = False
+        path = AStarFixed(check_map).search(start, goal)
+        self.floorMap[path[0][0], path[0][1]] = 0
+        for i in range(1, len(path)):
+            self.floorMap[path[i][0], path[i][1]] = 0
+
+            #出口のための一方通行パネルを設置する
+            if setExit is False:
+                if (gy-1 <= path[i][0] < gy+gheight+1 and gx <= path[i][1] < gx+gwidth) or (gy <= path[i][0] < gy+gheight and gx-1 <= path[i][1] < gx+gwidth+1):
+                    if gy <= path[i+1][0] < gy+gheight and gx <= path[i+1][1] < gx+gwidth:
+                        self.setOneWay(path[i], path[i+1][0]-path[i][0], path[i+1][1]-path[i][1], self.condition_move[goalNodeID])
+                    else:
+                        if gy-1 == path[i][0]:
+                            self.setOneWay(path[i], 1, 0, self.condition_move[goalNodeID])
+                        elif gy+1 == path[i][0]:
+                            self.setOneWay(path[i], -1, 0, self.condition_move[goalNodeID])
+                        elif gx-1 == path[i][1]:
+                            self.setOneWay(path[i], 0, 1, self.condition_move[goalNodeID])
+                        else: # gx+1 == path[i][1]
+                            self.setOneWay(path[i], 0, -1, self.condition_move[goalNodeID])
+                        break
+                    setExit = True
+
         check_map[sy:sy+sheight, sx:sx+swidth] = 1
         check_map[gy:gy+gheight, gx:gx+gwidth] = 1
-        self.floorMap = 1 - check_map
-
-        if path is None:
-            self.setWarpZone(startNodeID, goalNodeID, 158)
-            
+        self.roomsMap = 1 - check_map
+           

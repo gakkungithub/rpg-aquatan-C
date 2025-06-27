@@ -2962,13 +2962,11 @@ class MiniMapWindow(Window, Map):
     tile_num = 60
     offset_x = 0
     offset_y = 0
-    border = 20
     radius = 0
     RED = (255, 0, 0)
 
     def __init__(self, rect, name):
-        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE - self.border
-        self.offset_y = self.border
+        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE
         self.radius = MIN_MAP_SIZE / self.tile_num
         Window.__init__(self, rect)
         Map.__init__(self, name)

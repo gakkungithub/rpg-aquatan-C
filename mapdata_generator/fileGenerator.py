@@ -6,7 +6,7 @@ import random
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/data'
 
-def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo, isUniversal):
+def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo, isUniversal, defaultMapChip=503):
     events = []
     characters = []
 
@@ -43,7 +43,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, warpCharaInfo, isU
     filename = f'{DATA_DIR}/{pname}/{pname}.json'
 
     with open(filename, 'w') as f:
-        fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": 503, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
+        fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
         json.dump(fileContent, f) 
 
 def writeMapIni(pname, initPos, gvarString):
