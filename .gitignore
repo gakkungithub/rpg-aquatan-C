@@ -1,1 +1,9 @@
 data/*
+.mypy_cache/
+charachip/.DS_Store
+.DS_Store
+charachip/aquatan.zip
+.vscode
+settings.json
+rawmaps/
+python27/
