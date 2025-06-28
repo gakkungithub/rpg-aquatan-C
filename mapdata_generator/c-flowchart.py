@@ -19,4 +19,4 @@ for cname, tu in translation_units.items():
 genBitMap = GenBitMap(programname, fchart.func_info, fchart.gvar_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move)
 genBitMap.startTracking()
 
-genBitMap.setMapChip(programname, args.u)
+genBitMap.setMapChip(programname, fchart.switchEnd, args.u)

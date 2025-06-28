@@ -36,6 +36,7 @@ class ASTtoFlowChart:
         self.roomSize_info = {}
         self.expNode_info = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
+        self.switchEnd : dict[str, list[int]] = {}
         self.funcBeginLine = 1 #初期値
         self.funcNum = 0
     
@@ -122,6 +123,7 @@ class ASTtoFlowChart:
                 self.funcBeginLine = cursor.location.line - 1
 
                 self.func_info[func_name] = {"start": f'"{nodeID}"', "refs": set()}
+                self.switchEnd[func_name] = []
                 #関数の最初の部屋情報を作る
                 self.roomSize_info[self.scanning_func] = {}
                 self.createRoomSizeEstimate(nodeID)
@@ -140,13 +142,32 @@ class ASTtoFlowChart:
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         for cr in cursor.get_children():
             if self.condition_move.get(f'"{nodeID}"', None) and self.condition_move[f'"{nodeID}"'][1][-1] is None:
-                self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line - self.funcBeginLine
+                self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line - self.funcBeginLine  
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
         return nodeID
 
     #色々な関数内や条件文内のコードの解析を行う
     def parse_stmt(self, cr, nodeID, edgeName=""):
+        #ループのbreakやcontinueの情報を保管する
+        def createLoopBreakerInfo():
+            self.loopBreaker_list.append({"break":[], "continue":[]})
+            if self.switchBreaker_list:
+                self.switchBreaker_list[-1]["level"] += 1
+
+        def downSwitchBreakerLevel():
+            if self.switchBreaker_list:
+                self.switchBreaker_list[-1]["level"] -= 1
+
+        def addLoopBreaker(node, type):
+            if self.switchBreaker_list and type == "break":
+                if self.switchBreaker_list[-1]["level"]:
+                    self.loopBreaker_list[-1][type].append(node)
+                else:
+                    self.switchBreaker_list[-1][type].append(node)
+            else:
+                self.loopBreaker_list[-1][type].append(node)
+
         self.check_cursor_error(cr)
 
         #break or continueの後なら何も行わない。ただし、ラベルを現在探索中でラベルを発見した時はラベルを見る
@@ -170,28 +191,28 @@ class ASTtoFlowChart:
         elif cr.kind == clang.cindex.CursorKind.IF_STMT:
             nodeID = self.parse_if_stmt(cr, nodeID, edgeName)
         elif cr.kind == clang.cindex.CursorKind.WHILE_STMT:
-            self.createLoopBreakerInfo()
+            createLoopBreakerInfo()
             nodeID = self.parse_while_stmt(cr, nodeID, edgeName)
-            self.downSwitchBreakerLevel()
+            downSwitchBreakerLevel()
         elif cr.kind == clang.cindex.CursorKind.DO_STMT:
-            self.createLoopBreakerInfo()
+            createLoopBreakerInfo()
             nodeID = self.parse_do_stmt(cr, nodeID, edgeName)
-            self.downSwitchBreakerLevel()
+            downSwitchBreakerLevel()
         elif cr.kind == clang.cindex.CursorKind.FOR_STMT:
-            self.createLoopBreakerInfo()
+            createLoopBreakerInfo()
             nodeID = self.parse_for_stmt(cr, nodeID, edgeName)
-            self.downSwitchBreakerLevel()
+            downSwitchBreakerLevel()
         elif cr.kind == clang.cindex.CursorKind.SWITCH_STMT:
             nodeID = self.parse_switch_stmt(cr, nodeID, edgeName)
         elif cr.kind == clang.cindex.CursorKind.BREAK_STMT:
             breakNodeID = self.createNode("break")
             self.createEdge(nodeID, breakNodeID, edgeName)
-            self.addLoopBreaker(breakNodeID, "break")
+            addLoopBreaker(breakNodeID, "break")
             return None
         elif cr.kind == clang.cindex.CursorKind.CONTINUE_STMT:
             continueNodeID = self.createNode("continue")
             self.createEdge(nodeID, continueNodeID, edgeName)
-            self.addLoopBreaker(continueNodeID, "continue")
+            addLoopBreaker(continueNodeID, "continue")
             return None
         elif cr.kind == clang.cindex.CursorKind.GOTO_STMT:
             cr = next(cr.get_children())
@@ -725,6 +746,19 @@ class ASTtoFlowChart:
 
     #switch文
     def parse_switch_stmt(self, cursor, nodeID, edgeName=""):
+        #caseはbreakだけ適応させる
+        #levelが0ならbreakノードを追加する。levelは繰り返し文が入ると1上がる。
+        #それ以外ならloopBreaker_listに追加する。
+        def createSwitchBreakerInfo():
+            self.switchBreaker_list.append({"level":0, "break":[]})
+
+        #switchのcaseのbreakノードを追加する。
+        def createSwitchBreakerEdge(endNodeID):
+            switchBreaker = self.switchBreaker_list.pop()
+            break_list = switchBreaker["break"]
+            for breakNodeID in break_list:
+                self.createEdge(breakNodeID, endNodeID)
+
         cond_cursor, comp_exec_cursor = [cr for cr in cursor.get_children() if self.check_cursor_error(cr)]
 
         switchRoomSizeEstimate = self.roomSizeEstimate
@@ -734,15 +768,18 @@ class ASTtoFlowChart:
         condNodeID = self.get_exp(cond_cursor, 'diamond')
         self.createEdge(nodeID, condNodeID, edgeName)
 
-        self.createSwitchBreakerInfo()
+        createSwitchBreakerInfo()
 
         #switch(A){ B }の場合
         endNodeID = self.createNode("", 'doublecircle')
+        last_line = None
         if comp_exec_cursor.kind == clang.cindex.CursorKind.COMPOUND_STMT:
             isNotBreak = False
             for cr in comp_exec_cursor.get_children():
                 self.check_cursor_error(cr)
                 if cr.kind == clang.cindex.CursorKind.CASE_STMT:
+                    if last_line:
+                        self.switchEnd[self.scanning_func].append(last_line)
                     while cr.kind == clang.cindex.CursorKind.CASE_STMT:
                         caseValue_cursor, cr = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
                         caseNodeID = self.get_exp(caseValue_cursor, 'invtriangle')
@@ -755,14 +792,22 @@ class ASTtoFlowChart:
                     switchRoomSizeEstimate[1] += 1
                     #ここで一つのcaseの部屋情報を作る
                     self.createRoomSizeEstimate(caseNodeID)
-                    self.condition_move[f'"{caseNodeID}"'] = ('switch', [comp_exec_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
+                    self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
 
                     if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+                        cr_true = list(exec_cursor.get_children())
+                        if len(cr_true):
+                            last_line = cr_true[0].location.line - self.funcBeginLine
+                        else:
+                            last_line = cr.location.line - self.funcBeginLine
                         nodeID = self.parse_comp_stmt(cr, caseNodeID)
                     else:
+                        last_line = cr.location.line - self.funcBeginLine
                         nodeID = self.parse_stmt(cr, caseNodeID)
 
                 elif cr.kind == clang.cindex.CursorKind.DEFAULT_STMT:
+                    if last_line:
+                        self.switchEnd[self.scanning_func].append(last_line)
                     defaultNodeID = self.createNode("default", 'invtriangle')
                     self.createEdge(condNodeID, defaultNodeID)
                     if isNotBreak:
@@ -774,16 +819,20 @@ class ASTtoFlowChart:
                     switchRoomSizeEstimate[1] += 1
                     #ここでdefaultの部屋情報を作る
                     self.createRoomSizeEstimate(defaultNodeID)
-                    self.condition_move[f'"{defaultNodeID}"'] = ('switch', [cr.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
+                    self.condition_move[f'"{defaultNodeID}"'] = ('switchCase', [cond_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
                     nodeID = self.parse_stmt(default_cursor, defaultNodeID)
+                    last_line = default_cursor.location.line - self.funcBeginLine
                     isNotBreak = True
                 elif cr.kind == clang.cindex.CursorKind.BREAK_STMT:
                     nodeID = self.parse_stmt(cr, nodeID)
+                    last_line = cr.location.line - self.funcBeginLine
                     isNotBreak = False
                     #caseラベルと実行文の処理の階層は最初の実行文以外同じ
+                # 一つのcaseに複数の処理がある場合はくっつける
                 else:
                     if caseNodeID or defaultNodeID:
                         nodeID = self.parse_stmt(cr, nodeID)
+                        last_line = cr.location.line - self.funcBeginLine
             self.createEdge(nodeID, endNodeID)
 
         #switch(A) Bの時、Bが case C: D なら A == C でDが行われる。
@@ -791,43 +840,30 @@ class ASTtoFlowChart:
             caseValue_cursor, exec_cursor = [cr for cr in comp_exec_cursor.get_children() if self.check_cursor_error(cr)]
             caseNodeID = self.get_exp(caseValue_cursor, 'invtriangle')
             self.createEdge(condNodeID, caseNodeID)
-            self.createSwitchBreakerInfo()
+            createSwitchBreakerInfo()
 
             #switchの元の部屋のサイズを+1する
             switchRoomSizeEstimate[1] += 1
             #ここでDのための部屋情報を作る
             self.createRoomSizeEstimate(caseNodeID)
-            self.condition_move[f'"{caseNodeID}"'] = ('switch', [cr.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
+            self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
             
             nodeID = self.parse_stmt(exec_cursor, caseNodeID)
+            last_line = exec_cursor.location.line - self.funcBeginLine
+            self.switchEnd[self.scanning_func].append(exec_cursor.location.line - self.funcBeginLine)
             self.createEdge(nodeID, endNodeID)
         #しかし、B D なら D は無視される。Dは複数行でも良い。
 
         if defaultNodeID is None:
             self.createEdge(condNodeID, endNodeID)
-        self.createSwitchBreakerEdge(endNodeID)
+        createSwitchBreakerEdge(endNodeID)
         #ここでswitchを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
-        self.condition_move[f'"{endNodeID}"'] = ('switch', [None, None])
+        self.condition_move[f'"{endNodeID}"'] = ('switchEnd', [None, None])
 
+        self.switchEnd[self.scanning_func].append(last_line)
         self.roomSize_info[self.scanning_func][f'"{switchRoomSizeEstimate[0]}"'] = switchRoomSizeEstimate[1]
         return endNodeID
-        
-
-    #ループのbreakやcontinueの情報を保管する
-    def createLoopBreakerInfo(self):
-        self.loopBreaker_list.append({"break":[], "continue":[]})
-        if self.switchBreaker_list:
-            self.switchBreaker_list[-1]["level"] += 1
-
-    def addLoopBreaker(self, node, type):
-        if self.switchBreaker_list and type == "break":
-            if self.switchBreaker_list[-1]["level"]:
-                self.loopBreaker_list[-1][type].append(node)
-            else:
-                self.switchBreaker_list[-1][type].append(node)
-        else:
-            self.loopBreaker_list[-1][type].append(node)
 
     #ループ処理のノードをくっつけていく
     def createEdgeForLoop(self, breakToNodeID, continueToNodeID):
@@ -839,20 +875,4 @@ class ASTtoFlowChart:
         for continueNodeID in continue_list:
             self.createEdge(continueNodeID, continueToNodeID)
 
-    #caseはbreakだけ適応させる
-    #levelが0ならbreakノードを追加する。levelは繰り返し文が入ると1上がる。
-    #それ以外ならloopBreaker_listに追加する。
-    def createSwitchBreakerInfo(self):
-        self.switchBreaker_list.append({"level":0, "break":[]})
-
-    def downSwitchBreakerLevel(self):
-        if self.switchBreaker_list:
-            self.switchBreaker_list[-1]["level"] -= 1
-
-    #switchのcaseのbreakノードを追加する。
-    def createSwitchBreakerEdge(self, endNodeID):
-        switchBreaker = self.switchBreaker_list.pop()
-        break_list = switchBreaker["break"]
-        for breakNodeID in break_list:
-            self.createEdge(breakNodeID, endNodeID)
     

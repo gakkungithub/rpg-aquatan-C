@@ -1,7 +1,7 @@
-start,forstatement,6, 5
-itemget, forstatement,5, 4,i
-itemget, forstatement,8, 4,j
-jump, forstatement,15, 13
-jump, forstatement,15, 13
-moveout, forstatement,16, 6
-end, forstatement,16, 6
+start,switchstatement,13, 11
+itemget, switchstatement,11, 12,j
+itemget, switchstatement,9, 11,i
+jump, switchstatement,33, 16
+jump, switchstatement,33, 24
+moveout, switchstatement,31, 24
+end, switchstatement,31, 24

@@ -71,11 +71,12 @@ def writeMapIni(pname, initPos, gvarString):
     with open(filename, 'w') as f:
         config.write(f)
 
-def writeLineFile(pname, line_info):
+def writeLineFile(pname, line_info, switchEnd):
     filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
     line_info_serializable = {
-        k: list(v) for k, v in line_info.items()
+        k: list(v) + switchEnd[k] for k, v in line_info.items()
     }
+
     with open(filename, 'w') as f:
         json.dump(line_info_serializable, f)

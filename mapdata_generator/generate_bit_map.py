@@ -97,7 +97,7 @@ class GenBitMap:
         self.line_info: dict[str, set[int]] = {}
         self.condition_move: list[tuple[str, list[int | None]]] = condition_move
 
-    def setMapChip(self, pname, isUniversal):
+    def setMapChip(self, pname, switchEnd, isUniversal):
         wallFlags = np.zeros(8, dtype=int)
         height, width = self.floorMap.shape
         bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
@@ -153,7 +153,7 @@ class GenBitMap:
 
         fg.writeMapIni(pname, self.initPos, self.set_gvar())
         fg.writeMapJson(pname, self.floorMap, self.warp_info, self.treasure_info, self.exit_info, self.warpChara_info, isUniversal, defaultMapChips[0])
-        fg.writeLineFile(pname, self.line_info)
+        fg.writeLineFile(pname, self.line_info, switchEnd)
 
         plt.imshow(self.floorMap, cmap='gray', interpolation='nearest')
         plt.title(pname)
@@ -188,16 +188,16 @@ class GenBitMap:
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
         #まず遷移元を設定する
-        zero_elements = np.argwhere(self.eventMap[sy+1:sy+sheight-1, sx+1:sx+swidth-1] == 0)
+        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            warpFrom = (int(sy+y+1), int(sx+x+1))
+            warpFrom = (int(sy+y), int(sx+x))
             self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
             #次に遷移先を設定する
-            zero_elements = np.argwhere(self.eventMap[gy+1:gy+gheight-1, gx+1:gx+gwidth-1] == 0)
+            zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
             if zero_elements.size > 0:
                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-                warpTo = (int(gy+y+1), int(gx+x+1))
+                warpTo = (int(gy+y), int(gx+x))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
                 # doWhileTrue, ifEndについては上書きする
