@@ -568,10 +568,11 @@ def main():
                                 value = str(int(current_value) + 1)
                             elif value == "--":
                                 value = str(int(current_value) - 1)
-                            elif value.startswith("+"):
-                                value = str(int(current_value) + int(value[1:]))
-                            elif value.startswith("-"):
-                                value = str(int(current_value) - int(value[1:]))
+                            # この下の計算式コマンドは j = -5 と被るので今は無視
+                            # elif value.startswith("+"):
+                            #     value = str(int(current_value) + int(value[1:]))
+                            # elif value.startswith("-"):
+                            #     value = str(int(current_value) - int(value[1:]))
 
                             sender.send_event({"itemset": [itemname, value]})
                             itemsetResult = sender.receive_json()
