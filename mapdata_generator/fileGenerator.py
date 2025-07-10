@@ -19,12 +19,13 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
         
     # アイテムの情報
     for item in itemInfo:
-        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1]})
+        exp_str, exp_refs, exp_comments = item[2]
+        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3]})
 
     # 経路の一方通行情報
     for exit in exitInfo:
         events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4]})
-
+ 
     # ワープキャラの情報
     ### 関数の呼び出しに応じたキャラクターの情報
     for chara_moveItems in chara_moveItemsInfo:

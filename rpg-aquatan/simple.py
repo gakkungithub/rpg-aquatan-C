@@ -396,7 +396,11 @@ def main():
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
                         event_underfoot.open(itemResult['value'])
-                        MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                        item_comments = "%".join(event_underfoot.comments)
+                        if item_comments:
+                            MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                        else:
+                            MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
                         fieldmap.remove_event(event_underfoot)
                         PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                     else:
@@ -462,6 +466,8 @@ def main():
             
             # region keydown event
             ## open map
+            if event.type == KEYDOWN and event.key == K_i:
+                PLAYER.set_game_mode("item")
             if event.type == KEYDOWN and event.key == K_m:
                 if MMAPWND.is_visible:
                     MMAPWND.hide()
@@ -690,7 +696,11 @@ def main():
                         if itemResult is not None:
                             if itemResult['status'] == "ok":
                                 event_underfoot.open(itemResult['value'])
-                                MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                                item_comments = "%".join(event_underfoot.comments)
+                                if item_comments:
+                                    MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                                else:
+                                    MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
                                 fieldmap.remove_event(event_underfoot)
                                 PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                             else:
@@ -1268,7 +1278,11 @@ class Map:
         """宝箱を作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         item = data["item"]
-        treasure = Treasure((x, y), item)
+        exp = data["exp"]
+        refs = data["refs"]
+        comments = data["comments"]
+        vartype = data["vartype"]
+        treasure = Treasure((x, y), item, exp, refs, comments, vartype)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1588,6 +1602,7 @@ class Player(Character):
         self.itembag = ItemBag()
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
+        self.itemNameShow = False
 
         ## start
         self.fp = open(PATH, mode='w')
@@ -1816,6 +1831,10 @@ class Player(Character):
             self.waitingMove.dest_y = move['y']
         else:
             self.waitingMove = None
+    
+    def set_game_mode(self, type):
+        if type == "item":
+            self.itemNameShow = not self.itemNameShow
 
 
 
@@ -2114,34 +2133,36 @@ class MessageWindow(Window):
 
     def set(self, message):
         """メッセージをセットしてウィンドウを画面に表示する"""
-        self.cur_pos = 0
-        self.cur_page = 0
-        self.next_flag = False
-        self.hide_flag = False
-        # 全角スペースで初期化
-        self.text = ['　'] * (self.MAX_LINES*self.max_chars_per_line)
-        # メッセージをセット
-        p = 0
-        for ch in enumerate(message):
-            if ch[1] == "/":  # /は改行文字
-                self.text[p] = "/"
-                p += self.max_chars_per_line
-                p = int(p//self.max_chars_per_line)*self.max_chars_per_line
-            elif ch[1] == "%":  # \fは改ページ文字
-                self.text[p] = "%"
-                p += self.max_chars_per_page
-                p = int(p//self.max_chars_per_page)*self.max_chars_per_page
-            else:
-                self.text[p] = ch[1]
-                p += 1
-        self.text[p] = "$"  # 終端文字
-        self.show()
+        if message:
+            self.cur_pos = 0
+            self.cur_page = 0
+            self.next_flag = False
+            self.hide_flag = False
+            print(message)
+            # 全角スペースで初期化
+            self.text = ""
+            # メッセージをセット
+            p = 0
+            for ch in enumerate(message):
+                if ch[1] == "/":  # /は改行文字
+                    self.text += "/"
+                    self.text += "　" * (self.max_chars_per_line - (p+1) % self.max_chars_per_line)
+                    p = int(p//self.max_chars_per_line+1)*self.max_chars_per_line
+                elif ch[1] == "%":  # \fは改ページ文字
+                    self.text += "%"
+                    self.text += "　" * (self.max_chars_per_page - (p+1) % self.max_chars_per_page)
+                    p = int(p//self.max_chars_per_page+1)*self.max_chars_per_page
+                else:
+                    self.text += ch[1]
+                    p += 1
+            self.text += "$"  # 終端文字
+            self.show()
 
     def update(self):
         """メッセージウィンドウを更新する
         メッセージが流れるように表示する"""
         if self.is_visible:
-            if self.next_flag is False:
+            if self.next_flag is False and self.hide_flag is False:
                 self.cur_pos += 1  # 1文字流す
                 # テキスト全体から見た現在位置
                 p = self.cur_page * self.max_chars_per_page + self.cur_pos
@@ -2241,7 +2262,7 @@ class ItemWindow(Window):
             self.draw_string(10, 10 + i*20, f"{item.name:<8} ({item.value})", self.GREEN)
         gvarnum = len(PLAYER.commonItembag.items[-1])
         for j,item in enumerate(PLAYER.itembag.items[-1]):
-            self.draw_string(10, 10 + (gvarnum+j)*20, f"{item.name:<8} ({item.value})", self.WHITE)
+            self.draw_string(10, 10 + (gvarnum+j)*20, f"{item.vartype:<8} {item.name:<8} ({item.value})", self.WHITE)
 
         Window.blit(self, screen)
 
@@ -2486,19 +2507,25 @@ class PlacesetEvent():
 
 class Treasure():
     """宝箱"""
+    FONT_SIZE = 16
 
-    def __init__(self, pos, item):
+    def __init__(self, pos, item, exp, refs, comments, vartype):
+        self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
         self.item = item  # アイテム名
+        self.exp = exp # アイテムの値の代入式
+        self.refs = refs # アイテムを取得するのに必要なアイテム (変数)
+        self.comments = comments # アイテムの値の設定(計算)がどのように行われたかを説明するコメント
+        self.vartype = vartype # アイテムの型
 
     def open(self, value):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, value)
+        item = Item(self.item, value, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -2507,6 +2534,37 @@ class Treasure():
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
+
+        # アイテム名を描画（宝箱の上に）
+        if self.item and PLAYER.x == self.x and PLAYER.y == self.y or PLAYER.itemNameShow:
+            # 文字色（白）とアルファ付き背景（例: 半透明黒）
+            text_surface, text_rect = self.font.render(
+                self.item, 
+                fgcolor=(255, 255, 255),         # 文字色：白
+                bgcolor=(0, 0, 0, 128)           # 背景色：半透明黒（RGBA）
+            )
+            # パディング値（上下左右の余白）
+            padding = 4
+
+            # 背景用の矩形（テキストサイズ + パディング）
+            bg_rect = pygame.Rect(
+                text_rect.left - padding,
+                text_rect.top - padding,
+                text_rect.width + 2 * padding,
+                text_rect.height + 2 * padding
+            )
+
+            # 表示位置（中央寄せ）
+            bg_rect.centerx = self.rect.centerx - offsetx
+            bg_rect.bottom = self.rect.top - offsety  # 宝箱の上
+
+            text_rect.center = bg_rect.center  # テキストを背景中央に配置
+
+            # 背景を描画（半透明黒）
+            pygame.draw.rect(screen, (0, 0, 0, 128), bg_rect)
+
+            # テキストを描画
+            screen.blit(text_surface, text_rect)
 
     def __str__(self):
         return f"TREASURE,{self.x},{self.y},{self.item}"
@@ -2781,9 +2839,10 @@ class ItemBag:
 class Item:
     """アイテム"""
 
-    def __init__(self,name,value):
+    def __init__(self,name,value,vartype):
         self.name = str(name)
         self.value = value
+        self.vartype = vartype
 
     def get_value(self):
         """値を返す"""
@@ -2972,8 +3031,6 @@ class CommandWindow(Window):
 #                                                                  88                                                                                           
 #                                                                  88                                                                                           
 
-
-## JK add here!!
 class MiniMapWindow(Window, Map):
     """"ミニマップウィンドウ"""
     tile_num = 60

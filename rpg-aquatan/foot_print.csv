@@ -1,2 +1,4 @@
-start,switchstatement,11, 7
-end, switchstatement,11, 7
+start,01_int_variables,10, 8
+itemget, 01_int_variables,13, 10,a
+itemget, 01_int_variables,19, 13,sum
+end, 01_int_variables,19, 13

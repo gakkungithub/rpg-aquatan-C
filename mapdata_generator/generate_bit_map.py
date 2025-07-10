@@ -180,14 +180,14 @@ class MapInfo:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定
-    def setItemBox(self, roomNodeID, itemName):
+    def setItemBox(self, roomNodeID, itemName, item_exp_Info: dict[str, list[str], list[str]], var_type: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             itemPos = (int(ry+y), int(rx+x))
             self.eventMap[itemPos[0], itemPos[1]] = self.ISEVENT
-            self.treasure_info.append((itemPos, itemName))
+            self.treasure_info.append((itemPos, itemName, item_exp_Info, var_type))
         else:
             print("generation failed: try again!! 3")
 
@@ -236,11 +236,14 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info, gvar_info, expNode_info, roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
+    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str]]], roomSize_info, 
+                 gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
+        
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
-        self.edgeInfo = {}
+        self.nextNodeInfo: dict[str, tuple[str, str]] = {}
         self.func_info = func_info
         self.gvar_info = gvar_info
+        self.varNode_info = varNode_info
         self.expNode_info = expNode_info
         self.roomSize_info = roomSize_info
         self.floorMap = None
@@ -300,7 +303,7 @@ class GenBitMap:
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
 
     def startTracking(self):
-        self.setEdgeInfo()
+        self.setNextNodeInfo()
         self.func_name = "main"
         refInfo = self.func_info.pop(self.func_name)
         self.floorMap = np.ones((20,20))
@@ -311,7 +314,7 @@ class GenBitMap:
         gvarString = ""
         for gvarNodeID in self.gvar_info:
             varName = self.getNodeLabel(gvarNodeID)
-            for gvarContentNodeID in self.getEdgeInfo(gvarNodeID):
+            for gvarContentNodeID in self.getNextNodeInfo(gvarNodeID):
                 #配列
                 if self.getNodeShape(gvarContentNodeID) == 'box3d':
                     pass
@@ -339,7 +342,7 @@ class GenBitMap:
         else:
             self.func_warp[self.func_name] = [nodeID, [], []]
 
-        for toNodeID in self.getEdgeInfo(nodeID):
+        for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
         
         self.mapInfo.setGotoWarpZone(self.gotoRoom_list[self.func_name])
@@ -359,7 +362,7 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
-            for toNodeID in self.getEdgeInfo(nodeID):
+            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
                     #do_whileの同じノードに返って来る用
@@ -391,7 +394,7 @@ class GenBitMap:
             self.createRoom(nodeID)
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
             nodeIDs = []
-            for toNodeID in self.getEdgeInfo(nodeID):
+            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
                     self.createPath(nodeID, toNodeID)
@@ -410,11 +413,11 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'oval':
             funcName = self.getNodeLabel(nodeID)
             funcWarpInfo = [crntRoomID, [], funcName]
-            for toNodeID in self.getEdgeInfo(nodeID):
+            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 #関数の引数を関数遷移の鍵とする
                 if self.getNodeShape(toNodeID) == 'egg':
                     funcWarpInfo[1].append(self.expNode_info[toNodeID][1])
-                    for eggFuncNodeID in self.getEdgeInfo(toNodeID):
+                    for eggFuncNodeID, edgeLabel in self.getNextNodeInfo(toNodeID):
                         self.trackAST(crntRoomID, eggFuncNodeID)
                 #それ以外は次のノードに進む
                 else:
@@ -439,7 +442,7 @@ class GenBitMap:
 
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
-            toNodeID = self.getEdgeInfo(nodeID)[0]
+            toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
             self.createRoom(toNodeID)
             self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
             nodeID = toNodeID
@@ -447,7 +450,8 @@ class GenBitMap:
 
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':
-            for toNodeID in self.getEdgeInfo(nodeID):
+            var_type = self.varNode_info[nodeID]
+            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 #配列
                 if self.getNodeShape(toNodeID) == 'box3d':
                     self.trackAST(crntRoomID, toNodeID)
@@ -456,7 +460,7 @@ class GenBitMap:
                     self.trackAST(crntRoomID, toNodeID)
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID))
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), self.expNode_info[toNodeID], var_type)
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -470,7 +474,7 @@ class GenBitMap:
                     self.mapInfo.setWarpZone(crntRoomID, nodeID, 158)
                     crntRoomID = nodeID
                     
-        for toNodeID in self.getEdgeInfo(nodeID):
+        for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
     #'label', 'shape'属性がある
@@ -484,16 +488,17 @@ class GenBitMap:
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
         return attrs['label']
     
-    def setEdgeInfo(self):
+    def setNextNodeInfo(self):
         for edge in self.graph.get_edges():
-            if (edgeSource := edge.get_source()) in self.edgeInfo:
-                self.edgeInfo[edgeSource].append(edge.get_destination())
+            label = edge.get_attributes().get("label", "")
+            if (edgeSource := edge.get_source()) in self.nextNodeInfo:
+                self.nextNodeInfo[edgeSource].append((edge.get_destination(), label))
             else:
-                self.edgeInfo[edgeSource] = [edge.get_destination()]
+                self.nextNodeInfo[edgeSource] = [(edge.get_destination(), label)]
 
-    def getEdgeInfo(self, fromNodeID):
-        if fromNodeID in self.edgeInfo:
-            return self.edgeInfo.pop(fromNodeID)
+    def getNextNodeInfo(self, fromNodeID):
+        if fromNodeID in self.nextNodeInfo:
+            return self.nextNodeInfo.pop(fromNodeID)
         return []
 
     def createRoom(self, nodeID):

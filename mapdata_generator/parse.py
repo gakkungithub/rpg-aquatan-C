@@ -35,7 +35,8 @@ class ASTtoFlowChart:
         self.gotoRoom_list = {}
         self.roomSizeEstimate = None
         self.roomSize_info = {}
-        self.expNode_info = {}
+        self.varNode_info: dict[str, str] = {}
+        self.expNode_info: dict[str, tuple[str, list[str], list[str]]] = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
         self.line_info : dict[str, set[int]] = {}
         self.funcBeginLine = 1 #初期値
@@ -180,6 +181,7 @@ class ASTtoFlowChart:
         #部屋のサイズを1上げる
         self.roomSizeEstimate[1] += 1
 
+        # 変数や関数の宣言
         if cr.kind == clang.cindex.CursorKind.DECL_STMT:
             for vcr in cr.get_children():
                 self.check_cursor_error(vcr)
@@ -263,6 +265,9 @@ class ASTtoFlowChart:
         varNodeID = self.createNode(cursor.spelling, 'signature')
         self.createEdge(nodeID, varNodeID, edgeName)
 
+        # 変数の型名はこのcursorで分かる
+        self.varNode_info[f'"{varNodeID}"'] = cursor.type.spelling
+
         #配列
         if isArray:
             #配列の最初の要素数は必ず取得する
@@ -299,7 +304,7 @@ class ASTtoFlowChart:
             #スカラー変数の初期化値が無い場合
             if nodeID is None:
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [])
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [])
                 self.createEdge(varNodeID, nodeID)
 
         return varNodeID
@@ -330,17 +335,14 @@ class ASTtoFlowChart:
                 arrNumNodeIDs.append(arrNumNodeID)
             return arrNumNodeIDs
         
-    #必要なグローバル変数だけ取得
-    def parse_gvar(self, varName):
-        if (gvar_cursor := self.gvar_candidate_crs.pop(varName, None)):
-            self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
-    
     #式(一つのノードexpNodeに内容をまとめる)
-    def get_exp(self, cursor, shape='square', label=""):
+    def get_exp(self, cursor, shape='square', label="") -> str:
         expNodeID = self.createNode(label, shape)
         references = []
-        exp_terms = self.parse_exp_term(cursor, references, expNodeID)
-        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, references)
+        calc_order_comments = []
+        exp_terms = self.parse_exp_term(cursor, references, calc_order_comments, expNodeID)
+        print(calc_order_comments)
+        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, references, calc_order_comments)
         return expNodeID
 
     def unwrap_unexposed(self, cursor):
@@ -352,21 +354,61 @@ class ASTtoFlowChart:
                 self.check_cursor_error(cursor)
         return cursor
 
-    #式の項を一つずつ解析
-    def parse_exp_term(self, cursor, references, inNodeID=None):
-        cursor = self.unwrap_unexposed(cursor)
 
+    #式の項を一つずつ解析
+    def parse_exp_term(self, cursor, references: list[str], calc_order_comments: list[str], inNodeID=None) -> str:
+        unary_front_operator_comments = {
+            '++': "{expr} を 1 増やしてから {expr} の値を使います",
+            '--': "{expr} を 1 減らしてから {expr} の値を使います",
+            '+': "{expr} の元の値を使います",
+            '-': "{expr} の符号を反転した値を使います",
+            '!': "{expr} が真なら偽、偽なら真です",
+            '~': "{expr} を 2進数で表し、各ビットを反転します",
+            '&': "変数 {expr} を格納しているアドレスを取得します",
+            '*': "アドレス {expr} が指す値を読み取ります",
+        }
+
+        unary_back_operator_comments = {
+            '++': "{expr} の値を使います。その後、{expr} を 1 増やします",
+            '--': "{expr} の値を使います。その後、{expr} を 1 減らします",
+        }
+
+        binary_operator_comments = {
+            '+': "{left} と {right} の値を足します",
+            '-': "{left} から {right} を引きます",
+            '*': "{left} と {right} を掛けます",
+            '/': "{left} を {right} で割ります",
+            '%': "{left} を {right} で割った余りを求めます",
+            '=': "{left} に {right} を代入します",
+            '==': "{left} と {right} が等しいかどうかを比較します",
+            '!=': "{left} と {right} が異なるかを比較します",
+            '<': "{left} が {right} より小さいかを調べます",
+            '<=': "{left} が {right} 以下かを調べます",
+            '>': "{left} が {right} より大きいかを調べます",
+            '>=': "{left} が {right} 以上かを調べます",
+            '&&': "{left} と {right} の両方が真かを調べます",
+            '||': "{left} または {right} のいずれかが真かを調べます",
+            '&': "{left} と {right} を 2進数で表し、それぞれのビットが両方とも 1 のときに 1 になります",
+            '|': "{left} と {right} を 2進数で表し、どちらかのビットが 1 であれば 1 になります",
+            '^': "{left} と {right} を 2進数で表し、ビットが異なるときに 1 になります",
+            '<<': "{left} を左に {right} ビット分シフトします。2進数で見ると桁が左にずれて、2の {right} 乗倍になります",
+            '>>': "{left} を右に {right} ビット分シフトします。2進数で見ると桁が右にずれて、2の {right} 乗で割ったのと同じになります",
+        }
+        
+        cursor = self.unwrap_unexposed(cursor)
         exp_terms = ""
+
         #()で囲まれている場合
         if cursor.kind == clang.cindex.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            exp_terms = ''.join(["(", self.parse_exp_term(cr, references, inNodeID), ")"])
+            calc_order_comments.append(f"()で囲まれている部分は先に計算します")
+            exp_terms = ''.join(["(", self.parse_exp_term(cr, references, calc_order_comments, inNodeID), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
-            exp_terms = f"int({next(cursor.get_tokens()).spelling})"
+            exp_terms = next(cursor.get_tokens()).spelling
         elif cursor.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
-            exp_terms = f"float({next(cursor.get_tokens()).spelling})"
+            exp_terms = next(cursor.get_tokens()).spelling
         elif (cursor.kind == clang.cindex.CursorKind.STRING_LITERAL or
               cursor.kind == clang.cindex.CursorKind.CHARACTER_LITERAL):
             exp_terms = next(cursor.get_tokens()).spelling
@@ -374,32 +416,37 @@ class ASTtoFlowChart:
         elif cursor.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
             ref_spell = next(cursor.get_tokens()).spelling
             exp_terms = ref_spell
-            self.parse_gvar(ref_spell)
+            # グローバル変数ならグローバル変数のリファレンスを登録する
+            if (gvar_cursor := self.gvar_candidate_crs.pop(ref_spell, None)):
+                self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
             references.append(ref_spell)
         #配列
         elif cursor.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, references, inNodeID), "]"])
+            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, references, calc_order_comments, inNodeID), "]"])
         #関数
         elif cursor.kind == clang.cindex.CursorKind.CALL_EXPR:
             exp_terms, refspell = self.parse_call_expr(cursor, inNodeID)
             references.append(refspell)
         #一項条件式
         elif cursor.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
-            #(++aでいうa)
+            #(++aでいうaのカーソル)
             idf_cursor = next(cursor.get_children())
             self.check_cursor_error(idf_cursor)
             operator = next(cursor.get_tokens())
             #前置(++a)
+            term = self.parse_exp_term(idf_cursor, references, calc_order_comments, inNodeID)
             if operator.location.offset < idf_cursor.location.offset:
-                exp_terms = ''.join([operator.spelling, self.parse_exp_term(idf_cursor, references, inNodeID)])
+                exp_terms = ''.join([operator.spelling, term])
+                comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
             #後置(a++)
             else:
                 operator = next(reversed(list(cursor.get_tokens())))
-                exp_terms = ''.join([self.parse_exp_term(idf_cursor, references, inNodeID), operator.spelling])
-        #二項条件式と複合代入演算子("+="など)
-        elif (cursor.kind == clang.cindex.CursorKind.BINARY_OPERATOR or
-            cursor.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR):
+                exp_terms = ''.join([term, operator.spelling])
+                comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
+            calc_order_comments.append(f"{comment.format(expr=term)}")
+        #二項条件式(a + b)
+        elif cursor.kind == clang.cindex.CursorKind.BINARY_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             first_end = exps[0].extent.end.offset
             operator_spell = ""
@@ -407,17 +454,37 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            exp_terms = ''.join([self.parse_exp_term(exps[0], references, inNodeID), operator_spell, self.parse_exp_term(exps[1], references, inNodeID)])
+            front = self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID)
+            back = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
+            exp_terms = ''.join([front, operator_spell, back])
+            comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
+            calc_order_comments.append(f"{comment.format(left=front, right=back)}")
+
+        # 複合代入演算子(a += b)
+        elif cursor.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
+            exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
+            first_end = exps[0].extent.end.offset
+            operator_spell = ""
+            for token in cursor.get_tokens():
+                if first_end <= token.location.offset:
+                    operator_spell = token.spelling
+                    break
+            exp_terms = ''.join([self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID), operator_spell, self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)])
         #三項条件式(c? a : b)
         elif cursor.kind == clang.cindex.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
-            exp_terms = ''.join([self.parse_exp_term(exps[0], references, inNodeID), " ? ", self.parse_exp_term(exps[1], references, inNodeID), " : ", self.parse_exp_term(exps[2], references, inNodeID)])
+            condition = self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID)
+            trueExp = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
+            falseExp = self.parse_exp_term(exps[2], references, calc_order_comments, inNodeID)
+            exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
+            calc_order_comments.append(f"{condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
         #キャスト型
         elif cursor.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            exp_terms = ''.join(["(", cr.type.spelling, ") ", self.parse_exp_term(cr, references, inNodeID)])
+            exp_terms = ''.join(["(", cr.type.spelling, ") ", self.parse_exp_term(cr, references, calc_order_comments, inNodeID)])
+
         return exp_terms
 
     #関数の呼び出し(変数と関数の呼び出しは分ける)
