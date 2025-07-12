@@ -7,7 +7,7 @@
 # 1 "/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C-1/data/01_int_variables/01_int_variables.c" 2
 
 int main() {
-  int a = 5;
+  int a = 5, d = 4;
   int b = 3;
   int c = a + b;
 

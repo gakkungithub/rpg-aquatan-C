@@ -81,7 +81,7 @@ class MapInfo:
         self.condition_move: dict[str, tuple[str, list[int | None]]] = condition_move
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
-        self.treasure_info = []
+        self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
         self.chara_moveItems = []
         self.chara_return = []
         self.exit_info = []
@@ -180,7 +180,7 @@ class MapInfo:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定
-    def setItemBox(self, roomNodeID, itemName, item_exp_Info: dict[str, list[str], list[str]], var_type: str):
+    def setItemBox(self, roomNodeID, itemName, item_exp_Info: tuple[str, list[str], list[str], int], var_type: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         if zero_elements.size > 0:
@@ -236,7 +236,7 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str]]], roomSize_info, 
+    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], int]], roomSize_info, 
                  gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
@@ -300,6 +300,8 @@ class GenBitMap:
 
         self.mapInfo.setFuncWarp(self.func_warp)
 
+        print(self.expNode_info)
+
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
 
     def startTracking(self):
@@ -323,10 +325,11 @@ class GenBitMap:
                     pass
                 #ノーマル変数
                 elif self.getNodeShape(gvarContentNodeID) == 'square':
+                    eni = self.getExpNodeInfo(gvarContentNodeID)
                     if gvarString:
-                        gvarString = ', '.join([gvarString, f"'{varName}' : {self.expNode_info[gvarContentNodeID]}"])
+                        gvarString = ', '.join([gvarString, f"'{varName}' : {eni}"])
                     else:
-                        gvarString = f"'{varName}' : {self.expNode_info[gvarContentNodeID]}"
+                        gvarString = f"'{varName}' : {eni}"
                 #これはあり得ないがデバッグ用
                 else:
                     print("wrong node shape")
@@ -416,7 +419,8 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 #関数の引数を関数遷移の鍵とする
                 if self.getNodeShape(toNodeID) == 'egg':
-                    funcWarpInfo[1].append(self.expNode_info[toNodeID][1])
+                    eni = self.getExpNodeInfo(toNodeID)
+                    funcWarpInfo[1].append(eni[1])
                     for eggFuncNodeID, edgeLabel in self.getNextNodeInfo(toNodeID):
                         self.trackAST(crntRoomID, eggFuncNodeID)
                 #それ以外は次のノードに進む
@@ -460,7 +464,8 @@ class GenBitMap:
                     self.trackAST(crntRoomID, toNodeID)
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), self.expNode_info[toNodeID], var_type)
+                    eni = self.getExpNodeInfo(toNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -497,9 +502,11 @@ class GenBitMap:
                 self.nextNodeInfo[edgeSource] = [(edge.get_destination(), label)]
 
     def getNextNodeInfo(self, fromNodeID):
-        if fromNodeID in self.nextNodeInfo:
-            return self.nextNodeInfo.pop(fromNodeID)
-        return []
+        return self.nextNodeInfo.pop(fromNodeID, [])
+    
+    def getExpNodeInfo(self, nodeID):
+        # tuple[str, list[str], list[str], int]
+        return self.expNode_info.pop(nodeID, ("", [], [], 0))
 
     def createRoom(self, nodeID):
         if (size := self.roomSize_info[self.func_name].pop(nodeID, None)):

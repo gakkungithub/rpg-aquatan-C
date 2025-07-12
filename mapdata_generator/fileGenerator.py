@@ -9,6 +9,7 @@ DATA_DIR = BASE_DIR + '/data'
 def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInfo, chara_returnInfo, isUniversal, defaultMapChip=503):
     events = []
     characters = []
+    vardecl_lines: dict[int, list[str]] = {}
 
     universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
 
@@ -19,8 +20,12 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
         
     # アイテムの情報
     for item in itemInfo:
-        exp_str, exp_refs, exp_comments = item[2]
-        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3]})
+        exp_str, exp_refs, exp_comments, exp_line_num = item[2]
+        if exp_line_num in vardecl_lines:
+            vardecl_lines[exp_line_num].append(item[1])
+        else:
+            vardecl_lines[exp_line_num] = [item[1]]
+        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num})
 
     # 経路の一方通行情報
     for exit in exitInfo:
@@ -48,6 +53,10 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
     with open(filename, 'w') as f:
         fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
         json.dump(fileContent, f) 
+
+    vl_filename = f'{DATA_DIR}/{pname}/{pname}_varDeclLines.json'
+    with open(vl_filename, 'w') as f:
+        json.dump(vardecl_lines, f) 
 
 def writeMapIni(pname, initPos, gvarString):
     config = configparser.ConfigParser()

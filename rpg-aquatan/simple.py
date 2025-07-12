@@ -1282,7 +1282,8 @@ class Map:
         refs = data["refs"]
         comments = data["comments"]
         vartype = data["vartype"]
-        treasure = Treasure((x, y), item, exp, refs, comments, vartype)
+        linenum = data["linenum"]
+        treasure = Treasure((x, y), item, exp, refs, comments, vartype, linenum)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -2239,6 +2240,8 @@ class ItemWindow(Window):
     BLUE = Color(31, 31, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
+    mapchip = 456  # アイテムのUI(テスト用)
+
     def __init__(self, rect,player):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
@@ -2246,6 +2249,7 @@ class ItemWindow(Window):
             FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
+        self.image = Map.images[self.mapchip]
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2261,8 +2265,21 @@ class ItemWindow(Window):
         for i,item in enumerate(PLAYER.commonItembag.items[-1]):
             self.draw_string(10, 10 + i*20, f"{item.name:<8} ({item.value})", self.GREEN)
         gvarnum = len(PLAYER.commonItembag.items[-1])
-        for j,item in enumerate(PLAYER.itembag.items[-1]):
-            self.draw_string(10, 10 + (gvarnum+j)*20, f"{item.vartype:<8} {item.name:<8} ({item.value})", self.WHITE)
+        for j, item in enumerate(PLAYER.itembag.items[-1]):
+            y = 10 + (gvarnum + j) * 20
+
+            # 型に応じたアイコンを blit（描画）
+            icon = self.image  # あなたが使っている単一画像でも、将来的に複数アイコン対応でも可
+            icon_x = 10
+            icon_y = y
+            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+
+            if icon:
+                self.surface.blit(icon, (icon_x, icon_y))
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, y, f"{item.name:<8} ({item.value})", self.WHITE)
+
 
         Window.blit(self, screen)
 
@@ -2509,7 +2526,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exp, refs, comments, vartype):
+    def __init__(self, pos, item, exp, refs, comments, vartype, linenum):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -2520,6 +2537,7 @@ class Treasure():
         self.refs = refs # アイテムを取得するのに必要なアイテム (変数)
         self.comments = comments # アイテムの値の設定(計算)がどのように行われたかを説明するコメント
         self.vartype = vartype # アイテムの型
+        self.linenum = linenum # 宝箱を開けるタイミング
 
     def open(self, value):
         """宝箱をあける"""

@@ -31,6 +31,7 @@ def get_all_stdvalue(process):
 class VarsTracker:
     def __init__(self):
         self.previous_values = {}
+        self.vars_declared = []
     
     def trackStart(self, frame):
         return self.track(frame.GetVariables(True, True, False, True))
@@ -151,6 +152,9 @@ class VarsTracker:
     def getValue(self, var):
         return self.previous_values[var]
     
+    def setVarsDeclared(self, var):
+        return self.vars_declared.append(var)
+    
 # コマンドライン引数の確認
 def get_command_line_args():
     parser = argparse.ArgumentParser(description='for the c-backdoor')
@@ -190,7 +194,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         pass
 
     def vars_checker(vars_changed):
-        if vars_changed:
+        varsDeclLines = list(set(varsDeclLines_list.get(str(line_number), [])) - set(varsTracker.vars_declared))
+        
+        if len(varsDeclLines) != 0:
             # 変数が合致していればstepinを実行して次に進む
             vars_event = []
             errorCnt = 0
@@ -199,53 +205,69 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 event = event_reciever()
 
                 if (item := event.get('item', None)) is not None:
-                    if not item in vars_changed:
+                    if not item in varsDeclLines:
                         errorCnt += 1
-                        print(f'your variables were incorrect!!\ncorrect variables: {vars_changed}')
+                        print(f'your variables were incorrect!!\ncorrect variables: {varsDeclLines}')
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
-                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} を取得してください!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(varsDeclLines) - set(vars_event)))} を取得してください!!", "status": "ng"})
                         else:
                             event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
                         continue
                     
                     vars_event.append(item)
-                    if Counter(vars_event) == Counter(vars_changed):
+                    if Counter(vars_event) == Counter(varsDeclLines):
                         print("you selected correct vars")
                         event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
+                        varsTracker.setVarsDeclared(item)
                         break
                     event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok", "getting": True})
+                    varsTracker.setVarsDeclared(item)
+                else:
+                    errorCnt += 1
+                    event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                    continue
 
-                elif (itemset := event.get('itemset', None)) is not None:
+        # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
+        common = list(set(vars_changed) & set(varsTracker.vars_declared))
+        varsChanged = list(set(common) - set(varsDeclLines))
+
+        if len(varsChanged) != 0:
+            print(f"vars_changed: {varsChanged}")
+            vars_event = []
+            errorCnt = 0
+            while True:
+                event = event_reciever()
+                if (itemset := event.get('itemset', None)) is not None:
                     item, itemValue = itemset
-                    if item not in vars_changed:
+                    if item not in varsChanged:
                         errorCnt += 1
-                        print(f'your variables were incorrect!!\ncorrect variables: {vars_changed}')
+                        print(f'your variables were incorrect!!\ncorrect variables: {varsChanged}')
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
-                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(vars_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
+                            event_sender({"message": f"ヒント: アイテム {', '.join(list(set(varsChanged) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
                         else:
                             event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
                         continue
                     if itemValue != varsTracker.getValue(item):
                         errorCnt += 1
-                        print(f'your variable numbers were incorrect!!\ncorrect variables: {vars_changed}')
+                        print(f'your variable numbers were incorrect!!\ncorrect variables: {varsChanged}')
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
-                            item_values_str = ', '.join(f"{name} は {varsTracker.getValue(name)}" for name in list(set(vars_changed) - set(vars_event)))
+                            item_values_str = ', '.join(f"{name} は {varsTracker.getValue(name)}" for name in list(set(varsChanged) - set(vars_event)))
                             event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
                         else:
                             event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
                         continue
                     vars_event.append(item)
-                    if Counter(vars_event) == Counter(vars_changed):
+                    if Counter(vars_event) == Counter(varsChanged):
                         print("you changed correct vars")
                         event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
                         break
                     event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok", "getting": True})
                 else:
                     errorCnt += 1
-                    event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"})
+                    event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
                     continue
 
     def event_reciever():
@@ -327,16 +349,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         print(f"[接続] {addr} が接続しました")
 
         func_crnt_name = "main"
-        begin_line_number = None
+
+        varsTracker = VarsTracker()
             
         with conn:
             isEnd = False
 
             if (next_state := get_next_state()):
                 state, frame, file_name, line_number, func_name = next_state
-                begin_line_number = line_number
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                     line_data = json.load(f)
+                with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_varDeclLines.json", 'r') as f:
+                    varsDeclLines_list = json.load(f)
             else:
                 isEnd = True
 
@@ -355,9 +379,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped: 
-
+            # JSONが複数回に分かれて送られてくる可能性があるためパース
                 if line_data.get(func_name, None) and line_number in line_data[func_name] and not isEnd:
-                # JSONが複数回に分かれて送られてくる可能性があるためパース
                     if (event := event_reciever()) is None:
                         continue
 
@@ -538,9 +561,6 @@ def start_server(host='localhost', port=9999):
         print("[サーバ終了]")
 
 args = get_command_line_args()
-
-varsTracker = VarsTracker()
-
 
 # region lldbの初期設定
 lldb.SBDebugger.Initialize()

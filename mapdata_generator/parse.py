@@ -13,11 +13,26 @@ DATA_DIR = BASE_DIR + '/data'
 def parseIndex(c_files):
     index = clang.cindex.Index.create()
     translation_units = {}
+
+    # macOS の標準ライブラリパス（CommandLineTools SDK使用時）
+    sdk_path = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk'
+    include_path = f'{sdk_path}/usr/include'
+
     for c_file in c_files:
-        subprocess.run(['clang', '-E', c_file, '-o', 'preprocessed.c'], check=True)
-        translation_units[c_file] = (index.parse('preprocessed.c', 
-            args=['-I/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include','-std=c11']
-        ))
+        tu = index.parse(
+            c_file,
+            args=[
+                f'-I{include_path}',         # ヘッダ検索パス
+                f'-isysroot', sdk_path,      # SDKルート
+                '-std=c11',                  # C11準拠で解析
+                '-ferror-limit=0',           # すべてのエラーを表示
+                # '-Wall'                      # 警告を出す（必要なら）
+                # '-Wno-unused-variable'       # unused警告は消去
+            ],
+            options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
+        )
+        translation_units[c_file] = tu
+
     return translation_units
 
 class ASTtoFlowChart:
@@ -36,10 +51,9 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
         self.roomSize_info = {}
         self.varNode_info: dict[str, str] = {}
-        self.expNode_info: dict[str, tuple[str, list[str], list[str]]] = {}
+        self.expNode_info: dict[str, tuple[str, list[str], list[str], int]] = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
         self.line_info : dict[str, set[int]] = {}
-        self.funcBeginLine = 1 #初期値
         self.funcNum = 0
     
     def createNode(self, nodeLabel, shape='rect'):
@@ -59,10 +73,17 @@ class ASTtoFlowChart:
                 sys.exit(0)
 
     def check_cursor_error(self, cursor):
+        # カーソルがファイルに属していないならスキップ
+        if cursor.location.file is None:
+            return True
+
         for diag in self.diag_list:
-            #エラーとなるワードは場合によってカーソルが作成されないことがあるので、同ファイルのあるワード数を超えたらにする
+            if diag.location.file is None:
+                continue  # 位置情報のない診断はスキップ
+
+            # 同じファイルかつ、カーソルの位置が診断より後ろ（または近接）
             if (cursor.location.file.name == diag.location.file.name and
-            cursor.location.offset >= diag.location.offset-1): 
+                cursor.location.offset >= diag.location.offset - 1): 
                 print(f"{diag.spelling}")
                 sys.exit(0)
         return True
@@ -121,9 +142,6 @@ class ASTtoFlowChart:
                 #関数の情報を取得し、ビットマップ描画時に取捨選択する
                 self.scanning_func = func_name
 
-                #関数の条件文の行遷移情報を取得する(これの合致で)
-                self.funcBeginLine = cursor.location.line - 1
-
                 self.func_info[func_name] = {"start": f'"{nodeID}"', "refs": set()}
                 self.line_info[func_name] = set()
                 #関数の最初の部屋情報を作る
@@ -146,7 +164,7 @@ class ASTtoFlowChart:
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         for cr in cursor.get_children():
             if self.condition_move.get(f'"{nodeID}"', None) and self.condition_move[f'"{nodeID}"'][1][-1] is None:
-                self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line - self.funcBeginLine  
+                self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line  
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
         return nodeID
@@ -189,7 +207,7 @@ class ASTtoFlowChart:
         elif cr.kind == clang.cindex.CursorKind.RETURN_STMT:
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.createNode(f"{cr.location.line - self.funcBeginLine}", 'lpromoter')
+            returnNodeID = self.createNode(f"{cr.location.line}", 'lpromoter')
             self.createEdge(returnNodeID, self.get_exp(value_cursor))
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None
@@ -304,7 +322,7 @@ class ASTtoFlowChart:
             #スカラー変数の初期化値が無い場合
             if nodeID is None:
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [])
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], cursor.location.line)
                 self.createEdge(varNodeID, nodeID)
 
         return varNodeID
@@ -341,8 +359,7 @@ class ASTtoFlowChart:
         references = []
         calc_order_comments = []
         exp_terms = self.parse_exp_term(cursor, references, calc_order_comments, expNodeID)
-        print(calc_order_comments)
-        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, references, calc_order_comments)
+        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, references, calc_order_comments, cursor.location.line)
         return expNodeID
 
     def unwrap_unexposed(self, cursor):
@@ -510,8 +527,8 @@ class ASTtoFlowChart:
         # --- 引数ノードとのエッジ作成 ---
         for arg_cursor in children[1:]:
             self.check_cursor_error(arg_cursor)
-            arg_node_id = self.get_exp(arg_cursor, 'egg')
-            self.createEdge(funcNodeID, arg_node_id)
+            argNodeID = self.get_exp(arg_cursor, 'egg')
+            self.createEdge(funcNodeID, argNodeID)
 
         return funcNodeID, ref_spell_w_id
 
@@ -577,12 +594,12 @@ class ASTtoFlowChart:
             children = list(cursor.get_children())
             if cursor.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 if len(children):
-                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line - self.funcBeginLine])
+                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line ])
                 else:
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [line_track[-1]])
                 return self.parse_comp_stmt(cursor, parentNodeID)
             else:
-                self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line - self.funcBeginLine])
+                self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line ])
                 return self.parse_stmt(cursor, parentNodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
@@ -596,8 +613,8 @@ class ASTtoFlowChart:
         condNodeID = self.get_exp(cond_cursor, 'diamond')
         self.createEdge(nodeID, condNodeID, edgeName)
 
-        line_track.append(cond_cursor.location.line - self.funcBeginLine)
-        self.line_info[self.scanning_func].add(cond_cursor.location.line - self.funcBeginLine)
+        line_track.append(cond_cursor.location.line )
+        self.line_info[self.scanning_func].add(cond_cursor.location.line )
 
         # --- then節の処理 ---
         then_cursor = children[1]
@@ -607,12 +624,14 @@ class ASTtoFlowChart:
 
         self.createEdge(condNodeID, trueNodeID, "True")
         self.createRoomSizeEstimate(trueNodeID)
+
+        # 後々 condNodeID による演算内容を設定する
         then_end = parse_if_branch_start(then_cursor, trueNodeID, line_track)
 
         # --- trueの後の処理の終点を作る (後でif構文の終点をまとめる) ---
         trueEndNodeID = self.createNode("", 'terminator')
         end_line = then_cursor.extent.end.line
-        self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd', [end_line - self.funcBeginLine])
+        self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd', [end_line])
         self.createEdge(then_end, trueEndNodeID)
 
         # --- else節の処理（ある場合） ---
@@ -628,19 +647,21 @@ class ASTtoFlowChart:
                 falseNodeID = self.createNode("", 'circle')
                 self.createEdge(condNodeID, falseNodeID, "False")
                 self.createRoomSizeEstimate(falseNodeID)
-                nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track + [else_cursor.location.line - self.funcBeginLine]) 
-                self.line_info[self.scanning_func].add(else_cursor.location.line - self.funcBeginLine)
+                
+                # 後々 condNodeID による演算内容を設定する
+                nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track + [else_cursor.location.line]) 
+                self.line_info[self.scanning_func].add(else_cursor.location.line )
                 falseEndNodeID = self.createNode("", 'terminator')
                 end_line = else_cursor.extent.end.line
-                self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [end_line - self.funcBeginLine])
-                self.line_info[self.scanning_func].add(end_line - self.funcBeginLine)
+                self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [end_line])
+                self.line_info[self.scanning_func].add(end_line )
                 self.createEdge(nodeID, falseEndNodeID)
                 nodeIDs = [trueEndNodeID, falseEndNodeID]
         else:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
-            self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [cond_cursor.location.line - self.funcBeginLine])
-            self.line_info[self.scanning_func].add(cond_cursor.location.line - self.funcBeginLine)
+            self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [cond_cursor.location.line ])
+            self.line_info[self.scanning_func].add(cond_cursor.location.line )
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
         
@@ -666,8 +687,8 @@ class ASTtoFlowChart:
 
         # --- 条件True時の処理ノード ---
         trueNodeID = self.createNode("", 'circle')
-        self.condition_move[f'"{condNodeID}"'] = ('whileIn', [cond_cursor.location.line - self.funcBeginLine])
-        self.line_info[self.scanning_func].add(cond_cursor.location.line - self.funcBeginLine)
+        self.condition_move[f'"{condNodeID}"'] = ('whileIn', [cond_cursor.location.line ])
+        self.line_info[self.scanning_func].add(cond_cursor.location.line )
         
         # 次のノードがwhileのtrueかを確認するためにエッジにラベルをつけておく(falseも同じ)
         self.createEdge(condNodeID, trueNodeID, "true")
@@ -680,12 +701,12 @@ class ASTtoFlowChart:
             if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 cr_true = list(cr.get_children())
                 if len(cr_true):
-                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line - self.funcBeginLine, cr_true[0].location.line - self.funcBeginLine])
+                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr_true[0].location.line ])
                 else:
-                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line - self.funcBeginLine, cond_cursor.location.line - self.funcBeginLine])
+                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cond_cursor.location.line ])
                 body_end = self.parse_comp_stmt(cr, body_end)
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
+                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr.location.line ])
                 body_end = self.parse_stmt(cr, body_end)
 
         # --- ループを閉じる処理 ---
@@ -698,7 +719,7 @@ class ASTtoFlowChart:
         endNodeID = self.createNode("", 'doublecircle')
         self.createEdge(condNodeID, endNodeID, "false")
         self.createRoomSizeEstimate(endNodeID)
-        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line - self.funcBeginLine, None])
+        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line , None])
 
         return endNodeID
 
@@ -720,25 +741,25 @@ class ASTtoFlowChart:
             if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 cr_in = list(cr.get_children())
                 if len(cr_in):
-                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cr_in[0].location.line - self.funcBeginLine])
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line , cr_in[0].location.line ])
                     start_cr = cr_in[0]
                 else:
-                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line - self.funcBeginLine, cursor.location.line - self.funcBeginLine])
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line , cursor.location.line ])
                     start_cr = cursor
                 
-                self.line_info[self.scanning_func].add(cursor.location.line - self.funcBeginLine)
+                self.line_info[self.scanning_func].add(cursor.location.line )
                 nodeID = self.parse_comp_stmt(cr, startNodeID)
             else:
                 if nodeID is None:
                     return None
                 condNodeID = self.get_exp(cr, 'diamond')
-                self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line - self.funcBeginLine, start_cr.location.line - self.funcBeginLine])
-                self.line_info[self.scanning_func].add(cr.location.line - self.funcBeginLine)
+                self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line , start_cr.location.line ])
+                self.line_info[self.scanning_func].add(cr.location.line )
                 self.createEdgeForLoop(endNodeID, condNodeID)
                 self.createEdge(nodeID, condNodeID)
                 self.createEdge(condNodeID, startNodeID, "True")
                 self.createEdge(condNodeID, endNodeID, "False")
-        self.condition_move[f'"{endNodeID}"'] = ('doWhileFalse', [cr.location.line - self.funcBeginLine, None])
+        self.condition_move[f'"{endNodeID}"'] = ('doWhileFalse', [cr.location.line , None])
         #ここでdo_whileを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
         return endNodeID
@@ -783,8 +804,8 @@ class ASTtoFlowChart:
             else:
                 self.createEdge(nodeID, condNodeID, edgeName)
                 
-        self.condition_move[f'"{condNodeID}"'] = ('forIn', [cursor.location.line - self.funcBeginLine])
-        self.line_info[self.scanning_func].add(cursor.location.line - self.funcBeginLine)
+        self.condition_move[f'"{condNodeID}"'] = ('forIn', [cursor.location.line ])
+        self.line_info[self.scanning_func].add(cursor.location.line )
         self.check_cursor_error(exec_cursor)
 
         trueNodeID = self.createNode("", 'circle')
@@ -795,12 +816,12 @@ class ASTtoFlowChart:
         if exec_cursor.kind == clang.cindex.CursorKind.COMPOUND_STMT:
             cr_true = list(exec_cursor.get_children())
             if len(cr_true):
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line - self.funcBeginLine, cr_true[0].location.line - self.funcBeginLine])
+                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line , cr_true[0].location.line ])
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line - self.funcBeginLine, cursor.location.line - self.funcBeginLine])
+                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line , cursor.location.line ])
             nodeID = self.parse_comp_stmt(exec_cursor, trueNodeID)
         else:
-            self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line - self.funcBeginLine, exec_cursor.location.line - self.funcBeginLine])
+            self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line , exec_cursor.location.line ])
             nodeID = self.parse_stmt(exec_cursor, trueNodeID)
 
         #changeノードがある条件
@@ -818,7 +839,7 @@ class ASTtoFlowChart:
         #ここでforを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
 
-        self.condition_move[f'"{endNodeID}"'] = ('forFalse', [cursor.location.line - self.funcBeginLine, None])
+        self.condition_move[f'"{endNodeID}"'] = ('forFalse', [cursor.location.line , None])
         
         return endNodeID
 
@@ -870,18 +891,18 @@ class ASTtoFlowChart:
                     switchRoomSizeEstimate[1] += 1
                     #ここで一つのcaseの部屋情報を作る
                     self.createRoomSizeEstimate(caseNodeID)
-                    self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine])
-                    self.line_info[self.scanning_func].add(comp_exec_cursor.location.line - self.funcBeginLine)
+                    self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line , cr.location.line ])
+                    self.line_info[self.scanning_func].add(comp_exec_cursor.location.line )
 
                     if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                         cr_true = list(exec_cursor.get_children())
                         if len(cr_true):
-                            last_line = cr_true[0].location.line - self.funcBeginLine
+                            last_line = cr_true[0].location.line 
                         else:
-                            last_line = cr.location.line - self.funcBeginLine
+                            last_line = cr.location.line 
                         nodeID = self.parse_comp_stmt(cr, caseNodeID)
                     else:
-                        last_line = cr.location.line - self.funcBeginLine
+                        last_line = cr.location.line 
                         nodeID = self.parse_stmt(cr, caseNodeID)
 
                 elif cr.kind == clang.cindex.CursorKind.DEFAULT_STMT:
@@ -898,20 +919,20 @@ class ASTtoFlowChart:
                     switchRoomSizeEstimate[1] += 1
                     #ここでdefaultの部屋情報を作る
                     self.createRoomSizeEstimate(defaultNodeID)
-                    self.condition_move[f'"{defaultNodeID}"'] = ('switchCase', [cond_cursor.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
+                    self.condition_move[f'"{defaultNodeID}"'] = ('switchCase', [cond_cursor.location.line , cr.location.line  + 1])
                     nodeID = self.parse_stmt(default_cursor, defaultNodeID)
-                    last_line = default_cursor.location.line - self.funcBeginLine
+                    last_line = default_cursor.location.line 
                     isNotBreak = True
                 elif cr.kind == clang.cindex.CursorKind.BREAK_STMT:
                     nodeID = self.parse_stmt(cr, nodeID)
-                    last_line = cr.location.line - self.funcBeginLine
+                    last_line = cr.location.line 
                     isNotBreak = False
                     #caseラベルと実行文の処理の階層は最初の実行文以外同じ
                 # 一つのcaseに複数の処理がある場合はくっつける
                 else:
                     if caseNodeID or defaultNodeID:
                         nodeID = self.parse_stmt(cr, nodeID)
-                        last_line = cr.location.line - self.funcBeginLine
+                        last_line = cr.location.line 
             self.createEdge(nodeID, endNodeID)
 
         #switch(A) Bの時、Bが case C: D なら A == C でDが行われる。
@@ -925,11 +946,11 @@ class ASTtoFlowChart:
             switchRoomSizeEstimate[1] += 1
             #ここでDのための部屋情報を作る
             self.createRoomSizeEstimate(caseNodeID)
-            self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line - self.funcBeginLine, cr.location.line - self.funcBeginLine + 1])
+            self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line , cr.location.line  + 1])
             
             nodeID = self.parse_stmt(exec_cursor, caseNodeID)
-            last_line = exec_cursor.location.line - self.funcBeginLine
-            self.line_info[self.scanning_func].add(exec_cursor.location.line - self.funcBeginLine)
+            last_line = exec_cursor.location.line 
+            self.line_info[self.scanning_func].add(exec_cursor.location.line )
             self.createEdge(nodeID, endNodeID)
         #しかし、B D なら D は無視される。Dは複数行でも良い。
 
