@@ -1,4 +1,6 @@
-start,01_int_variables,14, 25
-itemget, 01_int_variables,11, 19,a
-itemget, 01_int_variables,15, 26,b
-end, 01_int_variables,15, 26
+start,01_int_variables,19, 12
+itemget, 01_int_variables,25, 17,a
+itemget, 01_int_variables,29, 23,b
+itemget, 01_int_variables,28, 14,c
+itemget, 01_int_variables,23, 15,sum
+end, 01_int_variables,23, 15

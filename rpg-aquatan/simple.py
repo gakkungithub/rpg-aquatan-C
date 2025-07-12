@@ -953,12 +953,73 @@ def load_mapchips(dir, file):
             mapchip_name = data[1]
             movable = int(data[2])  # 移動可能か？
             transparent = int(data[3])  # 背景を透明にするか？
+            # 画像のidで若い順に画像を登録しているので画像のidは配列の添字と一致する
             if transparent == 0:
                 Map.images.append(load_image("mapchip", f"{mapchip_name}.png", -1))
             else:
                 Map.images.append(load_image("mapchip", f"{mapchip_name}.png", TRANS_COLOR))
             Map.movable_type.append(movable)
 
+                                                                                         
+# 88                                        ,ad8888ba,  88          88                        
+# 88   ,d                                  d8"'    `"8b 88          ""                        
+# 88   88                                 d8'           88                                    
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  88            88,dPPYba,  88 8b,dPPYba,  ,adPPYba,  
+# 88   88   a8P_____88 88P'   "88"    "8a 88            88P'    "8a 88 88P'    "8a I8[    ""  
+# 88   88   8PP""""""" 88      88      88 Y8,           88       88 88 88       d8  `"Y8ba,   
+# 88   88,  "8b,   ,aa 88      88      88  Y8a.    .a8P 88       88 88 88b,   ,a8" aa    ]8I  
+# 88   "Y888 `"Ybbd8"' 88      88      88   `"Y8888Y"'  88       88 88 88`YbbdP"'  `"YbbdP"'  
+#                                                                      88                     
+#                                                                      88                     
+
+class ItemChips():
+    def __init__(self):
+        def load_itemChip(name):
+            return load_image('itemchip', name)
+        
+        self.typeModifierUIMap = {
+            'int' : {
+                frozenset() : load_itemChip('jewel2l-5.png'),
+                frozenset(['unsigned']) : load_itemChip('jewel2b-5.png'),
+                frozenset(['long']): load_itemChip('jewel2l-3.png'),
+                frozenset(['long', 'long']): load_itemChip('jewel2l-4.png'),
+                frozenset(['unsigned', 'long']): load_itemChip('jewel2b-3.png'),
+                frozenset(['unsigned', 'long', 'long']): load_itemChip('jewel2b-4.png'),
+            },
+            'other': {
+                frozenset(): load_itemChip('jewel2t-5.png'),
+            }
+        }
+        self.constUIMap = {
+            True : pygame.transform.smoothscale(load_itemChip('shield.png'), (12,12)),
+            False: None
+        }
+
+    def getChip(self, type_name: str):
+        tokens = type_name.strip().split()
+
+        is_const = 'const' in tokens
+        tokens = [t for t in tokens if t != 'const']
+
+        base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
+
+        base_type = None
+        for t in tokens:
+            if t in base_types:
+                base_type = t
+                break
+        
+        if base_type is not None:
+            tokens.remove(base_type)
+        else:
+            base_type = 'other'
+        
+        modifier_set = frozenset(tokens)
+
+        base_icon = self.typeModifierUIMap.get(base_type, self.typeModifierUIMap['other']).get(modifier_set, self.typeModifierUIMap['other'][frozenset()])
+        const_overlay = self.constUIMap[is_const]
+
+        return base_icon, const_overlay
 
 #                                                                                                        
 #                       88                                    ad88    ad88                               
@@ -2250,6 +2311,7 @@ class ItemWindow(Window):
         self.color = self.WHITE
         self.player = player
         self.image = Map.images[self.mapchip]
+        self.itemChips = ItemChips()
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2263,19 +2325,23 @@ class ItemWindow(Window):
             return
         Window.draw(self)
         for i,item in enumerate(PLAYER.commonItembag.items[-1]):
-            self.draw_string(10, 10 + i*20, f"{item.name:<8} ({item.value})", self.GREEN)
+            self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
         gvarnum = len(PLAYER.commonItembag.items[-1])
         for j, item in enumerate(PLAYER.itembag.items[-1]):
-            y = 10 + (gvarnum + j) * 20
+            y = 10 + (gvarnum + j) * 25
 
             # 型に応じたアイコンを blit（描画）
-            icon = self.image  # あなたが使っている単一画像でも、将来的に複数アイコン対応でも可
+            icon, constLock = self.itemChips.getChip(item.vartype)  # あなたが使っている単一画像でも、将来的に複数アイコン対応でも可
             icon_x = 10
             icon_y = y
             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
 
             if icon:
                 self.surface.blit(icon, (icon_x, icon_y))
+
+            if constLock:
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+                pass
 
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, y, f"{item.name:<8} ({item.value})", self.WHITE)
