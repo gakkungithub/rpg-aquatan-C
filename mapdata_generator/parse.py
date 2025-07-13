@@ -5,6 +5,7 @@ import subprocess
 import uuid
 from graphviz import Digraph
 import json
+import ctypes
 
 # 今、generate_bit_map.pyで形成しているline_infoはここで
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -363,14 +364,10 @@ class ASTtoFlowChart:
         return expNodeID
 
     def unwrap_unexposed(self, cursor):
-        if cursor.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
+        while cursor.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
             cursor = next(cursor.get_children())
             self.check_cursor_error(cursor)
-            if cursor.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
-                cursor = next(cursor.get_children())
-                self.check_cursor_error(cursor)
         return cursor
-
 
     #式の項を一つずつ解析
     def parse_exp_term(self, cursor, references: list[str], calc_order_comments: list[str], inNodeID=None) -> str:
@@ -389,6 +386,58 @@ class ASTtoFlowChart:
             '++': "{expr} の値を使います。その後、{expr} を 1 増やします",
             '--': "{expr} の値を使います。その後、{expr} を 1 減らします",
         }
+
+        # 環境依存は後で考える (環境を考えないならctypes.sizeofでOK)
+        sizeof_operator_size = {
+            'int' : {
+                frozenset() : 4,
+                frozenset(['long']) : 4,
+                frozenset(['long', 'long']) : 8,
+                frozenset(['short']) : 2,
+                frozenset(['unsigned']) : 4,
+                frozenset(['unsigned', 'long']) : 4,
+                frozenset(['unsigned', 'long', 'long']) : 8,
+                frozenset(['unsigned', 'short']) : 2,
+            },
+            'char' : {
+                frozenset() : 1,
+            },
+            'float' : {
+                frozenset() : 4,
+            },
+            'double' : {
+                frozenset() : 8,
+                frozenset(['long']) : 16,
+            },
+            'other' : {
+                frozenset() : None
+            }
+        }
+
+        def get_sizeof_operator_comments(type_name):
+            tokens = type_name.strip().split()
+            non_size_modifiers = {'const', 'volatile', 'extern', 'static', 'register', 'inline'}
+
+            size_tokens = [token for token in tokens if token not in non_size_modifiers]
+    
+            base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
+
+            base_type = None
+            for t in tokens:
+                if t in base_types:
+                    base_type = t
+                    break
+            
+            if base_type is not None:
+                size_tokens.remove(base_type)
+            else:
+                base_type = 'int'
+
+            size = sizeof_operator_size.get(base_type, sizeof_operator_size['other']).get(frozenset(size_tokens), None)
+            if size:
+                return f"{type_name}のサイズ{size}を取得します"
+            else:
+                return f"{type_name}のサイズを取得します"
 
         binary_operator_comments = {
             '+': "{left} と {right} の値を足します",
@@ -419,7 +468,7 @@ class ASTtoFlowChart:
         if cursor.kind == clang.cindex.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            calc_order_comments.append(f"()で囲まれている部分は先に計算します")
+            calc_order_comments.append(f"{''.join([t.spelling for t in list(cursor.get_tokens())])} : ()で囲まれている部分は先に計算します")
             exp_terms = ''.join(["(", self.parse_exp_term(cr, references, calc_order_comments, inNodeID), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
@@ -431,12 +480,11 @@ class ASTtoFlowChart:
             exp_terms = next(cursor.get_tokens()).spelling
         #変数の呼び出し
         elif cursor.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
-            ref_spell = next(cursor.get_tokens()).spelling
-            exp_terms = ref_spell
+            exp_terms = next(cursor.get_tokens()).spelling
             # グローバル変数ならグローバル変数のリファレンスを登録する
-            if (gvar_cursor := self.gvar_candidate_crs.pop(ref_spell, None)):
+            if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
                 self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
-            references.append(ref_spell)
+            references.append(exp_terms)
         #配列
         elif cursor.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -461,7 +509,17 @@ class ASTtoFlowChart:
                 operator = next(reversed(list(cursor.get_tokens())))
                 exp_terms = ''.join([term, operator.spelling])
                 comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
-            calc_order_comments.append(f"{comment.format(expr=term)}")
+            calc_order_comments.append(f"{exp_terms} : {comment.format(expr=term)}")
+        #c言語特有の一項条件式
+        elif cursor.kind == clang.cindex.CursorKind.CXX_UNARY_EXPR:
+            exp_terms = ' '.join([t.spelling for t in list(cursor.get_tokens())])
+            if 'sizeof' in exp_terms:
+                children = list(cursor.get_children())
+                if children:
+                    type_str = self.unwrap_unexposed(children[0]).type.spelling
+                else:
+                    type_str = exp_terms.removeprefix("sizeof(").removesuffix(")")
+                calc_order_comments.append(f"{exp_terms} : {get_sizeof_operator_comments(type_str)}")
         #二項条件式(a + b)
         elif cursor.kind == clang.cindex.CursorKind.BINARY_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -475,8 +533,7 @@ class ASTtoFlowChart:
             back = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
             exp_terms = ''.join([front, operator_spell, back])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
-            calc_order_comments.append(f"{comment.format(left=front, right=back)}")
-
+            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
         # 複合代入演算子(a += b)
         elif cursor.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -495,13 +552,18 @@ class ASTtoFlowChart:
             trueExp = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
             falseExp = self.parse_exp_term(exps[2], references, calc_order_comments, inNodeID)
             exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
-            calc_order_comments.append(f"{condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
+            calc_order_comments.append(f"{exp_terms} : {condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
         #キャスト型
         elif cursor.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            exp_terms = ''.join(["(", cr.type.spelling, ") ", self.parse_exp_term(cr, references, calc_order_comments, inNodeID)])
-
+            castedExp = self.parse_exp_term(cr, references, calc_order_comments, inNodeID)
+            exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
+            castedExpType = self.unwrap_unexposed(cr).type.spelling
+            if castedExpType:
+                calc_order_comments.append(f"{exp_terms} : {castedExp} の型({castedExpType}) を {cursor.type.spelling} に変換します")
+            else:
+                calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
         return exp_terms
 
     #関数の呼び出し(変数と関数の呼び出しは分ける)
@@ -647,7 +709,7 @@ class ASTtoFlowChart:
                 falseNodeID = self.createNode("", 'circle')
                 self.createEdge(condNodeID, falseNodeID, "False")
                 self.createRoomSizeEstimate(falseNodeID)
-                
+
                 # 後々 condNodeID による演算内容を設定する
                 nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track + [else_cursor.location.line]) 
                 self.line_info[self.scanning_func].add(else_cursor.location.line )

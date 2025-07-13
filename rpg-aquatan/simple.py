@@ -980,14 +980,26 @@ class ItemChips():
         self.typeModifierUIMap = {
             'int' : {
                 frozenset() : load_itemChip('jewel2l-5.png'),
+                frozenset(['long']) : load_itemChip('jewel2l-3.png'),
+                frozenset(['long', 'long']) : load_itemChip('jewel2l-4.png'),
+                frozenset(['short']) : load_itemChip('jewel2l-2.png'),
                 frozenset(['unsigned']) : load_itemChip('jewel2b-5.png'),
-                frozenset(['long']): load_itemChip('jewel2l-3.png'),
-                frozenset(['long', 'long']): load_itemChip('jewel2l-4.png'),
-                frozenset(['unsigned', 'long']): load_itemChip('jewel2b-3.png'),
-                frozenset(['unsigned', 'long', 'long']): load_itemChip('jewel2b-4.png'),
+                frozenset(['unsigned', 'long']) : load_itemChip('jewel2b-3.png'),
+                frozenset(['unsigned', 'long', 'long']) : load_itemChip('jewel2b-4.png'),
+                frozenset(['unsigned', 'short']) : load_itemChip('jewel2b-2.png'),
             },
-            'other': {
-                frozenset(): load_itemChip('jewel2t-5.png'),
+            'char' : {
+                frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-25.png'), (32,32)),
+            },
+            'float' : {
+                frozenset() : load_image('mapchip', 'foods-35.png'),
+            },
+            'double' : {
+                frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-33.png'), (24,24)),
+                frozenset(['long']) : load_image('mapchip', 'foods-33.png'),
+            },
+            'other' : {
+                frozenset() : load_itemChip('jewel2t-5.png'),
             }
         }
         self.constUIMap = {
@@ -1012,7 +1024,7 @@ class ItemChips():
         if base_type is not None:
             tokens.remove(base_type)
         else:
-            base_type = 'other'
+            base_type = 'int'
         
         modifier_set = frozenset(tokens)
 
@@ -3167,7 +3179,7 @@ class MiniMapWindow(Window, Map):
                                                                                                                                                                                                                                                     
 class CodeWindow(Window, Map):
     """デバッグコードウィンドウ"""
-    FONT_SIZE = 16
+    FONT_SIZE = 12
     HIGHLIGHT_COLOR = (0, 0, 255)
     TEXT_COLOR = (255, 255, 255)
     BG_COLOR = (30, 30, 30)
@@ -3175,7 +3187,10 @@ class CodeWindow(Window, Map):
     def __init__(self, rect, name, highlight_lines=None):
         Window.__init__(self, rect)
         Map.__init__(self, name)
-        self.font = pygame.font.SysFont("monospace", self.FONT_SIZE)
+        
+        # ✅ 日本語対応フォントの指定（相対パスで管理しやすく）
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        
         self.c_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
         self.linenum = self.load_first_code_line()
@@ -3185,7 +3200,7 @@ class CodeWindow(Window, Map):
         """Cファイルからコードを読み込む"""
         if not os.path.exists(self.c_file_path):
             return ["// File not found"]
-        with open(self.c_file_path, 'r') as f:
+        with open(self.c_file_path, 'r', encoding="utf-8") as f:
             return f.readlines()
 
     def load_first_code_line(self):
@@ -3196,7 +3211,7 @@ class CodeWindow(Window, Map):
                 if cnt == 2:
                     return idx + 1  # 行番号として返す
         return 1  # fallback
-    
+
     def update_code_line(self, linenum):
         self.linenum = linenum
 
@@ -3209,12 +3224,10 @@ class CodeWindow(Window, Map):
         x_offset = SCR_WIDTH - MIN_MAP_SIZE
         y_offset = 20
 
-        # iは行数なので、これと現在の行数-1が合致した場合光かがやかせる
         for i, line in enumerate(self.lines):
-            rendered_line = self.font.render(line.rstrip(), True, self.TEXT_COLOR)
+            text = line.rstrip()
 
             if (i + 1) == self.linenum:
-                # ハイライト背景描画
                 bg_rect = pygame.Rect(
                     x_offset - 5,
                     y_offset,
@@ -3223,7 +3236,8 @@ class CodeWindow(Window, Map):
                 )
                 pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
 
-            screen.blit(rendered_line, (x_offset, y_offset))
+            # ✅ freetypeの描画 (Surface には直接描画)
+            self.font.render_to(screen, (x_offset, y_offset), text, self.TEXT_COLOR)
             y_offset += self.FONT_SIZE + 4
 
 # 88888888888                                        ad88888ba                                  88                        
