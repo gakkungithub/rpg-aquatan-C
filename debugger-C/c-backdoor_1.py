@@ -194,7 +194,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         pass
 
     def vars_checker(vars_changed):
-        varsDeclLines = list(set(varsDeclLines_list.get(str(line_number), [])) - set(varsTracker.vars_declared))
+        varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared))
         
         if len(varsDeclLines) != 0:
             # 変数が合致していればstepinを実行して次に進む
@@ -218,10 +218,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(varsDeclLines):
                         print("you selected correct vars")
-                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok"})
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"})
                         varsTracker.setVarsDeclared(item)
                         break
-                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "status": "ok", "getting": True})
+                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok", "getting": True})
                     varsTracker.setVarsDeclared(item)
                 else:
                     errorCnt += 1
@@ -270,6 +270,44 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
                     continue
 
+        # 変数が初期化されない時、スキップされるので、それも読み取る
+        target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
+
+        if len(target_lines) != 0:
+            # 変数が合致していればstepinを実行して次に進む
+            for line in target_lines:
+                skipped_varDecls = varsDeclLines_list.pop(line)
+                vars_event = []
+                errorCnt = 0
+                while True:
+                    # とりあえずスカラー変数
+                    event = event_reciever()
+
+                    if (item := event.get('item', None)) is not None:
+                        if not item in skipped_varDecls:
+                            errorCnt += 1
+                            print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
+                            # 複数回入力を間違えたらヒントをあげる
+                            if errorCnt >= 3:
+                                event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
+                            else:
+                                event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                            continue
+                        
+                        vars_event.append(item)
+                        if Counter(vars_event) == Counter(skipped_varDecls):
+                            print("you selected correct vars")
+                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"})
+                            varsTracker.setVarsDeclared(item)
+                            break
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok", "getting": True})
+                        varsTracker.setVarsDeclared(item)
+                    else:
+                        errorCnt += 1
+                        event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                        continue
+            
+
     def event_reciever():
         # JSONが複数回に分かれて送られてくる可能性があるためパース
         data = conn.recv(1024)
@@ -283,7 +321,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     
     def event_sender(msgJson):
         if msgJson["status"] == "ok" and not msgJson.get("getting", None):
-            msgJson["line"] = crnt_line_number
+            target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
+            if len(target_lines) == 0:
+                msgJson["line"] = crnt_line_number
+            # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
+            else:
+                msgJson["line"] = int(target_lines[0])
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 

@@ -228,7 +228,8 @@ def main():
     
     # 初期アイテムの設定(グローバル変数)
     for itemName in items.keys():
-        #このitemValueをアイテムの初期値として設定するつもりです!!
+        # このitemValueをアイテムの初期値として設定するつもりです!!
+        # ここも後のグローバル変数の解析を考える時に修正する
         item = Item(itemName)
         # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
         item.set_value(get_exp_value(items[itemName]))
@@ -395,7 +396,7 @@ def main():
                 itemResult = sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        event_underfoot.open(itemResult['value'])
+                        event_underfoot.open(itemResult['value'], itemResult['undefined'])
                         item_comments = "%".join(event_underfoot.comments)
                         if item_comments:
                             MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
@@ -641,6 +642,7 @@ def main():
                                         #グローバル変数のアイテムを設定する
                                         newItems = []
                                         for argument in chara.arguments:
+                                            # ここは後に関数キャラを考える時に修正する
                                             item = Item(argument)
                                             item.value = 1
                                             newItems.append(item)
@@ -695,7 +697,7 @@ def main():
                         itemResult = sender.receive_json()
                         if itemResult is not None:
                             if itemResult['status'] == "ok":
-                                event_underfoot.open(itemResult['value'])
+                                event_underfoot.open(itemResult['value'], itemResult['undefined'])
                                 item_comments = "%".join(event_underfoot.comments)
                                 if item_comments:
                                     MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
@@ -767,6 +769,7 @@ def main():
                                         PLAYER.move5History.pop(0)
                                     newItems = []
                                     for argument in chara.arguments:
+                                        # ここも関数を考える時に後々修正する
                                         item = Item(argument)
                                         item.value = 1
                                         newItems.append(item)
@@ -2356,8 +2359,11 @@ class ItemWindow(Window):
                 pass
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, y, f"{item.name:<8} ({item.value})", self.WHITE)
+            self.draw_string(text_x, y, f"{item.name:<8}", self.WHITE)
 
+            value_color = self.RED if item.undefined else self.WHITE
+            value_offset = self.myfont.get_rect(item.name).width + 30
+            self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
 
         Window.blit(self, screen)
 
@@ -2617,11 +2623,11 @@ class Treasure():
         self.vartype = vartype # アイテムの型
         self.linenum = linenum # 宝箱を開けるタイミング
 
-    def open(self, value):
+    def open(self, value, undefined):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, value, self.vartype)
+        item = Item(self.item, value, self.vartype, undefined)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -2935,10 +2941,11 @@ class ItemBag:
 class Item:
     """アイテム"""
 
-    def __init__(self,name,value,vartype):
+    def __init__(self,name,value,vartype, undefined):
         self.name = str(name)
         self.value = value
         self.vartype = vartype
+        self.undefined = undefined
 
     def get_value(self):
         """値を返す"""
@@ -2948,6 +2955,7 @@ class Item:
         """値をセット"""
         if val is not None:
             self.value = val
+            self.undefined = False
 
                                                                                                                                               
 # 88                                                           I8,        8        ,8I 88                      88                                 
