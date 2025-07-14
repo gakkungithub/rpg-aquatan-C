@@ -1,5 +1,2 @@
-start,03_complex_operators,19, 17
-itemget, 03_complex_operators,26, 22,x
-itemget, 03_complex_operators,19, 13,y
-itemget, 03_complex_operators,17, 21,z
-end, 03_complex_operators,17, 21
+start,04_conditional_branch,9, 7
+end, 04_conditional_branch,13, 20

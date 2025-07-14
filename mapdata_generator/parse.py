@@ -159,8 +159,6 @@ class ASTtoFlowChart:
             exitNodeID = self.createNode("", 'lpromoter')
             self.createEdge(nodeID, exitNodeID)
 
-        print(self.line_info)
-
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         for cr in cursor.get_children():
@@ -648,20 +646,22 @@ class ASTtoFlowChart:
         for termNodeID in termNodeIDs:
             self.createEdge(termNodeID, endNodeID)
 
+        print('here')
         return endNodeID
 
-    def parse_if_branch(self, cursor, nodeID, edgeName="", line_track: list[int] = []):
+    def parse_if_branch(self, cursor, nodeID, edgeName="", line_track: list[int] | None = None):
         def parse_if_branch_start(cursor, parentNodeID, line_track: list[int]):
+            print(line_track)
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 if len(children):
-                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line ])
+                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line])
                 else:
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [line_track[-1]])
                 return self.parse_comp_stmt(cursor, parentNodeID)
             else:
-                self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line ])
+                self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line])
                 return self.parse_stmt(cursor, parentNodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
@@ -669,14 +669,17 @@ class ASTtoFlowChart:
         if not children:
             sys.exit(0)
 
+        if line_track is None:
+            line_track = []
+
         # --- 条件式処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
         condNodeID = self.get_exp(cond_cursor, 'diamond')
         self.createEdge(nodeID, condNodeID, edgeName)
 
-        line_track.append(cond_cursor.location.line )
-        self.line_info[self.scanning_func].add(cond_cursor.location.line )
+        line_track.append(cond_cursor.location.line)
+        self.line_info[self.scanning_func].add(cond_cursor.location.line)
 
         # --- then節の処理 ---
         then_cursor = children[1]
@@ -727,6 +730,7 @@ class ASTtoFlowChart:
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
         
+        print(line_track)
         return nodeIDs
     
     #while文

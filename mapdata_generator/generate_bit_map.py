@@ -300,8 +300,6 @@ class GenBitMap:
 
         self.mapInfo.setFuncWarp(self.func_warp)
 
-        print(self.expNode_info)
-
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
 
     def startTracking(self):

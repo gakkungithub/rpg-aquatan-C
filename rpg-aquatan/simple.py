@@ -369,8 +369,7 @@ def main():
         ITEMWND.draw(screen)
         BTNWND.draw(screen)
 
-        ## JK add here!!
-        MMAPWND.draw(screen)
+        MMAPWND.draw(screen, fieldmap)
         CODEWND.draw(screen)
 
         show_info(screen, PLAYER, clock, current_date, sunrize, sunset, light_mode, start_time)
@@ -3142,6 +3141,8 @@ class MiniMapWindow(Window, Map):
     offset_y = 0
     radius = 0
     RED = (255, 0, 0)
+    BLUE = (0, 0, 255)
+    BLACK = (0, 0, 0)
 
     def __init__(self, rect, name):
         self.offset_x = SCR_WIDTH - MIN_MAP_SIZE
@@ -3150,7 +3151,7 @@ class MiniMapWindow(Window, Map):
         Map.__init__(self, name)
         self.hide()
 
-    def draw(self, screen):
+    def draw(self, screen, map : Map):
         if not self.is_visible:
             return
         Window.draw(self)
@@ -3169,9 +3170,22 @@ class MiniMapWindow(Window, Map):
                 screen.blit(image, (pos_x, pos_y))
         
         # Playerの場所を表示　赤丸
-        px = PLAYER.x * MIN_MAP_SIZE/ self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+        px = PLAYER.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
         py = PLAYER.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
         pygame.draw.circle(screen, self.RED, (px, py), self.radius)
+
+        # Player以外のCharacterの場所を表示　黒丸
+        for chara in map.charas:
+            if not isinstance(chara, Player):
+                cx = chara.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+                cy = chara.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                pygame.draw.circle(screen, self.BLACK, (cx, cy), self.radius)
+        # Treasureの場所を表示　青丸
+        for event in map.events:
+            if isinstance(event, Treasure):
+                tx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+                ty = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                pygame.draw.circle(screen, self.BLUE, (tx, ty), self.radius)
     
 
 
