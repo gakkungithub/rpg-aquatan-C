@@ -646,19 +646,17 @@ class ASTtoFlowChart:
         for termNodeID in termNodeIDs:
             self.createEdge(termNodeID, endNodeID)
 
-        print('here')
         return endNodeID
 
     def parse_if_branch(self, cursor, nodeID, edgeName="", line_track: list[int] | None = None):
         def parse_if_branch_start(cursor, parentNodeID, line_track: list[int]):
-            print(line_track)
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 if len(children):
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line])
                 else:
-                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [line_track[-1]])
+                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.extent.end.line])
                 return self.parse_comp_stmt(cursor, parentNodeID)
             else:
                 self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line])
@@ -730,7 +728,6 @@ class ASTtoFlowChart:
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
         
-        print(line_track)
         return nodeIDs
     
     #while文

@@ -581,6 +581,70 @@ class GenBitMap:
                 return None
 
             return random.choice(candidates)
+        
+        def get_edge_point(start, goal):
+            def random_edge_point(dir):
+                candidates = []
+                # top edge (y = sy)
+                if dir == 'up':
+                    for x in range(sx, sx + swidth):
+                        if (0 <= sy-1 < h and 0 <= x < w and self.floorMap[sy, x] != 0 and
+                            self.roomsMap[sy, x-1] != 0 and self.roomsMap[sy-1, x] != 0 and self.roomsMap[sy, x+1] != 0):
+                            candidates.append((sy, x))
+
+                # bottom edge (y = sy + height - 1)
+                elif dir == 'down':
+                    for x in range(sx, sx + swidth):
+                        y = sy + sheight
+                        if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
+                            self.roomsMap[y, x-1] != 0 and self.roomsMap[y+1, x] != 0 and self.roomsMap[y, x+1] != 0):
+                            candidates.append((y, x))
+
+                # left edge (x = sx)
+                elif dir == 'left':
+                    for y in range(sy, sy + sheight):
+                        if (0 <= y < h and 0 <= sx-1 < w and self.floorMap[y, sx] != 0 and
+                            self.roomsMap[y-1, sx] != 0 and self.roomsMap[y, sx-1] != 0 and self.roomsMap[y+1, sx] != 0):
+                            candidates.append((y, sx))
+
+                # right edge (x = sx + width - 1)
+                elif dir == 'right':
+                    for y in range(sy, sy + sheight):
+                        x = sx + swidth
+                        if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and
+                            self.roomsMap[y-1, x] != 0 and self.roomsMap[y, x+1] != 0 and self.roomsMap[y+1, x] != 0):
+                            candidates.append((y, x))
+
+                if not candidates:
+                    return None
+
+                return random.choice(candidates)
+
+            h, w = self.floorMap.shape
+
+            sy, sx, sheight, swidth = start
+            gy, gx, gheight, gwidth = goal
+
+            center_s = (sy + sheight / 2, sx + swidth / 2)
+            center_g = (gy + gheight / 2, gx + gwidth / 2)
+
+            dy = center_g[0] - center_s[0]
+            dx = center_g[1] - center_s[1]
+
+            edge_point = None
+
+            if abs(dy) > abs(dx):
+                edge_point = random_edge_point('down') if dy > 0 else random_edge_point('up')
+            else:
+                edge_point = random_edge_point('right') if dx > 0 else random_edge_point('left')
+
+            if edge_point is None:
+                if abs(dy) > abs(dx):
+                    edge_point = random_edge_point('right') if dx > 0 else random_edge_point('left')
+                else:
+                    edge_point = random_edge_point('down') if dy > 0 else random_edge_point('up')
+            
+            return edge_point
 
         sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
@@ -590,7 +654,8 @@ class GenBitMap:
         room_reversed[gy:gy+gheight, gx:gx+gwidth] = 1
         check_map = 1 - room_reversed
 
-        start = random_edge_point(sy, sx, sheight, swidth)
+        # start = random_edge_point(sy, sx, sheight, swidth)
+        start = get_edge_point(self.mapInfo.room_info[startNodeID], self.mapInfo.room_info[goalNodeID])
         goal = (gy - 1 + random.randint(1, gheight), gx - 1 + random.randint(1, gwidth))
 
         if start is None or goal is None:
@@ -598,32 +663,32 @@ class GenBitMap:
             check_map[sy:sy+sheight, sx:sx+swidth] = 1
             check_map[gy:gy+gheight, gx:gx+gwidth] = 1
             self.roomsMap = 1 - check_map
+        else:
+            check_map[start] = 0
+            check_map[goal] = 0
 
-        check_map[start] = 0
-        check_map[goal] = 0
+            setExit = False
+            path = AStarFixed(check_map).search(start, goal)
+            self.floorMap[path[0][0], path[0][1]] = 0
+            for i in range(1, len(path)):
+                self.floorMap[path[i][0], path[i][1]] = 0
 
-        setExit = False
-        path = AStarFixed(check_map).search(start, goal)
-        self.floorMap[path[0][0], path[0][1]] = 0
-        for i in range(1, len(path)):
-            self.floorMap[path[i][0], path[i][1]] = 0
-
-            #出口のための一方通行パネルを設置する
-            if setExit is False:
-                if (gy-1 <= path[i][0] < gy+gheight+1 and gx <= path[i][1] < gx+gwidth) or (gy <= path[i][0] < gy+gheight and gx-1 <= path[i][1] < gx+gwidth+1):
-                    if gy <= path[i+1][0] < gy+gheight and gx <= path[i+1][1] < gx+gwidth:
-                        self.mapInfo.setOneWay(path[i], path[i+1][0]-path[i][0], path[i+1][1]-path[i][1], self.mapInfo.condition_move[goalNodeID])
-                    else:
-                        if gy-1 == path[i][0]:
-                            self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_move[goalNodeID])
-                        elif gy+1 == path[i][0]:
-                            self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_move[goalNodeID])
-                        elif gx-1 == path[i][1]:
-                            self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_move[goalNodeID])
-                        else: # gx+1 == path[i][1]
-                            self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_move[goalNodeID])
-                        break
-                    setExit = True
+                #出口のための一方通行パネルを設置する
+                if setExit is False:
+                    if (gy-1 <= path[i][0] < gy+gheight+1 and gx <= path[i][1] < gx+gwidth) or (gy <= path[i][0] < gy+gheight and gx-1 <= path[i][1] < gx+gwidth+1):
+                        if gy <= path[i+1][0] < gy+gheight and gx <= path[i+1][1] < gx+gwidth:
+                            self.mapInfo.setOneWay(path[i], path[i+1][0]-path[i][0], path[i+1][1]-path[i][1], self.mapInfo.condition_move[goalNodeID])
+                        else:
+                            if gy-1 == path[i][0]:
+                                self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_move[goalNodeID])
+                            elif gy+1 == path[i][0]:
+                                self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_move[goalNodeID])
+                            elif gx-1 == path[i][1]:
+                                self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_move[goalNodeID])
+                            else: # gx+1 == path[i][1]
+                                self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_move[goalNodeID])
+                            break
+                        setExit = True
 
         check_map[sy:sy+sheight, sx:sx+swidth] = 1
         check_map[gy:gy+gheight, gx:gx+gwidth] = 1

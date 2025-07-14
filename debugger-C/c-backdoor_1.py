@@ -273,7 +273,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         # 変数が初期化されない時、スキップされるので、それも読み取る
         target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
 
-        print(f"{line_data[func_name]} - {line_number}")
         if len(target_lines) != 0 and line_number not in line_data[func_name]:
             # 変数が合致していればstepinを実行して次に進む
             for line in target_lines:
@@ -506,11 +505,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             line_number_track.append(crntFromTo.pop(0))
 
                                         # crntFromToが 空 = 行番が完全一致 になるか、if文の中の処理が空な場合で最後の行番が一致するかを確認する
-                                        if not crntFromTo or crntFromTo[-1] == line_number:
+                                        if not crntFromTo:
                                             event_sender({"message": "", "status": "ok"})
                                             vars_changed = varsTracker.trackStart(frame)
                                             vars_checker(vars_changed)
                                             break
+                                        # elif crntFromTo[-1] == line_number:
+                                        #     event_sender({"message": "", "status": "ok"})
+                                        #     vars_changed = varsTracker.trackStart(frame)
+                                        #     vars_checker(vars_changed)
+                                        #     while True:
+                                        #         if (event := event_reciever()) is None:
+                                        #             break
+
                                 elif type == 'doWhileIn':
                                     event_sender({"message": "", "status": "ok"})
                                 elif type in ['doWhileTrue', 'doWhileFalse']:
@@ -565,6 +572,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})
                                 continue
                         else:
+                            print(f"{line_number}, {crnt_line_number}")
                             event_sender({"message": "ここから先は進入できません7!!", "status": "ng"})
                             continue
                     elif event.get('item', None) or event.get('itemset', None):
