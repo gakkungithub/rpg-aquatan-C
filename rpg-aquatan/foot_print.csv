@@ -1,16 +1,7 @@
-start,04_conditional_branch,11, 13
-itemget, 04_conditional_branch,14, 12,score
-itemget, 04_conditional_branch,50, 12,gradeB
-jump, 04_conditional_branch,25, 5
-itemget, 04_conditional_branch,21, 5,passed
-itemget, 04_conditional_branch,21, 4,percentage
-jump, 04_conditional_branch,8, 19
-itemget, 04_conditional_branch,6, 23,grade
-jump, 04_conditional_branch,32, 8
-jump, 04_conditional_branch,33, 33
-itemget, 04_conditional_branch,34, 30,age
-itemget, 04_conditional_branch,37, 28,hasID
-jump, 04_conditional_branch,23, 12
-jump, 04_conditional_branch,16, 18
-moveout, 04_conditional_branch,15, 18
-end, 04_conditional_branch,15, 18
+start,05_loops_and_break,12, 7
+itemget, 05_loops_and_break,15, 7,sum
+itemget, 05_loops_and_break,13, 7,i
+jump, 05_loops_and_break,4, 32
+jump, 05_loops_and_break,7, 15
+jump, 05_loops_and_break,4, 32
+end, 05_loops_and_break,4, 32

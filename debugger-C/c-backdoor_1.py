@@ -193,17 +193,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     class ProgramFinished(Exception):
         pass
 
-    def vars_checker(vars_changed):
+    def vars_checker(vars_changed, first_event=None):
         varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared))
-        
+        getLine = (first_event is None)
+
         if len(varsDeclLines) != 0:
             # 変数が合致していればstepinを実行して次に進む
             vars_event = []
-            errorCnt = 0
+            errorCnt = 0 
+            if first_event:
+                event = first_event
+                first_event = None
+            else:
+                if (event := event_reciever()) is None:
+                    return
             while True:
-                # とりあえずスカラー変数
-                event = event_reciever()
-
                 if (item := event.get('item', None)) is not None:
                     if not item in varsDeclLines:
                         errorCnt += 1
@@ -213,19 +217,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event_sender({"message": f"ヒント: アイテム {', '.join(list(set(varsDeclLines) - set(vars_event)))} を取得してください!!", "status": "ng"})
                         else:
                             event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                        event = event_reciever()
                         continue
                     
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(varsDeclLines):
                         print("you selected correct vars")
-                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"})
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, getLine)
                         varsTracker.setVarsDeclared(item)
                         break
-                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok", "getting": True})
+                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, False)
                     varsTracker.setVarsDeclared(item)
                 else:
                     errorCnt += 1
                     event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                    event = event_reciever()
                     continue
 
         # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
@@ -233,11 +239,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         varsChanged = list(set(common) - set(varsDeclLines))
 
         if len(varsChanged) != 0:
-            print(f"vars_changed: {varsChanged}")
             vars_event = []
             errorCnt = 0
+            if first_event:
+                event = first_event
+                first_event = None
+            else:
+                if (event := event_reciever()) is None:
+                    return
             while True:
-                event = event_reciever()
                 if (itemset := event.get('itemset', None)) is not None:
                     item, itemValue = itemset
                     if item not in varsChanged:
@@ -248,6 +258,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event_sender({"message": f"ヒント: アイテム {', '.join(list(set(varsChanged) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
                         else:
                             event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
+                        event = event_reciever()
                         continue
                     if itemValue != varsTracker.getValue(item):
                         errorCnt += 1
@@ -258,16 +269,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
                         else:
                             event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
+                        event = event_reciever()
                         continue
                     vars_event.append(item)
                     if Counter(vars_event) == Counter(varsChanged):
                         print("you changed correct vars")
-                        event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"})
+                        event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, getLine)
                         break
-                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok", "getting": True})
+                    event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, False)
                 else:
                     errorCnt += 1
                     event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
+                    event = event_reciever()
                     continue
 
         # 変数が初期化されない時、スキップされるので、それも読み取る
@@ -279,10 +292,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 skipped_varDecls = varsDeclLines_list.pop(line)
                 vars_event = []
                 errorCnt = 0
+                if first_event:
+                    event = first_event
+                    first_event = None
+                else:
+                    if (event := event_reciever()) is None:
+                        return
                 while True:
-                    # とりあえずスカラー変数
-                    event = event_reciever()
-
                     if (item := event.get('item', None)) is not None:
                         if not item in skipped_varDecls:
                             errorCnt += 1
@@ -292,19 +308,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
                             else:
                                 event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                            event = event_reciever()
                             continue
                         
                         vars_event.append(item)
                         if Counter(vars_event) == Counter(skipped_varDecls):
                             print("you selected correct vars")
-                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"})
+                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"}, getLine)
                             varsTracker.setVarsDeclared(item)
                             break
-                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok", "getting": True})
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"}, False)
                         varsTracker.setVarsDeclared(item)
                     else:
                         errorCnt += 1
                         event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                        event = event_reciever()
                         continue
             
 
@@ -319,8 +337,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         print(f"[受信イベント] {event}")
         return event
     
-    def event_sender(msgJson):
-        if msgJson["status"] == "ok" and not msgJson.get("getting", None):
+    def event_sender(msgJson, getLine=True):
+        if msgJson["status"] == "ok" and getLine:
             target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
             # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
             if len(target_lines) != 0 and line_number not in line_data[func_name]:
@@ -530,6 +548,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             elif fromTo[:2] == [None, crnt_line_number] and type == 'switchEnd':
                                 event_sender({"message": "", "status": "ok"})
                             else:
+                                print(f"{line_number} - {crnt_line_number}")
                                 event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
                                 continue            
                         elif len(fromTo) == 1 and fromTo == [line_number]:
@@ -552,22 +571,26 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 break
                                     event_sender({"message": "NG行動をしました4!!", "status": "ng"})
                             elif type == 'forIn':
-                                event_sender({"message": "", "status": "ok"})
+                                if str(line_number) not in varsDeclLines_list:
+                                    event_sender({"message": "", "status": "ok"})
 
-                                # get_std_outputs, state_checkerを入れるかは後々考える
+                                    # get_std_outputs, state_checkerを入れるかは後々考える
 
-                                while True:
-                                    print(line_number, crnt_line_number)
-                                    if (event := event_reciever()) is None:
-                                        break
+                                    while True:
+                                        print(line_number, crnt_line_number)
+                                        if (event := event_reciever()) is None:
+                                            break
 
-                                    if (fromTo := event.get('fromTo', None)) is not None:
-                                        type = event.get('type', '')
-                                        if type in ['forTrue', 'forFalse']:
-                                            if fromTo == [line_number, crnt_line_number]:
-                                                event_sender({"message": "", "status": "ok"})
-                                                break
-                                    event_sender({"message": "NG行動をしました5!!", "status": "ng"})
+                                        if (fromTo := event.get('fromTo', None)) is not None:
+                                            type = event.get('type', '')
+                                            if type in ['forTrue', 'forFalse']:
+                                                if fromTo == [line_number, crnt_line_number]:
+                                                    event_sender({"message": "", "status": "ok"})
+                                                    break
+                                        event_sender({"message": "NG行動をしました5!!", "status": "ng"})
+                                else:
+                                    event_sender({"message": "ある変数の初期化がされていません!!", "status": "ng"})
+                                    continue
                             else:
                                 event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})
                                 continue
@@ -575,11 +598,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             print(f"{line_number}, {crnt_line_number}")
                             event_sender({"message": "ここから先は進入できません7!!", "status": "ng"})
                             continue
-                    elif event.get('item', None) or event.get('itemset', None):
+                    # # ひとまず、forでの変数の初期化はitemとして考える
+                    # elif (item := event.get('item', None)) is not None:
+                    #     print('here')
+                    #     if item in varsDeclLines_list[str(line_number)]:
+                    #         vars_checker(vars_changed, event)
+                    #     continue
+                    else:
                         event_sender({"message": "NG行動をしました6!!", "status": "ng"})
                         continue
-                    else:
-                        pass
                     
                 step_conditionally(frame)
 

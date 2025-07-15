@@ -44,7 +44,7 @@ class ASTtoFlowChart:
         self.gvar_candidate_crs = {}
         self.gvar_info = []
         self.func_info = {}
-        self.loopBreaker_list = []
+        self.loopBreaker_list: dict[str, list[str]] = []
         self.switchBreaker_list = []
         self.findingLabel = None
         self.gotoLabel_list = {}
@@ -110,7 +110,7 @@ class ASTtoFlowChart:
                 self.parse_enum(cursor)
         output_dir = f'{DATA_DIR}/{programname}'
         os.makedirs(output_dir, exist_ok=True)
-        print(self.condition_move)
+        # print(self.condition_move)
         
         gv_dot_path = f'{output_dir}/{programname}'
         self.dot.render(gv_dot_path, format='dot')
@@ -180,14 +180,14 @@ class ASTtoFlowChart:
             if self.switchBreaker_list:
                 self.switchBreaker_list[-1]["level"] -= 1
 
-        def addLoopBreaker(node, type):
+        def addLoopBreaker(nodeID, type):
             if self.switchBreaker_list and type == "break":
                 if self.switchBreaker_list[-1]["level"]:
-                    self.loopBreaker_list[-1][type].append(node)
+                    self.loopBreaker_list[-1][type].append(nodeID)
                 else:
-                    self.switchBreaker_list[-1][type].append(node)
+                    self.switchBreaker_list[-1][type].append(nodeID)
             else:
-                self.loopBreaker_list[-1][type].append(node)
+                self.loopBreaker_list[-1][type].append(nodeID)
 
         self.check_cursor_error(cr)
 
@@ -227,12 +227,12 @@ class ASTtoFlowChart:
         elif cr.kind == clang.cindex.CursorKind.SWITCH_STMT:
             nodeID = self.parse_switch_stmt(cr, nodeID, edgeName)
         elif cr.kind == clang.cindex.CursorKind.BREAK_STMT:
-            breakNodeID = self.createNode("break")
+            breakNodeID = self.createNode("break", "hexagon")
             self.createEdge(nodeID, breakNodeID, edgeName)
             addLoopBreaker(breakNodeID, "break")
             return None
         elif cr.kind == clang.cindex.CursorKind.CONTINUE_STMT:
-            continueNodeID = self.createNode("continue")
+            continueNodeID = self.createNode("continue", "hexagon")
             self.createEdge(nodeID, continueNodeID, edgeName)
             addLoopBreaker(continueNodeID, "continue")
             return None
@@ -658,6 +658,7 @@ class ASTtoFlowChart:
                 else:
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.extent.end.line])
                 return self.parse_comp_stmt(cursor, parentNodeID)
+            # 混合文がない = {} で囲まれない単体文
             else:
                 self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line])
                 return self.parse_stmt(cursor, parentNodeID)
@@ -784,6 +785,8 @@ class ASTtoFlowChart:
         self.createRoomSizeEstimate(endNodeID)
         self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line , None])
 
+        self.createEdgeForLoop(endNodeID, condNodeID)
+
         return endNodeID
 
     #do-while文
@@ -844,13 +847,20 @@ class ASTtoFlowChart:
         for cr in expr_cursors:
             self.check_cursor_error(cr)
             if cr.location.offset < semi_offset[0]:
-                initNodeID = self.get_exp(cr, 'invhouse')
+                if cr.kind == clang.cindex.CursorKind.DECL_STMT:
+                    initNodeID = self.createNode("", 'invhouse')
+                    varNodeID = initNodeID
+                    for vcr in cr.get_children():
+                        self.check_cursor_error(vcr)
+                        varNodeID = self.parse_var_decl(vcr, varNodeID, "")
+                # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する
+                else:
+                    initNodeID = self.get_exp(cr, 'invhouse')
                 self.createEdge(nodeID, initNodeID, edgeName)
                 edgeName = ""
             elif semi_offset[0] < cr.location.offset < semi_offset[1]:
                 condNodeID = self.get_exp(cr, 'pentagon', 'for')
                 self.createRoomSizeEstimate(condNodeID)
-                
                 if initNodeID:
                     self.createEdge(initNodeID, condNodeID)
                 else:
@@ -867,8 +877,8 @@ class ASTtoFlowChart:
             else:
                 self.createEdge(nodeID, condNodeID, edgeName)
                 
-        self.condition_move[f'"{condNodeID}"'] = ('forIn', [cursor.location.line ])
-        self.line_info[self.scanning_func].add(cursor.location.line )
+        self.condition_move[f'"{condNodeID}"'] = ('forIn', [cursor.location.line])
+        self.line_info[self.scanning_func].add(cursor.location.line)
         self.check_cursor_error(exec_cursor)
 
         trueNodeID = self.createNode("", 'circle')
@@ -896,6 +906,7 @@ class ASTtoFlowChart:
 
         self.createEdge(nodeID, changeNodeID)
         self.createEdge(changeNodeID, condNodeID)
+        # self.createEdgeForLoop(endNodeID, changeNodeID)
         self.createEdgeForLoop(endNodeID, changeNodeID)
         
         self.createEdge(condNodeID, endNodeID, "False")
@@ -1035,7 +1046,9 @@ class ASTtoFlowChart:
         continue_list = loopBreaker["continue"]
         for breakNodeID in break_list:
             self.createEdge(breakNodeID, breakToNodeID)
+            self.condition_move[f'"{breakToNodeID}"'] = ('break', [None, None])
         for continueNodeID in continue_list:
             self.createEdge(continueNodeID, continueToNodeID)
+            self.condition_move[f'"{continueToNodeID}"'] = ('continue', [None, None])
 
     

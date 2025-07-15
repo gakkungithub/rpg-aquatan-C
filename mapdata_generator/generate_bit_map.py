@@ -381,13 +381,15 @@ class GenBitMap:
                     self.createPath(crntRoomID, toNodeID)
                     # self.setWarpZone(crntRoomID, toNodeID, 158)
                     nodeIDs.append(toNodeID)
+                elif self.getNodeShape(toNodeID) == 'terminator':
+                    self.trackAST(crntRoomID, toNodeID, loopBackID)
                 else:
                     print("unknown node appeared")
             for toNodeID in nodeIDs:
                 if self.getNodeShape(toNodeID) == 'diamond':
-                    self.trackAST(crntRoomID, toNodeID)
+                    self.trackAST(crntRoomID, toNodeID, loopBackID)
                 else:
-                    self.trackAST(toNodeID, toNodeID)
+                    self.trackAST(toNodeID, toNodeID, loopBackID)
 
         #while文とfor文は最終ノードからワープで戻る必要があるので、現在の部屋ノードのID(戻り先)を取得する
         elif self.getNodeShape(nodeID) == 'pentagon':
@@ -407,8 +409,10 @@ class GenBitMap:
             if nodeIDs:
                 #whileの領域に入る
                 self.createPath(crntRoomID, nodeID)
+                # true
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
-                self.trackAST(nodeIDs[1], nodeIDs[1])
+                # false
+                self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
 
         #関数のワープ情報を更新する
         elif self.getNodeShape(nodeID) == 'oval':
@@ -467,8 +471,24 @@ class GenBitMap:
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
+        # for文の初期値で変数の初期化がある場合はアイテムを作る ()
+        elif self.getNodeShape(nodeID) == 'invhouse':
+            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
+                # ノーマル変数
+                if self.getNodeShape(toNodeID) == 'signature':
+                    var_type = self.varNode_info[toNodeID]
+                    valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
+                    eni = self.getExpNodeInfo(valueNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type)
+                # 次のノード
+                else:
+                    self.trackAST(crntRoomID, toNodeID, loopBackID)
+        # elif self.getNodeShape(nodeID) == 'hexagon':
+        #     toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
+        #     self.createRoom(toNodeID)
+        #     self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
         else:
-            #switch構文でワープゾーンを繋げる
+            # switch構文でワープゾーンを繋げる
             if crntRoomID != nodeID:
                 if nodeID in self.roomSize_info[self.func_name]:
                     self.createRoom(nodeID)
@@ -478,6 +498,7 @@ class GenBitMap:
                     crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
+            print(f"{self.getNodeShape(toNodeID)} - {loopBackID}")
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
     #'label', 'shape'属性がある
@@ -547,40 +568,40 @@ class GenBitMap:
             return self.findRoomArea(roomSize, (new_height, new_width), kernel)
 
     def createPath(self, startNodeID, goalNodeID):
-        def random_edge_point(ty, lx, height, width):
-            h, w = self.floorMap.shape
-            candidates = []
+        # def random_edge_point(ty, lx, height, width):
+        #     h, w = self.floorMap.shape
+        #     candidates = []
 
-            # top edge (y = ty)
-            for x in range(lx, lx + width):
-                if (0 <= ty-1 < h and 0 <= x < w and self.floorMap[ty, x] != 0 and
-                    self.roomsMap[ty, x-1] != 0 and self.roomsMap[ty-1, x] != 0 and self.roomsMap[ty, x+1] != 0):
-                    candidates.append((ty, x))
+        #     # top edge (y = ty)
+        #     for x in range(lx, lx + width):
+        #         if (0 <= ty-1 < h and 0 <= x < w and self.floorMap[ty, x] != 0 and
+        #             self.roomsMap[ty, x-1] != 0 and self.roomsMap[ty-1, x] != 0 and self.roomsMap[ty, x+1] != 0):
+        #             candidates.append((ty, x))
 
-            # bottom edge (y = ty + height - 1)
-            for x in range(lx, lx + width):
-                y = ty + height
-                if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
-                    self.roomsMap[y, x-1] != 0 and self.roomsMap[y+1, x] != 0 and self.roomsMap[y, x+1] != 0):
-                    candidates.append((y, x))
+        #     # bottom edge (y = ty + height - 1)
+        #     for x in range(lx, lx + width):
+        #         y = ty + height
+        #         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
+        #             self.roomsMap[y, x-1] != 0 and self.roomsMap[y+1, x] != 0 and self.roomsMap[y, x+1] != 0):
+        #             candidates.append((y, x))
 
-            # left edge (x = lx)
-            for y in range(ty, ty + height):
-                if (0 <= y < h and 0 <= lx-1 < w and self.floorMap[y, lx] != 0 and
-                    self.roomsMap[y-1, lx] != 0 and self.roomsMap[y, lx-1] != 0 and self.roomsMap[y+1, lx] != 0):
-                    candidates.append((y, lx))
+        #     # left edge (x = lx)
+        #     for y in range(ty, ty + height):
+        #         if (0 <= y < h and 0 <= lx-1 < w and self.floorMap[y, lx] != 0 and
+        #             self.roomsMap[y-1, lx] != 0 and self.roomsMap[y, lx-1] != 0 and self.roomsMap[y+1, lx] != 0):
+        #             candidates.append((y, lx))
 
-            # right edge (x = lx + width - 1)
-            for y in range(ty, ty + height):
-                x = lx + width
-                if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and
-                    self.roomsMap[y-1, x] != 0 and self.roomsMap[y, x+1] != 0 and self.roomsMap[y+1, x] != 0):
-                    candidates.append((y, x))
+        #     # right edge (x = lx + width - 1)
+        #     for y in range(ty, ty + height):
+        #         x = lx + width
+        #         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and
+        #             self.roomsMap[y-1, x] != 0 and self.roomsMap[y, x+1] != 0 and self.roomsMap[y+1, x] != 0):
+        #             candidates.append((y, x))
 
-            if not candidates:
-                return None
+        #     if not candidates:
+        #         return None
 
-            return random.choice(candidates)
+        #     return random.choice(candidates)
         
         def get_edge_point(start, goal):
             def random_edge_point(dir):
