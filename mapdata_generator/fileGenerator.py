@@ -6,7 +6,7 @@ import random
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/data'
 
-def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInfo, chara_returnInfo, isUniversal, defaultMapChip=503):
+def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInfo, chara_returnInfo, doorInfo, isUniversal, defaultMapChip=503):
     events = []
     characters = []
     vardecl_lines: dict[int, list[str]] = {}
@@ -31,6 +31,10 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
     for exit in exitInfo:
         events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4]})
  
+    # 出口用のドアの情報
+    for door in doorInfo:
+        events.append({"type": "SDOOR", "x": door[0][1], "y": door[0][0], "doorname": door[1]})
+
     # ワープキャラの情報
     ### 関数の呼び出しに応じたキャラクターの情報
     for chara_moveItems in chara_moveItemsInfo:
@@ -47,6 +51,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
             characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": line})
         else:
             characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "line": line})
+
 
     filename = f'{DATA_DIR}/{pname}/{pname}.json'
 
