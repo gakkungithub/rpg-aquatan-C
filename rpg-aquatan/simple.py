@@ -736,9 +736,6 @@ def main():
                     # ドアを開ける
                     door = PLAYER.unlock(fieldmap)
                     if door is not None:
-                        door.open()
-                        MSGWND.set(f"{door.doorname}を開けた！")
-                        fieldmap.remove_event(door)
                         continue
 
                     # 表示中でないならはなす
@@ -1228,6 +1225,8 @@ class Map:
         for event in self.events:
             if self.movable_type[event.mapchip] == 0:
                 if event.x == x and event.y == y:
+                    if isinstance(event, SmallDoor) and event.status == 1:
+                        return True
                     return False
         return True
 
@@ -1380,7 +1379,8 @@ class Map:
         """ドアを作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         name = data["doorname"]
-        door = SmallDoor((x, y), name)
+        direction = data["dir"]
+        door = SmallDoor((x, y), name, direction)
         door.close()
         self.events.append(door)
 
@@ -1679,6 +1679,7 @@ class Player(Character):
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
         self.itemNameShow = False
+        self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
 
         ## start
         self.fp = open(PATH, mode='w')
@@ -1697,6 +1698,9 @@ class Player(Character):
                 self.x = self.rect.left // GS
                 self.y = self.rect.top // GS
 
+                if self.door is not None:
+                    self.door.close()
+                    self.door = None
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, PlacesetEvent):  # PlacesetEventなら
@@ -1705,6 +1709,9 @@ class Player(Character):
 #                    print(f"append_automove({event.sequence})")
                     self.append_automove(event.sequence, type=event.type, fromTo=event.fromTo)
                     return
+                elif isinstance(event, SmallDoor):
+                    self.door = event
+
         elif self.waitingMove is not None:
 #                print(f"waitingMove:{self.waitingMove}")
             dest_map = self.waitingMove.dest_map
@@ -1850,7 +1857,7 @@ class Player(Character):
             return event
         return None
 
-    def unlock(self, mymap):
+    def unlock(self, mymap: Map):
         """キャラクターが向いている方向にドアがあるか調べる"""
         # 向いている方向のとなりの座標を求める
         nextx, nexty = self.x, self.y
@@ -1864,7 +1871,15 @@ class Player(Character):
             nexty = self.y - 1
         # その方向にドアがあるか？
         event = mymap.get_event(nextx, nexty)
-        if isinstance(event, Door) or isinstance(event, SmallDoor) :
+        if isinstance(event, Door):
+            # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
+            if isinstance(event, SmallDoor):
+                if event.direction != self.direction:
+                    MSGWND.set('この方向から扉は開けません!!')
+                    return event
+            event.open()
+            MSGWND.set(f"{event.doorname}を開けた！")
+            # mymap.remove_event(event)
             return event
         return None
 
@@ -2780,12 +2795,13 @@ class Door():
 
 class SmallDoor(Door):
     """小さいドアクラス"""
-    def __init__(self, pos, name):
+    def __init__(self, pos, name, direction):
         self.mapchip = 27
         self.mapchip_list = [27,688]
         self.status = 0 # close
         self.x, self.y = pos[0], pos[1]  # ドア座標
         self.doorname = str(name)  # ドア名
+        self.direction = direction
         self.key = ""
 
     def draw(self, screen, offset):

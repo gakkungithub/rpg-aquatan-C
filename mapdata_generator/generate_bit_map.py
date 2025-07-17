@@ -88,7 +88,7 @@ class MapInfo:
         self.chara_moveItems = []
         self.chara_return = []
         self.exit_info = []
-        self.door_info: list[tuple[tuple[int, int], str]] = []
+        self.door_info: list[tuple[tuple[int, int], str, int]] = []
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -215,8 +215,8 @@ class MapInfo:
             self.exit_info.append((pos, 6, autoType, line_track, "d"))
 
     # 出口のドア生成
-    def setDoor(self, pos):
-        self.door_info.append((pos, "test"))
+    def setDoor(self, pos, dir):
+        self.door_info.append((pos, "test", dir))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
@@ -581,14 +581,14 @@ class GenBitMap:
             def random_edge_point(dir):
                 candidates = []
                 # top edge (y = sy)
-                if dir == 'up':
+                if dir == 'u':
                     for x in range(sx, sx + swidth):
                         if (0 <= sy-1 < h and 0 <= x < w and self.floorMap[sy, x] != 0 and 
                             self.roomsMap[sy, x-1] != 0 and self.roomsMap[sy-1, x] != 0 and self.roomsMap[sy, x+1] != 0):
                             candidates.append((sy, x))
 
                 # bottom edge (y = sy + height - 1)
-                elif dir == 'down':
+                elif dir == 'd':
                     for x in range(sx, sx + swidth):
                         y = sy + sheight
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
@@ -596,14 +596,14 @@ class GenBitMap:
                             candidates.append((y, x))
 
                 # left edge (x = sx)
-                elif dir == 'left':
+                elif dir == 'l':
                     for y in range(sy, sy + sheight):
                         if (0 <= y < h and 0 <= sx-1 < w and self.floorMap[y, sx] != 0 and 
                             self.roomsMap[y-1, sx] != 0 and self.roomsMap[y, sx-1] != 0 and self.roomsMap[y+1, sx] != 0):
                             candidates.append((y, sx))
 
                 # right edge (x = sx + width - 1)
-                elif dir == 'right':
+                elif dir == 'r':
                     for y in range(sy, sy + sheight):
                         x = sx + swidth
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
@@ -627,19 +627,41 @@ class GenBitMap:
             dx = center_g[1] - center_s[1]
 
             edge_point = None
+            dir = None
 
+            # DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
             if abs(dy) > abs(dx):
-                edge_point = random_edge_point('down') if dy > 0 else random_edge_point('up')
+                if dy > 0:
+                    edge_point = random_edge_point('d')
+                    dir = 0
+                else:
+                    edge_point = random_edge_point('u')
+                    dir = 3
             else:
-                edge_point = random_edge_point('right') if dx > 0 else random_edge_point('left')
+                if dx > 0:
+                    edge_point = random_edge_point('r') 
+                    dir = 2
+                else:
+                    edge_point = random_edge_point('l')
+                    dir = 1
 
             if edge_point is None:
                 if abs(dy) > abs(dx):
-                    edge_point = random_edge_point('right') if dx > 0 else random_edge_point('left')
+                    if dx > 0:
+                        edge_point = random_edge_point('r') 
+                        dir = 2
+                    else:
+                        edge_point = random_edge_point('l')
+                        dir = 1
                 else:
-                    edge_point = random_edge_point('down') if dy > 0 else random_edge_point('up')
+                    if dy > 0:
+                        edge_point = random_edge_point('d')
+                        dir = 0
+                    else:
+                        edge_point = random_edge_point('u')
+                        dir = 3
             
-            return edge_point
+            return (edge_point, dir)
 
         sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
@@ -649,7 +671,7 @@ class GenBitMap:
         room_reversed[gy:gy+gheight, gx:gx+gwidth] = 1
         check_map = 1 - room_reversed
 
-        start = get_edge_point(self.mapInfo.room_info[startNodeID], self.mapInfo.room_info[goalNodeID])
+        start, dir = get_edge_point(self.mapInfo.room_info[startNodeID], self.mapInfo.room_info[goalNodeID])
         goal = (gy - 1 + random.randint(1, gheight), gx - 1 + random.randint(1, gwidth))
 
         if start is None or goal is None:
@@ -668,7 +690,8 @@ class GenBitMap:
                 self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158) 
             else:
                 self.floorMap[path[0][0], path[0][1]] = 0
-                self.mapInfo.setDoor(path[0])
+
+                self.mapInfo.setDoor(path[0], dir)
                 for i in range(1, len(path)):
                     self.floorMap[path[i][0], path[i][1]] = 0
 

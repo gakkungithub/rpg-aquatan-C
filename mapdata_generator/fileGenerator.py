@@ -33,7 +33,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
  
     # 出口用のドアの情報
     for door in doorInfo:
-        events.append({"type": "SDOOR", "x": door[0][1], "y": door[0][0], "doorname": door[1]})
+        events.append({"type": "SDOOR", "x": door[0][1], "y": door[0][0], "doorname": door[1], "dir": door[2]})
 
     # ワープキャラの情報
     ### 関数の呼び出しに応じたキャラクターの情報
