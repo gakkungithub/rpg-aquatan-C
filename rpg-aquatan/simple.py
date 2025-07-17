@@ -1519,7 +1519,7 @@ class Character:
         """移動スピードを設定"""
         self.speed = s
 
-    def update(self, mymap):
+    def update(self, mymap: Map):
         """キャラクター状態を更新する。
         mapは移動可能かの判定に必要。"""
         # プレイヤーの移動処理
@@ -1535,6 +1535,7 @@ class Character:
             newdir = self.get_next_automove()
             if newdir is not None:
                 # print "name:%s -> (%2d,%2d)" % (self.name,self.x,self.y)
+                # mymap.get_event(self.x, self.y) #もし、後々CPUは宝箱の上を通れないようにするなら、ここで確認する
                 self.direction = newdir
                 if self.direction == DOWN:
                     if mymap.is_movable_but_chara(self.x, self.y+1):
@@ -1699,8 +1700,11 @@ class Player(Character):
                 self.y = self.rect.top // GS
 
                 if self.door is not None:
-                    self.door.close()
-                    self.door = None
+                    if ((self.door.direction == DOWN and (self.door.x, self.door.y-1) == (self.x, self.y)) or (self.door.direction == UP and (self.door.x, self.door.y+1) == (self.x, self.y)) or
+                        (self.door.direction == LEFT and (self.door.x+1, self.door.y) == (self.x, self.y)) or (self.door.direction == RIGHT and (self.door.x-1, self.door.y) == (self.x, self.y))):
+                        self.door.close()
+                        self.door = None
+
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, PlacesetEvent):  # PlacesetEventなら
@@ -1713,7 +1717,7 @@ class Player(Character):
                     self.door = event
 
         elif self.waitingMove is not None:
-#                print(f"waitingMove:{self.waitingMove}")
+#           print(f"waitingMove:{self.waitingMove}")
             dest_map = self.waitingMove.dest_map
             dest_x = self.waitingMove.dest_x
             dest_y = self.waitingMove.dest_y
@@ -1781,6 +1785,10 @@ class Player(Character):
                             else:
                                 direction = 'd'                            
                             self.prevPos = [None, self.prevPos[0]]
+                        else:
+                            if self.door is not None:
+                                self.door.close()
+                                self.door = None
                     self.pop_automoveFromTo()
                     self.pop_automove()
             elif direction == 'x':
@@ -1874,12 +1882,16 @@ class Player(Character):
         if isinstance(event, Door):
             # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
             if isinstance(event, SmallDoor):
-                if event.direction != self.direction:
+                if event.direction == self.direction:
+                    event.open()
+                    MSGWND.set(f"{event.doorname}を開けた！")
+                    if self.door is not None:
+                        self.door.close()
+                        self.door = None
+                else:
                     MSGWND.set('この方向から扉は開けません!!')
-                    return event
-            event.open()
-            MSGWND.set(f"{event.doorname}を開けた！")
-            # mymap.remove_event(event)
+            else:
+                mymap.remove_event(event)
             return event
         return None
 
@@ -2496,6 +2508,7 @@ class CharaReturn(Character):
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.line:d}"
+    
 
 #                                                                                                                                                                    
 #   ,ad8888ba,  88                                           88b           d88                                    88888888888                                        
