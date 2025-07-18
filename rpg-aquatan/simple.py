@@ -125,6 +125,7 @@ last_action_time = 0
 
 LONGPRESS_EVENT = pygame.USEREVENT + 1
 
+# 長押し処理をするためのメソッド (200m秒後に長押しイベントをキューに追加する = キューの中の複数の処理が順に実行されていく)
 def start_timer():
     pygame.time.set_timer(LONGPRESS_EVENT, 200)
 def end_timer():
@@ -299,6 +300,7 @@ def main():
     # # main関数開始時の処理を送信する(今は何もない想定でパスする)。
     # sender.send_event({"pass": "begin"})
 
+    last_mouse_y = None
     while True:
         messages = []
         clock.tick(MAX_FRAME_PER_SEC)
@@ -454,14 +456,22 @@ def main():
                 if event.button == 1:
                     mouse_down = True
                     start_timer()
+                    if CODEWND.is_visible:
+                        if CODEWND.isCursorInWindow(event.pos):
+                            last_mouse_y = event.pos[1]
                     cmd = BTNWND.is_clicked(event.pos)
+                
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     mouse_down = False
+                    last_mouse_y = None
                     end_timer()
             if mouse_down:
-                if mouse_down:
-                    cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
+                if event.type == pygame.MOUSEMOTION and last_mouse_y:
+                    dy = - (event.pos[1] - last_mouse_y)
+                    CODEWND.scrollY += dy
+                    last_mouse_y = event.pos[1]
+                cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
             # endregion
             
             # region keydown event
@@ -3235,11 +3245,15 @@ class CodeWindow(Window, Map):
     TEXT_COLOR = (255, 255, 255)
     BG_COLOR = (30, 30, 30)
 
-    def __init__(self, rect, name, highlight_lines=None):
+    def __init__(self, rect, name):
         Window.__init__(self, rect)
         Map.__init__(self, name)
+
+        self.maxX = self.x + self.width
+        self.maxY = self.y + self.height
+        self.scrollY = 0
         
-        # ✅ 日本語対応フォントの指定（相対パスで管理しやすく）
+        # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         
         self.c_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", name.lower(), name.lower() + ".c")
@@ -3276,6 +3290,11 @@ class CodeWindow(Window, Map):
         y_offset = 20
 
         for i, line in enumerate(self.lines):
+            if y_offset > self.maxY:
+                break
+            elif i < self.linenum - 3 + (self.scrollY // 20):
+                continue
+            
             text = line.rstrip()
 
             if (i + 1) == self.linenum:
@@ -3287,9 +3306,12 @@ class CodeWindow(Window, Map):
                 )
                 pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
 
-            # ✅ freetypeの描画 (Surface には直接描画)
+            # freetypeの描画 (Surface には直接描画)
             self.font.render_to(screen, (x_offset, y_offset), text, self.TEXT_COLOR)
             y_offset += self.FONT_SIZE + 4
+    
+    def isCursorInWindow(self, pos : tuple[int, int]):
+        return True if self.x <= pos[0] <= self.maxX and self.y <= pos[1] <= self.maxY else False
 
 # 88888888888                                        ad88888ba                                  88                        
 # 88                                          ,d    d8"     "8b                                 88                        

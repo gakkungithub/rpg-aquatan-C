@@ -1,5 +1,1 @@
-start,05_loops_and_break,15, 10
-itemget, 05_loops_and_break,12, 10,sum
-itemget, 05_loops_and_break,14, 14,i
-jump, 05_loops_and_break,9, 6
-end, 05_loops_and_break,27, 12
+start,05_loops_and_break,7, 14

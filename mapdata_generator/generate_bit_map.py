@@ -584,30 +584,30 @@ class GenBitMap:
                 if dir == 'u':
                     for x in range(sx, sx + swidth):
                         if (0 <= sy-1 < h and 0 <= x < w and self.floorMap[sy, x] != 0 and 
-                            self.roomsMap[sy, x-1] != 0 and self.roomsMap[sy-1, x] != 0 and self.roomsMap[sy, x+1] != 0):
+                            self.mapInfo.eventMap[sy, x-1] == 0 and self.mapInfo.eventMap[sy-1, x] == 0 and self.mapInfo.eventMap[sy, x+1] == 0):
                             candidates.append((sy, x))
 
                 # bottom edge (y = sy + height - 1)
                 elif dir == 'd':
+                    y = sy + sheight
                     for x in range(sx, sx + swidth):
-                        y = sy + sheight
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
-                            self.roomsMap[y, x-1] != 0 and self.roomsMap[y+1, x] != 0 and self.roomsMap[y, x+1] != 0):
+                            self.mapInfo.eventMap[y, x-1] == 0 and self.mapInfo.eventMap[y+1, x] == 0 and self.mapInfo.eventMap[y, x+1] == 0):
                             candidates.append((y, x))
 
                 # left edge (x = sx)
                 elif dir == 'l':
                     for y in range(sy, sy + sheight):
                         if (0 <= y < h and 0 <= sx-1 < w and self.floorMap[y, sx] != 0 and 
-                            self.roomsMap[y-1, sx] != 0 and self.roomsMap[y, sx-1] != 0 and self.roomsMap[y+1, sx] != 0):
+                            self.mapInfo.eventMap[y-1, sx] == 0 and self.mapInfo.eventMap[y, sx-1] == 0 and self.mapInfo.eventMap[y+1, sx] == 0):
                             candidates.append((y, sx))
 
                 # right edge (x = sx + width - 1)
                 elif dir == 'r':
+                    x = sx + swidth
                     for y in range(sy, sy + sheight):
-                        x = sx + swidth
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
-                            self.roomsMap[y-1, x] != 0 and self.roomsMap[y, x+1] != 0 and self.roomsMap[y+1, x] != 0):
+                            self.mapInfo.eventMap[y-1, x] == 0 and self.mapInfo.eventMap[y, x+1] == 0 and self.mapInfo.eventMap[y+1, x] == 0):
                             candidates.append((y, x))
 
                 if not candidates:
@@ -683,15 +683,14 @@ class GenBitMap:
             check_map[start] = 0
             check_map[goal] = 0
 
-            setExit = False
             path = AStarFixed(check_map).search(start, goal)
 
             if path is None:
                 self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158) 
             else:
                 self.floorMap[path[0][0], path[0][1]] = 0
-
                 self.mapInfo.setDoor(path[0], dir)
+                setExit = False
                 for i in range(1, len(path)):
                     self.floorMap[path[i][0], path[i][1]] = 0
 
