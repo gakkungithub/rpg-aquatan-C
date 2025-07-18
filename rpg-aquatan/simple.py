@@ -300,7 +300,7 @@ def main():
     # # main関数開始時の処理を送信する(今は何もない想定でパスする)。
     # sender.send_event({"pass": "begin"})
 
-    last_mouse_y = None
+    last_mouse_pos = None
     while True:
         messages = []
         clock.tick(MAX_FRAME_PER_SEC)
@@ -458,19 +458,27 @@ def main():
                     start_timer()
                     if CODEWND.is_visible:
                         if CODEWND.isCursorInWindow(event.pos):
-                            last_mouse_y = event.pos[1]
+                            last_mouse_pos = event.pos
                     cmd = BTNWND.is_clicked(event.pos)
                 
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     mouse_down = False
-                    last_mouse_y = None
+                    last_mouse_pos = None
                     end_timer()
             if mouse_down:
-                if event.type == pygame.MOUSEMOTION and last_mouse_y:
-                    dy = - (event.pos[1] - last_mouse_y)
-                    CODEWND.scrollY += dy
-                    last_mouse_y = event.pos[1]
+                if event.type == pygame.MOUSEMOTION and last_mouse_pos:
+                    dy = - (event.pos[1] - last_mouse_pos[1])
+                    dx = - (event.pos[0] - last_mouse_pos[0])
+                    if CODEWND.scrollY + dy > 0:
+                        CODEWND.scrollY += dy
+                    else:
+                        CODEWND.scrollY = 0
+                    if CODEWND.scrollX + dx > 0:
+                        CODEWND.scrollX += dx
+                    else:
+                        CODEWND.scrollX = 0
+                    last_mouse_pos = event.pos
                 cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
             # endregion
             
@@ -2354,7 +2362,7 @@ class ItemWindow(Window):
 
     mapchip = 456  # アイテムのUI(テスト用)
 
-    def __init__(self, rect,player):
+    def __init__(self, rect, player):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
         self.myfont = pygame.freetype.Font(
@@ -2382,7 +2390,7 @@ class ItemWindow(Window):
             y = 10 + (gvarnum + j) * 25
 
             # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype)  # あなたが使っている単一画像でも、将来的に複数アイコン対応でも可
+            icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
             icon_y = y
             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
@@ -3242,15 +3250,15 @@ class CodeWindow(Window, Map):
     """デバッグコードウィンドウ"""
     FONT_SIZE = 12
     HIGHLIGHT_COLOR = (0, 0, 255)
-    TEXT_COLOR = (255, 255, 255)
-    BG_COLOR = (30, 30, 30)
+    TEXT_COLOR = (255, 255, 255, 255)
 
     def __init__(self, rect, name):
         Window.__init__(self, rect)
-        Map.__init__(self, name)
+        # Map.__init__(self, name)
 
         self.maxX = self.x + self.width
         self.maxY = self.y + self.height
+        self.scrollX = 0
         self.scrollY = 0
         
         # 日本語対応フォントの指定
@@ -3267,6 +3275,11 @@ class CodeWindow(Window, Map):
             return ["// File not found"]
         with open(self.c_file_path, 'r', encoding="utf-8") as f:
             return f.readlines()
+        
+    def draw_string(self, x, y, string, color):
+        """文字列出力"""
+        surf, rect = self.font.render(string, color)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE+2)-rect[3]))
 
     def load_first_code_line(self):
         cnt = 0
@@ -3283,11 +3296,11 @@ class CodeWindow(Window, Map):
     def draw(self, screen):
         if not self.is_visible:
             return
-        Window.draw(self)
-        Window.blit(self, screen)
 
-        x_offset = SCR_WIDTH - MIN_MAP_SIZE
-        y_offset = 20
+        Window.draw(self)
+
+        x_offset = 10 - self.scrollX
+        y_offset = 10 - self.scrollY
 
         for i, line in enumerate(self.lines):
             if y_offset > self.maxY:
@@ -3304,11 +3317,13 @@ class CodeWindow(Window, Map):
                     self.rect.width - 20,
                     self.FONT_SIZE + 4
                 )
-                pygame.draw.rect(screen, self.HIGHLIGHT_COLOR, bg_rect)
+                pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
 
             # freetypeの描画 (Surface には直接描画)
-            self.font.render_to(screen, (x_offset, y_offset), text, self.TEXT_COLOR)
+            self.draw_string(x_offset, y_offset, text, self.TEXT_COLOR)
             y_offset += self.FONT_SIZE + 4
+
+        Window.blit(self, screen)
     
     def isCursorInWindow(self, pos : tuple[int, int]):
         return True if self.x <= pos[0] <= self.maxX and self.y <= pos[1] <= self.maxY else False
