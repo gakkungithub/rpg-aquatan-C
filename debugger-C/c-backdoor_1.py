@@ -434,6 +434,47 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             vars_changed = varsTracker.trackStart(frame)
 
+            # 変数が初期化されない時、スキップされるので、それも読み取る
+            target_lines = [line for line in varsDeclLines_list if int(line) < line_number]
+
+            # 最初の初期化されない変数があるかを見る
+            if len(target_lines) != 0 and line_number not in line_data[func_name]:
+                # 変数が合致していればstepinを実行して次に進む
+                for i, line in enumerate(target_lines):
+                    skipped_varDecls = varsDeclLines_list.pop(line)
+                    vars_event = []
+                    errorCnt = 0
+                    if (event := event_reciever()) is None:
+                        return
+                    while True:
+                        if (item := event.get('item', None)) is not None:
+                            if not item in skipped_varDecls:
+                                errorCnt += 1
+                                print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
+                                # 複数回入力を間違えたらヒントをあげる
+                                if errorCnt >= 3:
+                                    event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
+                                else:
+                                    event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                                event = event_reciever()
+                                continue
+                            
+                            vars_event.append(item)
+                            if Counter(vars_event) == Counter(skipped_varDecls):
+                                print("you selected correct vars")
+                                event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok", "line": int(target_lines[i+1]) if len(target_lines) > i+1 else line_number}, False)
+                                varsTracker.setVarsDeclared(item)
+                                vars_changed.remove(item)
+                                break
+                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"}, False)
+                            varsTracker.setVarsDeclared(item)
+                            vars_changed.remove(item)
+                        else:
+                            errorCnt += 1
+                            event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                            event = event_reciever()
+                            continue
+
             get_std_outputs()
 
             vars_checker(vars_changed)

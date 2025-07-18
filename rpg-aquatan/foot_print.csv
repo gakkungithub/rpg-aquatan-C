@@ -1,2 +1,5 @@
-start,05_loops_and_break,13, 12
-end, 05_loops_and_break,13, 12
+start,05_loops_and_break,14, 8
+itemget, 05_loops_and_break,15, 13,test
+itemget, 05_loops_and_break,13, 11,sum
+itemget, 05_loops_and_break,16, 11,i
+end, 05_loops_and_break,16, 15

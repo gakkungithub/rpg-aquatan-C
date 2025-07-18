@@ -2987,7 +2987,7 @@ class ItemBag:
 class Item:
     """アイテム"""
 
-    def __init__(self,name,value,vartype, undefined):
+    def __init__(self, name, value, vartype, undefined):
         self.name = str(name)
         self.value = value
         self.vartype = vartype
@@ -3279,7 +3279,7 @@ class CodeWindow(Window, Map):
     def draw_string(self, x, y, string, color):
         """文字列出力"""
         surf, rect = self.font.render(string, color)
-        self.surface.blit(surf, (x, y+(self.FONT_SIZE+2)-rect[3]))
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
 
     def load_first_code_line(self):
         cnt = 0
@@ -3305,8 +3305,6 @@ class CodeWindow(Window, Map):
         for i, line in enumerate(self.lines):
             if y_offset > self.maxY:
                 break
-            elif i < self.linenum - 3 + (self.scrollY // 20):
-                continue
             
             text = line.rstrip()
 
