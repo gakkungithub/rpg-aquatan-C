@@ -12,22 +12,6 @@ from collections import Counter
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/data'
 
-def get_all_stdvalue(process):
-    stdout_output = ""
-    stderr_output = ""
-
-    while True:
-        out = process.GetSTDOUT(1024)
-        err = process.GetSTDERR(1024)
-
-        if not out and not err:
-            break
-
-        stdout_output += out
-        stderr_output += err
-
-    return stdout_output, stderr_output
-
 class VarsTracker:
     def __init__(self):
         self.previous_values = {}
@@ -60,31 +44,6 @@ class VarsTracker:
             self.previous_values[full_name] = value
 
             num_children = var.GetNumChildren()
-            # region commandline
-            # print(var.GetType().GetName() + str(var.GetType().IsPointerType()))
-
-            # コマンドライン引数の名前をフローチャートを使って解明できるならここを使ってコマンドライン引数を取得
-            # コマンドライン引数は定数なので、精査する必要はない
-            # if argv_name == name:
-            #     try:
-            #         argc_val = int(var.GetValue())
-            #         argv_addr = int(var.GetValue(), 16)
-
-            #         for i in range(argc_val):
-            #             element_addr = argv_addr + i * process.GetAddressByteSize()
-            #             error = lldb.SBError()
-            #             ptr_data = process.ReadPointerFromMemory(element_addr, error)
-            #             if error.Success() and ptr_data:
-            #                 cstr = process.ReadCStringFromMemory(ptr_data, 100, error)
-            #                 if error.Success():
-            #                     print(f"{indent}argv[{i}]: \"{cstr}\"")
-            #                 else:
-            #                     print(f"{indent}argv[{i}]: <unreadable>")
-            #             else:
-            #                 print(f"{indent}argv[{i}]: <null or error>")
-            #     except Exception as e:
-            #         print(f"{indent}Failed to read argv: {e}")
-            # endregion
             
             if var.GetType().IsPointerType():
                 pointee_type = var.GetType().GetPointeeType()
@@ -155,15 +114,21 @@ class VarsTracker:
     def setVarsDeclared(self, var):
         return self.vars_declared.append(var)
     
-# コマンドライン引数の確認
-def get_command_line_args():
-    parser = argparse.ArgumentParser(description='for the c-backdoor')
+def get_all_stdvalue(process):
+    stdout_output = ""
+    stderr_output = ""
 
-    # ベース名を取得
-    parser.add_argument('--name', type=str, required=True, help='string')
+    while True:
+        out = process.GetSTDOUT(1024)
+        err = process.GetSTDERR(1024)
 
-    # 引数を解析
-    return parser.parse_args()
+        if not out and not err:
+            break
+
+        stdout_output += out
+        stderr_output += err
+
+    return stdout_output, stderr_output
 
 def get_instructions_for_current_line(frame, target):
     line_entry = frame.GetLineEntry()
@@ -325,7 +290,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event = event_reciever()
                         continue
             
-
     def event_reciever():
         # JSONが複数回に分かれて送られてくる可能性があるためパース
         data = conn.recv(1024)
@@ -439,6 +403,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             # 最初の初期化されない変数があるかを見る
             if len(target_lines) != 0 and line_number not in line_data[func_name]:
+                print(line_number)
                 # 変数が合致していればstepinを実行して次に進む
                 for i, line in enumerate(target_lines):
                     skipped_varDecls = varsDeclLines_list.pop(line)
@@ -478,6 +443,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             get_std_outputs()
 
             vars_checker(vars_changed)
+
+            
 
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped: 
@@ -569,19 +536,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             vars_changed = varsTracker.trackStart(frame)
                                             vars_checker(vars_changed)
                                             break
-                                        # elif crntFromTo[-1] == line_number:
-                                        #     event_sender({"message": "", "status": "ok"})
-                                        #     vars_changed = varsTracker.trackStart(frame)
-                                        #     vars_checker(vars_changed)
-                                        #     while True:
-                                        #         if (event := event_reciever()) is None:
-                                        #             break
-
+                                elif type == 'ifEnd':
+                                    event_sender({"message": "", "status": "ok"})
                                 elif type == 'doWhileIn':
                                     event_sender({"message": "", "status": "ok"})
                                 elif type in ['doWhileTrue', 'doWhileFalse']:
                                     event_sender({"message": "", "status": "ok"})
                                 elif type == 'switchCase':
+                                    event_sender({"message": "", "status": "ok"})
+                                elif type == 'break':
                                     event_sender({"message": "", "status": "ok"})
                                 else:
                                     event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
@@ -589,13 +552,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             elif fromTo[:2] == [None, crnt_line_number] and type == 'switchEnd':
                                 event_sender({"message": "", "status": "ok"})
                             else:
-                                print(f"{line_number} - {crnt_line_number}")
                                 event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
                                 continue            
                         elif len(fromTo) == 1 and fromTo == [line_number]:
-                            if type == 'ifEnd':
-                                event_sender({"message": "", "status": "ok"})
-                            elif type == 'whileIn':
+                            if type == 'whileIn':
                                 event_sender({"message": "", "status": "ok"})
 
                                 # get_std_outputs, state_checkerを入れるかは後々考える
@@ -639,12 +599,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             print(f"{line_number}, {crnt_line_number}")
                             event_sender({"message": "ここから先は進入できません7!!", "status": "ng"})
                             continue
-                    # # ひとまず、forでの変数の初期化はitemとして考える
-                    # elif (item := event.get('item', None)) is not None:
-                    #     print('here')
-                    #     if item in varsDeclLines_list[str(line_number)]:
-                    #         vars_checker(vars_changed, event)
-                    #     continue
                     else:
                         event_sender({"message": "NG行動をしました6!!", "status": "ng"})
                         continue
@@ -667,22 +621,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     except:
         pass
 
-def start_server(host='localhost', port=9999):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        s.bind((host, port))
-        s.listen()
-        print(f"[サーバ起動] {host}:{port} で待機中...")
 
-        conn, addr = s.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
-        thread.start()
-
-        thread.join()
-        print("[サーバ終了]")
-
-args = get_command_line_args()
+# region コマンドライン引数の確認
+parser = argparse.ArgumentParser(description='for the c-backdoor')
+# ベース名を取得
+parser.add_argument('--name', type=str, required=True, help='string')
+# 引数を解析
+args = parser.parse_args()
+# endregion
 
 # region lldbの初期設定
 lldb.SBDebugger.Initialize()
@@ -724,4 +670,21 @@ if not thread.IsValid():
     exit(1)
 # endregion
 
-start_server()
+# region サーバーの開始メソッドは再利用性がないのでインライン展開する
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    host='localhost'
+    port=9999
+
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    s.bind((host, port))
+    s.listen()
+    print(f"[サーバ起動] {host}:{port} で待機中...")
+
+    conn, addr = s.accept()
+    server_thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
+    server_thread.start()
+
+    server_thread.join()
+    print("[サーバ終了]")
+# endregion

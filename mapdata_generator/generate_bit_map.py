@@ -85,9 +85,9 @@ class MapInfo:
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
         self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
-        self.chara_moveItems = []
-        self.chara_return = []
-        self.exit_info = []
+        self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
+        self.chara_return: list[tuple[tuple[int, int], str, int]] = []
+        self.exit_info: list[tuple[int, int], str, list[int | None], str] = []
         self.door_info: list[tuple[tuple[int, int], str, int]] = []
 
     # プレイヤーの初期位置の設定
@@ -157,7 +157,7 @@ class MapInfo:
                 self.setWarpZone(fromNodeID, toNodeID, 158)
 
     # ワープゾーンの設定
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, mapChipNum: int, diamondNodeID: str = None):
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, mapChipNum: int, warpNodeID: str = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -175,8 +175,8 @@ class MapInfo:
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
                 # doWhileTrue, ifEndについては上書きする
-                if diamondNodeID:
-                    c_move_type, c_move_fromTo = self.condition_move[diamondNodeID]
+                if warpNodeID:
+                    c_move_type, c_move_fromTo = self.condition_move[warpNodeID]
                 self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo))
             else:
                 print("generation failed: try again!! 1")
@@ -245,8 +245,8 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], int]], roomSize_info, 
-                 gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
+    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], int]], 
+                 roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
         self.nextNodeInfo: dict[str, tuple[str, str]] = {}
@@ -480,7 +480,7 @@ class GenBitMap:
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
-        # for文の初期値で変数の初期化がある場合はアイテムを作る ()
+        # for文の初期値で変数の初期化がある場合はアイテムを作る
         elif self.getNodeShape(nodeID) == 'invhouse':
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 # ノーマル変数
@@ -492,10 +492,13 @@ class GenBitMap:
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
-        # elif self.getNodeShape(nodeID) == 'hexagon':
-        #     toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
-        #     self.createRoom(toNodeID)
-        #     self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
+        elif self.getNodeShape(nodeID) == 'hexagon':
+            if self.mapInfo.condition_move.get(nodeID, None):
+                nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
+                self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
+            # toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
+            # self.createRoom(toNodeID)
+            # self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
         else:
             # switch構文でワープゾーンを繋げる
             if crntRoomID != nodeID:
@@ -507,7 +510,6 @@ class GenBitMap:
                     crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-            print(f"{self.getNodeShape(toNodeID)} - {loopBackID}")
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
     #'label', 'shape'属性がある
