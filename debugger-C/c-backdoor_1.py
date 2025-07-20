@@ -349,7 +349,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         mnemonic = inst.GetMnemonic(target)
 
         print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
-
+        
         thread.StepInto()
 
     def get_next_state():
@@ -547,6 +547,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 elif type == 'doWhileIn':
                                     event_sender({"message": "", "status": "ok"})
                                 elif type in ['doWhileTrue', 'doWhileFalse']:
+                                    # ここで繰り返しをスキップするかどうか確認する
                                     event_sender({"message": "", "status": "ok"})
                                 elif type == 'switchCase':
                                     event_sender({"message": "", "status": "ok"})
@@ -564,13 +565,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         elif len(fromTo) == 1 and fromTo == [line_number]:
                             if type == 'whileIn':
                                 event_sender({"message": "", "status": "ok"})
-
-                                # get_std_outputs, state_checkerを入れるかは後々考える
-
                                 while True:
                                     if (event := event_reciever()) is None:
                                         break
-
                                     if (fromTo := event.get('fromTo', None)) is not None:
                                         type = event.get('type', '')
                                         if type in ['whileTrue', 'whileFalse']:
@@ -581,14 +578,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             elif type == 'forIn':
                                 if str(line_number) not in varsDeclLines_list:
                                     event_sender({"message": "", "status": "ok"})
-
-                                    # get_std_outputs, state_checkerを入れるかは後々考える
-
                                     while True:
                                         print(line_number, next_line_number)
                                         if (event := event_reciever()) is None:
                                             break
-
                                         if (fromTo := event.get('fromTo', None)) is not None:
                                             type = event.get('type', '')
                                             if type in ['forTrue', 'forFalse']:

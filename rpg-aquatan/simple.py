@@ -3337,9 +3337,10 @@ class CodeWindow(Window, Map):
 # 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
 
 class EventSender:
-    def __init__(self, code_window: CodeWindow, host='localhost', port=9999):
+    def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.code_window = code_window
+        self.sock.settimeout(timeout)  # ← タイムアウトをここで設定
         try:
             self.sock.connect((host, port))
         except Exception as e:
@@ -3351,21 +3352,27 @@ class EventSender:
 
     def receive_json(self):
         buffer = ""
-        while True:
-            data = self.sock.recv(1024)
-            if not data:
-                return None  # 接続が閉じられた
-            buffer += data.decode()
-            try:
-                msg = json.loads(buffer)
-                if "line" in msg:
-                    self.code_window.update_code_line(msg["line"])
-                if "removed" in msg:
-                    for item in msg["removed"]:
-                        PLAYER.itembag.remove(item)
-                return msg
-            except json.JSONDecodeError:
-                continue  # JSONがまだ完全でないので続けて待つ
+        try:
+            while True:
+                data = self.sock.recv(1024)
+                if not data:
+                    return None  # 接続が閉じられた
+                buffer += data.decode()
+                try:
+                    msg = json.loads(buffer)
+                    if "line" in msg:
+                        self.code_window.update_code_line(msg["line"])
+                    if "removed" in msg:
+                        for item in msg["removed"]:
+                            PLAYER.itembag.remove(item)
+                    return msg
+                except json.JSONDecodeError:
+                    continue  # JSONがまだ完全でないので続けて待つ
+        except socket.timeout:
+            raise TimeoutError("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+        except Exception as e:
+            print(f"受信エラー: {e}")
+            raise 
         
     def close(self):
         self.sock.close()
