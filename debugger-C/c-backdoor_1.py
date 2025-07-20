@@ -16,17 +16,20 @@ class VarsTracker:
     def __init__(self):
         self.previous_values = {}
         self.vars_declared = []
+        self.vars_removed = []
     
     def trackStart(self, frame):
         return self.track(frame.GetVariables(True, True, False, True))
 
     def track(self, vars, depth=0, max_depth=10, prefix="") -> list[str]:
         vars_changed = []
+        crnt_vars = []
 
         if depth > max_depth:
             return []
         
         indent = "    " * depth
+
         for var in vars:
             name = var.GetName()
             full_name = f"{prefix}.{name}" if prefix else name
@@ -40,6 +43,9 @@ class VarsTracker:
                 vars_changed.append(full_name)
             else:
                 print(f"{indent}{full_name} = {value}")
+
+            if depth == 0:
+                crnt_vars.append(name)
 
             self.previous_values[full_name] = value
 
@@ -106,6 +112,8 @@ class VarsTracker:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
                 vars_changed += self.track(children, depth + 1, max_depth, full_name)
 
+        if depth == 0:
+            self.vars_removed = list(set(self.vars_declared) - set(crnt_vars))
         return vars_changed
     
     def getValue(self, var):
@@ -249,7 +257,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     continue
 
         # 変数が初期化されない時、スキップされるので、それも読み取る
-        target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
+        target_lines = [line for line in varsDeclLines_list if line_number < int(line) < next_line_number]
 
         if len(target_lines) != 0 and line_number not in line_data[func_name]:
             # 変数が合致していればstepinを実行して次に進む
@@ -303,12 +311,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     
     def event_sender(msgJson, getLine=True):
         if msgJson["status"] == "ok" and getLine:
-            target_lines = [line for line in varsDeclLines_list if line_number < int(line) < crnt_line_number]
+            target_lines = [line for line in varsDeclLines_list if line_number < int(line) < next_line_number]
             # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
             if len(target_lines) != 0 and line_number not in line_data[func_name]:
                 msgJson["line"] = int(target_lines[0])
             else:
-                msgJson["line"] = crnt_line_number
+                msgJson["line"] = next_line_number
+                msgJson["removed"] = varsTracker.vars_removed
         send_data = json.dumps(msgJson)
         conn.sendall(send_data.encode('utf-8'))
 
@@ -392,7 +401,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             step_conditionally(frame)
             
             if (next_state := get_next_state()):
-                state, frame, file_name, crnt_line_number, func_crnt_name = next_state
+                state, frame, file_name, next_line_number, func_crnt_name = next_state
             else:
                 isEnd = True
 
@@ -444,15 +453,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             vars_checker(vars_changed)
 
-            
-
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped: 
             # JSONが複数回に分かれて送られてくる可能性があるためパース
                 if line_data.get(func_name, None) and line_number in line_data[func_name] and not isEnd:
                     if (event := event_reciever()) is None:
                         continue
-
                     if (ngname := event.get('ng', None)) is not None:
                         if ngname == "notEnter":
                             event_sender({"message": "ここから先は進入できません1!!", "status": "ng"})
@@ -474,7 +480,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
                         # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
                         if len(fromTo) >= 2:
-                            if fromTo[:2] == [line_number, crnt_line_number]:
+                            if fromTo[:2] == [line_number, next_line_number]:
                                 if type == 'if':
                                     errorCnt_if = 0
                                     line_number_track = fromTo[:2]
@@ -506,13 +512,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             step_conditionally(frame)
 
                                             if (next_state := get_next_state()):
-                                                line_number = crnt_line_number
+                                                line_number = next_line_number
                                                 func_name = func_crnt_name
-                                                state, frame, file_name, crnt_line_number, func_crnt_name = next_state
+                                                state, frame, file_name, next_line_number, func_crnt_name = next_state
                                             else:
                                                 isEnd = True
 
-                                            if crntFromTo[0] != crnt_line_number:
+                                            if crntFromTo[0] != next_line_number:
                                                 errorCnt_if += 1
                                                 event_sender({"message": f"ここから先は進入できません3!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                                 while True:
@@ -526,7 +532,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                         event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
                                                     else:
                                                         break
-                                                line_number_track.append(crnt_line_number)
+                                                line_number_track.append(next_line_number)
                                                 break
                                             line_number_track.append(crntFromTo.pop(0))
 
@@ -549,9 +555,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 else:
                                     event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
                                     continue 
-                            elif fromTo[:2] == [None, crnt_line_number] and type == 'switchEnd':
+                            elif fromTo[:2] == [None, next_line_number] and type == 'switchEnd':
                                 event_sender({"message": "", "status": "ok"})
                             else:
+                                print(f"{line_number} - {next_line_number}")
                                 event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
                                 continue            
                         elif len(fromTo) == 1 and fromTo == [line_number]:
@@ -567,7 +574,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if (fromTo := event.get('fromTo', None)) is not None:
                                         type = event.get('type', '')
                                         if type in ['whileTrue', 'whileFalse']:
-                                            if fromTo == [line_number, crnt_line_number]:
+                                            if fromTo == [line_number, next_line_number]:
                                                 event_sender({"message": "", "status": "ok"})
                                                 break
                                     event_sender({"message": "NG行動をしました4!!", "status": "ng"})
@@ -578,14 +585,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     # get_std_outputs, state_checkerを入れるかは後々考える
 
                                     while True:
-                                        print(line_number, crnt_line_number)
+                                        print(line_number, next_line_number)
                                         if (event := event_reciever()) is None:
                                             break
 
                                         if (fromTo := event.get('fromTo', None)) is not None:
                                             type = event.get('type', '')
                                             if type in ['forTrue', 'forFalse']:
-                                                if fromTo == [line_number, crnt_line_number]:
+                                                if fromTo == [line_number, next_line_number]:
                                                     event_sender({"message": "", "status": "ok"})
                                                     break
                                         event_sender({"message": "NG行動をしました5!!", "status": "ng"})
@@ -596,7 +603,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})
                                 continue
                         else:
-                            print(f"{line_number}, {crnt_line_number}")
+                            print(f"{line_number}, {next_line_number}")
                             event_sender({"message": "ここから先は進入できません7!!", "status": "ng"})
                             continue
                     else:
@@ -606,9 +613,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 step_conditionally(frame)
 
                 if (next_state := get_next_state()):
-                    line_number = crnt_line_number
+                    line_number = next_line_number
                     func_name = func_crnt_name
-                    state, frame, file_name, crnt_line_number, func_crnt_name = next_state
+                    state, frame, file_name, next_line_number, func_crnt_name = next_state
                 else:
                     isEnd = True
 

@@ -375,8 +375,8 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
-                    #do_whileの同じノードに返って来る用
-                    if crntRoomID == toNodeID:
+                    #do_whileの場合はcondNodeIDのcondition_moveを使う
+                    if self.getNodeLabel(nodeID) == 'do':
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
                     else:
                         self.createPath(crntRoomID, toNodeID)
@@ -496,9 +496,6 @@ class GenBitMap:
             if self.mapInfo.condition_move.get(nodeID, None):
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
-            # toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
-            # self.createRoom(toNodeID)
-            # self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
         else:
             # switch構文でワープゾーンを繋げる
             if crntRoomID != nodeID:

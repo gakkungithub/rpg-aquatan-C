@@ -1315,7 +1315,8 @@ class Map:
             elif event_type == "SIGN":  # 任意の文字を書く看板
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
-                self.create_treasure_j(event)
+                if PLAYER.commonItembag.find(event["item"]) is None and PLAYER.itembag.find(event["item"]) is None:
+                    self.create_treasure_j(event)
             elif event_type == "DOOR":  # ドア
                 self.create_door_j(event)
             elif event_type == "SDOOR":  #  小さいドア
@@ -3359,6 +3360,9 @@ class EventSender:
                 msg = json.loads(buffer)
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])
+                if "removed" in msg:
+                    for item in msg["removed"]:
+                        PLAYER.itembag.remove(item)
                 return msg
             except json.JSONDecodeError:
                 continue  # JSONがまだ完全でないので続けて待つ

@@ -12,7 +12,11 @@ parser.add_argument('-u', '--universal', dest='universal', action='store_true', 
 args = parser.parse_args()
 
 programname = args.program
+programpath = f"{DATA_DIR}/{programname}/{programname}"
 cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+
+# cプログラムを整形する
+subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
 # cファイルを解析してマップデータを生成する
 # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
@@ -21,11 +25,7 @@ if args.universal:
     cfcode.append("-u")
 subprocess.run(cfcode, cwd="mapdata_generator")
 
-programpath = f"{DATA_DIR}/{programname}/{programname}"
 subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
-
-# cプログラムを整形する
-subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
 # サーバを立てる
 env = os.environ.copy()
