@@ -502,7 +502,22 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'hexagon':
             if self.mapInfo.condition_move.get(nodeID, None):
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
-                self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
+                if self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
+                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158, nodeID)
+                    loopBackID = None
+                elif self.getNodeShape(nextNodeID) == 'diamond':
+                    self.createRoom(nextNodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
+                    for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
+                        self.createRoom(toNodeID)
+                        if self.getNodeShape(toNodeID) == 'circle':
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158)
+                        elif self.getNodeShape(toNodeID) == 'doublecircle':
+                            self.createPath(nextNodeID, toNodeID)
+                            nodeID = nextNodeID
+                else:
+                    self.createRoom(nextNodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
         else:
             # switch構文でワープゾーンを繋げる or do_while構文のstartノードにくっつける
             if crntRoomID != nodeID:

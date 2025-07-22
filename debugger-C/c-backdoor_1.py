@@ -549,18 +549,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     event_sender({"message": "", "status": "ok"})
                                 elif type == 'switchCase':
                                     event_sender({"message": "", "status": "ok"})
+                                elif type == 'continue':
+                                    event_sender({"message": "", "status": "ok"})
                                 elif type == 'break':
                                     event_sender({"message": "", "status": "ok"})
                                 else:
                                     event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
                                     continue 
                             elif fromTo[:2] == [None, next_line_number]:
-                                if type == 'switchEnd':
+                                if type == 'doWhileTrue':
                                     event_sender({"message": "", "status": "ok"})
-                                elif type == 'doWhileTrue':
+                                elif type == 'switchEnd':
                                     event_sender({"message": "", "status": "ok"})
                             else:
-                                print(f"{line_number} - {next_line_number}")
+                                print(f"{line_number}, {next_line_number}")
                                 event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
                                 continue            
                         elif len(fromTo) == 1 and fromTo == [line_number]:
