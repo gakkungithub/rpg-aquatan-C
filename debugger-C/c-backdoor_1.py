@@ -544,9 +544,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             break
                                 elif type == 'ifEnd':
                                     event_sender({"message": "", "status": "ok"})
-                                elif type == 'doWhileIn':
-                                    event_sender({"message": "", "status": "ok"})
-                                elif type in ['doWhileTrue', 'doWhileFalse']:
+                                elif type in 'doWhileFalse':
                                     # ここで繰り返しをスキップするかどうか確認する
                                     event_sender({"message": "", "status": "ok"})
                                 elif type == 'switchCase':
@@ -556,8 +554,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 else:
                                     event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
                                     continue 
-                            elif fromTo[:2] == [None, next_line_number] and type == 'switchEnd':
-                                event_sender({"message": "", "status": "ok"})
+                            elif fromTo[:2] == [None, next_line_number]:
+                                if type == 'switchEnd':
+                                    event_sender({"message": "", "status": "ok"})
+                                elif type == 'doWhileTrue':
+                                    event_sender({"message": "", "status": "ok"})
                             else:
                                 print(f"{line_number} - {next_line_number}")
                                 event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
@@ -575,6 +576,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 event_sender({"message": "", "status": "ok"})
                                                 break
                                     event_sender({"message": "NG行動をしました4!!", "status": "ng"})
+                            elif type == 'doWhileIn':
+                                event_sender({"message": "", "status": "ok"})
+                                continue
                             elif type == 'forIn':
                                 if str(line_number) not in varsDeclLines_list:
                                     event_sender({"message": "", "status": "ok"})

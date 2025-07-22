@@ -779,12 +779,12 @@ class ASTtoFlowChart:
             if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 cr_true = list(cr.get_children())
                 if len(cr_true):
-                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr_true[0].location.line ])
+                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr_true[0].location.line])
                 else:
-                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cond_cursor.location.line ])
+                    self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cond_cursor.location.line])
                 body_end = self.parse_comp_stmt(cr, body_end)
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr.location.line ])
+                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line , cr.location.line])
                 body_end = self.parse_stmt(cr, body_end)
 
         # --- ループを閉じる処理 ---
@@ -799,7 +799,7 @@ class ASTtoFlowChart:
         self.createRoomSizeEstimate(endNodeID)
         self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line , self.nextLines[-1]])
 
-        self.createEdgeForLoop(endNodeID, condNodeID)
+        self.createEdgeForLoop(endNodeID, condNodeID, [cond_cursor.location.line])
 
         return endNodeID
 
@@ -807,6 +807,7 @@ class ASTtoFlowChart:
     #まずは最初の処理を示す子ノードと現在ノードを接続する
     #Doノードの子ノードはCOMPOUNDと条件部しかなく、条件部は2つ目に読まれる
     #そこで読み込まれたノードを先頭ノードと次ノードをくっつける
+    ### 条件部のために部屋を新たに作る
     def parse_do_stmt(self, cursor, nodeID, edgeName=""):
         startNodeID = self.createNode("", 'circle')
         #ここで部屋情報を作る
@@ -828,7 +829,6 @@ class ASTtoFlowChart:
                 else:
                     self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line , cursor.location.line])
                     start_cr = cursor
-                
                 self.line_info[self.scanning_func].add(cursor.location.line )
                 nodeID = self.parse_comp_stmt(cr, startNodeID)
             else:
@@ -837,7 +837,7 @@ class ASTtoFlowChart:
                 condNodeID = self.get_exp(cr, 'diamond', 'do')
                 self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line , start_cr.location.line])
                 self.line_info[self.scanning_func].add(cr.location.line )
-                self.createEdgeForLoop(endNodeID, condNodeID)
+                self.createEdgeForLoop(endNodeID, condNodeID, self.condition_move[f'"{startNodeID}"'][1])
                 self.createEdge(nodeID, condNodeID)
                 self.createEdge(condNodeID, startNodeID, "True")
                 self.createEdge(condNodeID, endNodeID, "False")
@@ -923,8 +923,7 @@ class ASTtoFlowChart:
 
         self.createEdge(nodeID, changeNodeID)
         self.createEdge(changeNodeID, condNodeID)
-        # self.createEdgeForLoop(endNodeID, changeNodeID)
-        self.createEdgeForLoop(endNodeID, changeNodeID)
+        self.createEdgeForLoop(endNodeID, changeNodeID, [cursor.location.line])
         
         self.createEdge(condNodeID, endNodeID, "False")
         #ここでforを抜けた後の部屋情報を作る
@@ -1057,7 +1056,7 @@ class ASTtoFlowChart:
         return endNodeID
 
     #ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
-    def createEdgeForLoop(self, breakToNodeID, continueToNodeID):
+    def createEdgeForLoop(self, breakToNodeID, continueToNodeID, continueLine_track):
         loopBreaker = self.loopBreaker_list.pop()
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
@@ -1067,4 +1066,9 @@ class ASTtoFlowChart:
             self.line_info[self.scanning_func].add(breakLine)
         for continueNodeID, continueLine in continue_list:
             self.createEdge(continueNodeID, continueToNodeID)
-            # self.condition_move[f'"{continueToNodeID}"'] = ('continue', [None, None])
+            # do_while 3
+            if len(continueLine_track) == 2:
+                self.condition_move[f'"{continueNodeID}"'] = ('continue', [continueLine] + continueLine_track)
+            # while, for 1
+            else:
+                self.condition_move[f'"{continueNodeID}"'] = ('continue', continueLine_track)

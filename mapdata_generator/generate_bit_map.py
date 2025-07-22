@@ -371,34 +371,43 @@ class GenBitMap:
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
-            #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
-            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-                self.createRoom(toNodeID)
-                if self.getNodeShape(toNodeID) == 'circle':
-                    #do_whileの場合はcondNodeIDのcondition_moveを使う
-                    if self.getNodeLabel(nodeID) == 'do':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
-                    else:
+            #do_whileの場合はcondNodeIDのcondition_moveを使う
+            if self.getNodeLabel(nodeID) == 'do':
+                self.createRoom(nodeID)
+                self.createPath(crntRoomID, nodeID)
+                crntRoomID = nodeID
+                for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
+                    self.createRoom(toNodeID)
+                    if self.getNodeShape(toNodeID) == 'circle':
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
+                    elif self.getNodeShape(toNodeID) == 'doublecircle':
                         self.createPath(crntRoomID, toNodeID)
-                    nodeIDs.insert(0, toNodeID)
-                elif self.getNodeShape(toNodeID) == 'diamond':
                     nodeIDs.append(toNodeID)
-                elif self.getNodeShape(toNodeID) == 'invtriangle':
-                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
-                    nodeIDs.insert(0, toNodeID)
-                elif self.getNodeShape(toNodeID) == 'doublecircle':
-                    self.createPath(crntRoomID, toNodeID)
-                    # self.setWarpZone(crntRoomID, toNodeID, 158)
-                    nodeIDs.append(toNodeID)
-                elif self.getNodeShape(toNodeID) == 'terminator':
-                    self.trackAST(crntRoomID, toNodeID, loopBackID)
-                else:
-                    print("unknown node appeared")
+            else:
+                #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
+                for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
+                    self.createRoom(toNodeID)
+                    if self.getNodeShape(toNodeID) == 'circle':
+                        self.createPath(crntRoomID, toNodeID)
+                        nodeIDs.insert(0, toNodeID)
+                    elif self.getNodeShape(toNodeID) == 'diamond':
+                        nodeIDs.append(toNodeID)
+                    elif self.getNodeShape(toNodeID) == 'invtriangle':
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
+                        nodeIDs.insert(0, toNodeID)
+                    elif self.getNodeShape(toNodeID) == 'doublecircle':
+                        self.createPath(crntRoomID, toNodeID)
+                        nodeIDs.append(toNodeID)
+                    elif self.getNodeShape(toNodeID) == 'terminator':
+                        self.trackAST(crntRoomID, toNodeID, loopBackID)
+                    else:
+                        print("unknown node appeared")
             for toNodeID in nodeIDs:
                 if self.getNodeShape(toNodeID) == 'diamond':
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
                 else:
                     self.trackAST(toNodeID, toNodeID, loopBackID)
+            return
 
         #while文とfor文は最終ノードからワープで戻る必要があるので、現在の部屋ノードのID(戻り先)を取得する
         elif self.getNodeShape(nodeID) == 'pentagon':
@@ -413,7 +422,6 @@ class GenBitMap:
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
                     self.createPath(nodeID, toNodeID)
-                    # self.setWarpZone(nodeID, toNodeID, 158)
                     nodeIDs.append(toNodeID)
             if nodeIDs:
                 #whileの領域に入る
@@ -450,10 +458,9 @@ class GenBitMap:
             self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name)
         
         # while文とfor文のワープ元である部屋のIDを取得する
-        elif self.getNodeShape(nodeID) == 'parallelogram':
-            if loopBackID:
-                self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158)
-                loopBackID = None
+        elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
+            self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158)
+            loopBackID = None
 
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
@@ -497,7 +504,7 @@ class GenBitMap:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
         else:
-            # switch構文でワープゾーンを繋げる
+            # switch構文でワープゾーンを繋げる or do_while構文のstartノードにくっつける
             if crntRoomID != nodeID:
                 if nodeID in self.roomSize_info[self.func_name]:
                     self.createRoom(nodeID)

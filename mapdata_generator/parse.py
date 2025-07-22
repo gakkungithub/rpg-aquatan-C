@@ -823,10 +823,10 @@ class ASTtoFlowChart:
             if cr.kind == clang.cindex.CursorKind.COMPOUND_STMT:
                 cr_in = list(cr.get_children())
                 if len(cr_in):
-                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line , cr_in[0].location.line])
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileTrue', [None, cr_in[0].location.line])
                     start_cr = cr_in[0]
                 else:
-                    self.condition_move[f'"{startNodeID}"'] = ('doWhileIn', [cursor.location.line , cursor.location.line])
+                    self.condition_move[f'"{startNodeID}"'] = ('doWhileTrue', [None, cursor.location.line])
                     start_cr = cursor
                 
                 self.line_info[self.scanning_func].add(cursor.location.line )
@@ -835,13 +835,15 @@ class ASTtoFlowChart:
                 if nodeID is None:
                     return None
                 condNodeID = self.get_exp(cr, 'diamond', 'do')
-                self.condition_move[f'"{condNodeID}"'] = ('doWhileTrue', [cr.location.line , start_cr.location.line])
-                self.line_info[self.scanning_func].add(cr.location.line )
+                # 今まではdo_whileだけ条件分岐の部屋を作っていなかったが、continueにも対応させるために作ることにする
+                self.createRoomSizeEstimate(condNodeID)
+                self.condition_move[f'"{condNodeID}"'] = ('doWhileIn', [cr.location.line])
+                self.line_info[self.scanning_func].add(cr.location.line)
                 self.createEdgeForLoop(endNodeID, condNodeID)
                 self.createEdge(nodeID, condNodeID)
                 self.createEdge(condNodeID, startNodeID, "True")
                 self.createEdge(condNodeID, endNodeID, "False")
-        self.condition_move[f'"{endNodeID}"'] = ('doWhileFalse', [cr.location.line , self.nextLines[-1]])
+        self.condition_move[f'"{endNodeID}"'] = ('doWhileFalse', [cr.location.line, self.nextLines[-1]])
         #ここでdo_whileを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
         return endNodeID

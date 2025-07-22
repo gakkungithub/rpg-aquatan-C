@@ -1,3 +1,9 @@
-start,05_loops_and_break,9, 12
-itemget, 05_loops_and_break,11, 12,test
-itemget, 05_loops_and_break,10, 11,sum
+start,05_loops_and_break,10, 11
+itemget, 05_loops_and_break,9, 13,test
+itemget, 05_loops_and_break,6, 12,sum
+itemget, 05_loops_and_break,10, 12,l
+itemget, 05_loops_and_break,15, 10,factorial
+jump, 05_loops_and_break,9, 6
+jump, 05_loops_and_break,36, 19
+jump, 05_loops_and_break,10, 5
+end, 05_loops_and_break,15, 32
