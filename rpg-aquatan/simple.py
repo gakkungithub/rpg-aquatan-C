@@ -430,6 +430,14 @@ def main():
                     PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    # skipアクション
+                    if moveResult.get('skip', False):
+                        MSGWND.set(moveResult['message'])
+                        skipResult = None
+                        while skipResult is None:
+                            sender.send_event({"type": "skip"})
+                        skipResult = sender.receive_json()
+                        MSGWND.set(skipResult['message'])
                 else:
                     MSGWND.set(moveResult['message'])
                 continue
@@ -726,7 +734,6 @@ def main():
                                 MSGWND.set(itemResult['message'])
                         continue
                     elif isinstance(event_underfoot, MoveEvent):
-                        # MoveEventなら
                         sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo})
                         moveResult = sender.receive_json()
                         if moveResult and moveResult['status'] == "ok":
@@ -734,12 +741,11 @@ def main():
                             dest_x = event_underfoot.dest_x
                             dest_y = event_underfoot.dest_y
 
-                            # region command
                             from_map = fieldmap.name
                             PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
                             if len(PLAYER.move5History) > 5:
                                 PLAYER.move5History.pop(0)
-                            # endregion
+
                             # 暗転
                             DIMWND.setdf(200)
                             DIMWND.show()
@@ -747,6 +753,14 @@ def main():
                             PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                             fieldmap.add_chara(PLAYER)  # マップに再登録
                             PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                            # skipアクション
+                            if moveResult.get('skip', False):
+                                MSGWND.set(moveResult['message'])
+                                skipResult = None
+                                while skipResult is None:
+                                    sender.send_event({"type": "skip"})
+                                skipResult = sender.receive_json()
+                                MSGWND.set(skipResult['message'])
                         else:
                             MSGWND.set(moveResult['message'])
                         continue
@@ -1808,6 +1822,14 @@ class Player(Character):
                             if self.door is not None:
                                 self.door.close()
                                 self.door = None
+                            # skipアクション
+                            if automoveResult.get('skip', False):
+                                MSGWND.set(automoveResult['message'])
+                                skipResult = None
+                                while skipResult is None:
+                                    self.sender.send_event({"type": "skip"})
+                                skipResult = self.sender.receive_json()
+                                MSGWND.set(skipResult['message'])
                     self.pop_automoveFromTo()
                     self.pop_automove()
             elif direction == 'x':
