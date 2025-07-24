@@ -75,7 +75,6 @@ CURRENT_FRAME_PER_SEC = 24
 SCR_RECT = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
 GS = 32
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
-MSGWAIT = 3 * MAX_FRAME_PER_SEC
 DB_CHECK_WAIT = 30 * MAX_FRAME_PER_SEC
 SS_CHECK_WAIT = args.screenshot * MAX_FRAME_PER_SEC
 
@@ -242,8 +241,8 @@ def main():
     # region ウィンドウの設定
     message_engine = MessageEngine()
     MSGWND = MessageWindow(
-        Rect( SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
-             SCR_WIDTH // 2, SCR_HEIGHT // 4), message_engine)
+        Rect(SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
+             SCR_WIDTH // 2, SCR_HEIGHT // 4), message_engine, sender)
     DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
     DIMWND.hide()
     LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
@@ -270,7 +269,6 @@ def main():
     print("5")
 
     PLAYER.append_automove(e)
-    msgwincount = 0
     db_check_count = 0
     ss_check_count = 0
 
@@ -295,10 +293,6 @@ def main():
 #        sys.exit()
 
     #current_place = OMZN_STATUS.current_place()
-    # 並列処理の接続開始はこれの前、データの送受信処理はこれ以降に書くことになる。
-
-    # # main関数開始時の処理を送信する(今は何もない想定でパスする)。
-    # sender.send_event({"pass": "begin"})
 
     last_mouse_pos = None
     while True:
@@ -307,7 +301,6 @@ def main():
         # メッセージウィンドウ表示中は更新を中止
         if not MSGWND.is_visible:
             fieldmap.update()
-
 
         MSGWND.update()
         offset = calc_offset(PLAYER)
@@ -384,7 +377,7 @@ def main():
             ss_check_count = ss_check_count + 1
 
         if MSGWND.is_visible:
-            msgwincount = msgwincount + 1
+            MSGWND.msgwincount += 1
 
         n_move = PLAYER.get_next_automove()
         if n_move is not None and n_move == 's':
@@ -432,12 +425,7 @@ def main():
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     # skipアクション
                     if moveResult.get('skip', False):
-                        MSGWND.set(moveResult['message'])
-                        skipResult = None
-                        while skipResult is None:
-                            sender.send_event({"type": "skip"})
-                        skipResult = sender.receive_json()
-                        MSGWND.set(skipResult['message'])
+                        MSGWND.set(moveResult['message'], ['はい', 'いいえ'])
                 else:
                     MSGWND.set(moveResult['message'])
                 continue
@@ -707,12 +695,14 @@ def main():
             if event.type == KEYDOWN and event.key == K_s:
                 pygame.image.save(screen, args.scrfile)
 
+            if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
+                MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+
             if (event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN)) or cmd == "action":
                 cmd = ""
                 if MSGWND.is_visible:
                     # メッセージウィンドウ表示中なら次ページへ
-                    MSGWND.next()
-                    msgwincount = 0
+                    MSGWND.next(True)
                 else:
                     # 足元にあるのが宝箱かワープゾーンかを調べる
                     event_underfoot = PLAYER.search(fieldmap)
@@ -755,12 +745,7 @@ def main():
                             PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                             # skipアクション
                             if moveResult.get('skip', False):
-                                MSGWND.set(moveResult['message'])
-                                skipResult = None
-                                while skipResult is None:
-                                    sender.send_event({"type": "skip"})
-                                skipResult = sender.receive_json()
-                                MSGWND.set(skipResult['message'])
+                                MSGWND.set(moveResult['message'], ['はい', 'いいえ'])
                         else:
                             MSGWND.set(moveResult['message'])
                         continue
@@ -835,12 +820,7 @@ def main():
                     else:
                         MSGWND.set("そのほうこうには　だれもいない。")
             # endregion
-        if msgwincount > MSGWAIT:
-            # 5秒ほったらかし
-            if MSGWND.is_visible:
-                # メッセージウィンドウ表示中なら次ページへ
-                MSGWND.next()
-            msgwincount = 0
+        MSGWND.next()
         pygame.display.flip()
 
 def get_exp_value(expList):
@@ -1824,12 +1804,7 @@ class Player(Character):
                                 self.door = None
                             # skipアクション
                             if automoveResult.get('skip', False):
-                                MSGWND.set(automoveResult['message'])
-                                skipResult = None
-                                while skipResult is None:
-                                    self.sender.send_event({"type": "skip"})
-                                skipResult = self.sender.receive_json()
-                                MSGWND.set(skipResult['message'])
+                                MSGWND.set(automoveResult['message'], ['はい', 'いいえ'])
                     self.pop_automoveFromTo()
                     self.pop_automove()
             elif direction == 'x':
@@ -2256,9 +2231,12 @@ class MessageWindow(Window):
     MAX_LINES = 30             # メッセージを格納できる最大行数
     LINE_HEIGHT = 2            # 行間の大きさ
     animcycle = MAX_FRAME_PER_SEC
+    MSGWAIT = 3 * MAX_FRAME_PER_SEC
+    HIGHLIGHT_COLOR = (0, 0, 255)
 
-    def __init__(self, rect, msg_eng):
+    def __init__(self, rect, msg_eng, sender):
         Window.__init__(self, rect)
+        self.sender = sender
         self.text_rect = self.inner_rect.inflate(-8, -8)  # テキストを表示する矩形
         self.text = []  # メッセージ
         self.cur_page = 0  # 現在表示しているページ
@@ -2274,10 +2252,15 @@ class MessageWindow(Window):
         self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
         self.max_chars_per_page = self.max_chars_per_line * \
             self.max_lines_per_page  # 1ページの最大文字数
+        self.msgwincount = 0
+        self.selectMsgText = None
+        self.selectingIndex = 0
 
-    def set(self, message):
+    def set(self, message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if message:
+            if selectMessages is not None:
+                self.selectMsgText = selectMessages
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -2348,18 +2331,53 @@ class MessageWindow(Window):
                 dy = self.text_rect[1] + \
                     (self.LINE_HEIGHT + MessageEngine.FONT_HEIGHT) * 4
                 self.surface.blit(self.cursor, (dx, dy))
+        if self.selectMsgText and self.hide_flag:
+            dx = 5
+            dy += MessageEngine.FONT_HEIGHT
+            for i, text in enumerate(self.selectMsgText):
+                text_length = len(text)
+                if i == self.selectingIndex:
+                    bg_rect = pygame.Rect(
+                        dx,
+                        dy,
+                        text_length * MessageEngine.FONT_WIDTH,
+                        MessageEngine.FONT_HEIGHT + 4
+                    )
+                    pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
+                for j, ch in enumerate(text):
+                    self.msg_engine.draw_character(self.surface, (dx + j * MessageEngine.FONT_WIDTH, dy), ch)
+                dx += (text_length + 1) * MessageEngine.FONT_WIDTH
         Window.blit(self, screen)
 
-    def next(self):
+    def selectMsg(self, i):
+        self.selectingIndex = (self.selectingIndex + i) % len(self.selectMsgText)
+
+    def next(self, force_next=False):
         """メッセージを先に進める"""
-        # 現在のページが最後のページだったらウィンドウを閉じる
-        if self.hide_flag:
-            self.hide()
-        # ▼が表示されてれば次のページへ
-        if self.next_flag:
-            self.cur_page += 1
-            self.cur_pos = 0
-            self.next_flag = False
+        if (self.msgwincount > self.MSGWAIT and self.selectMsgText is None) or force_next:
+            # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
+            if self.selectMsgText:
+                print(self.selectMsgText[self.selectingIndex])
+                self.sender.send_event({"type": "skip"})
+                skipResult = self.sender.receive_json()
+                MSGWND.set(skipResult['message'])
+                self.selectMsgText = None
+                self.msgwincount = 0
+                self.hide()
+                return
+
+            if MSGWND.is_visible:
+                # 現在のページが最後のページだったらウィンドウを閉じる
+                if self.hide_flag:
+                    self.hide()
+                # ▼が表示されてれば次のページへ
+                if self.next_flag:
+                    self.cur_page += 1
+                    self.cur_pos = 0
+                    self.next_flag = False
+            self.msgwincount = 0
+
+
 
 #                                                                                                                          
 # 88                                    I8,        8        ,8I 88                      88                                 
@@ -3340,7 +3358,7 @@ class CodeWindow(Window, Map):
                 )
                 pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
 
-            # freetypeの描画 (Surface には直接描画)
+            # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
             self.draw_string(x_offset, y_offset, text, self.TEXT_COLOR)
             y_offset += self.FONT_SIZE + 4
 

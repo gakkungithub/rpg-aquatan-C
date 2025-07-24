@@ -1,9 +1,8 @@
-start,05_loops_and_break,12, 9
-itemget, 05_loops_and_break,9, 9,test
-itemget, 05_loops_and_break,11, 8,sum
-itemget, 05_loops_and_break,10, 9,l
-itemget, 05_loops_and_break,9, 14,factorial
-jump, 05_loops_and_break,3, 7
-jump, 05_loops_and_break,11, 33
-jump, 05_loops_and_break,31, 12
-jump, 05_loops_and_break,4, 8
+start,05_loops_and_break,11, 11
+itemget, 05_loops_and_break,14, 14,l
+itemget, 05_loops_and_break,14, 9,factorial
+jump, 05_loops_and_break,7, 10
+jump, 05_loops_and_break,7, 3
+jump, 05_loops_and_break,18, 25
+jump, 05_loops_and_break,9, 12
+end, 05_loops_and_break,9, 12

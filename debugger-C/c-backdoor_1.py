@@ -301,7 +301,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     def event_reciever():
         # JSONが複数回に分かれて送られてくる可能性があるためパース
         data = conn.recv(1024)
-        # ここは後々変える
+        # ここは後々変えるかも
         if not data:
             return None
         buffer = data.decode()
@@ -567,7 +567,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if type == 'doWhileTrue':
                                     if len(line_loop) and line_loop[-1] == next_line_number:
                                         # ここでスキップするかどうを確認する
-                                        event_sender({"message": "ループ出る直前までスキップします", "status": "ok", "skip": True})
+                                        event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
+                                        
                                         skipStart = next_line_number
                                         while skipStart <= next_line_number <= skipEnd:
                                             step_conditionally(frame)
@@ -575,13 +576,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 line_number = next_line_number
                                                 func_name = func_crnt_name
                                                 state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                                vars_changed = varsTracker.trackStart(frame)
                                             else:
                                                 isEnd = True
-                                        vars_changed = varsTracker.trackStart(frame)
+                                        
                                         while True:
                                             if (event := event_reciever()) is None:
                                                 continue
                                             event_sender({"message": "スキップが完了しました", "status": "ok"})
+                                            break
                                     else:
                                         event_sender({"message": "", "status": "ok"})
                                         line_loop.append(next_line_number)
