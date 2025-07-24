@@ -568,23 +568,22 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if len(line_loop) and line_loop[-1] == next_line_number:
                                         # ここでスキップするかどうを確認する
                                         event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
-                                        
-                                        skipStart = next_line_number
-                                        while skipStart <= next_line_number <= skipEnd:
-                                            step_conditionally(frame)
-                                            if (next_state := get_next_state()):
-                                                line_number = next_line_number
-                                                func_name = func_crnt_name
-                                                state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                vars_changed = varsTracker.trackStart(frame)
-                                            else:
-                                                isEnd = True
-                                        
-                                        while True:
-                                            if (event := event_reciever()) is None:
-                                                continue
-                                            event_sender({"message": "スキップが完了しました", "status": "ok"})
-                                            break
+                                        event = event_reciever()
+                                        if event.get('skip', False):
+                                            skipStart = next_line_number
+                                            while skipStart <= next_line_number <= skipEnd:
+                                                step_conditionally(frame)
+                                                if (next_state := get_next_state()):
+                                                    line_number = next_line_number
+                                                    func_name = func_crnt_name
+                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
+                                                else:
+                                                    isEnd = True
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "whileIn"})
+                                            continue
+                                        else:
+                                            event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                     else:
                                         event_sender({"message": "", "status": "ok"})
                                         line_loop.append(next_line_number)

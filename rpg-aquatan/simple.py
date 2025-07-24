@@ -523,7 +523,7 @@ def main():
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                     cmd = "\0"
                     atxt = "\0"
-                    PLAYER.fp.write( "undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif cmd == "break":
                     try:
                         move = PLAYER.moveHistory.pop()
@@ -702,7 +702,7 @@ def main():
                 cmd = ""
                 if MSGWND.is_visible:
                     # メッセージウィンドウ表示中なら次ページへ
-                    MSGWND.next(True)
+                    MSGWND.next(fieldmap, force_next=True)
                 else:
                     # 足元にあるのが宝箱かワープゾーンかを調べる
                     event_underfoot = PLAYER.search(fieldmap)
@@ -820,7 +820,7 @@ def main():
                     else:
                         MSGWND.set("そのほうこうには　だれもいない。")
             # endregion
-        MSGWND.next()
+        MSGWND.next(fieldmap)
         pygame.display.flip()
 
 def get_exp_value(expList):
@@ -1723,7 +1723,6 @@ class Player(Character):
                 if isinstance(event, PlacesetEvent):  # PlacesetEventなら
                     self.place_label = event.place_label
                 elif isinstance(event, AutoEvent):  # AutoEvent
-#                    print(f"append_automove({event.sequence})")
                     self.append_automove(event.sequence, type=event.type, fromTo=event.fromTo)
                     return
                 elif isinstance(event, SmallDoor):
@@ -2352,21 +2351,35 @@ class MessageWindow(Window):
     def selectMsg(self, i):
         self.selectingIndex = (self.selectingIndex + i) % len(self.selectMsgText)
 
-    def next(self, force_next=False):
+    def next(self, fieldmap, force_next=False):
         """メッセージを先に進める"""
         if (self.msgwincount > self.MSGWAIT and self.selectMsgText is None) or force_next:
             # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
             if self.selectMsgText:
-                print(self.selectMsgText[self.selectingIndex])
-                self.sender.send_event({"type": "skip"})
-                skipResult = self.sender.receive_json()
-                MSGWND.set(skipResult['message'])
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    self.sender.send_event({"skip": True})
+                    skipResult = self.sender.receive_json()
+                    if skipResult['type'] == 'whileIn':
+                        move = PLAYER.move5History.pop()
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                        PLAYER.commonItembag.items[-1] = move['cItems']
+                        PLAYER.itembag.items[-1] = move['items']
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                    self.set(skipResult['message'])
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
                 self.selectMsgText = None
                 self.msgwincount = 0
-                self.hide()
+                self.selectingIndex = 0
                 return
 
-            if MSGWND.is_visible:
+            if self.is_visible:
                 # 現在のページが最後のページだったらウィンドウを閉じる
                 if self.hide_flag:
                     self.hide()
