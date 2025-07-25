@@ -88,9 +88,9 @@ def writeMapIni(pname, initPos, gvarString):
     with open(filename, 'w') as f:
         config.write(f)
 
-def writeLineFile(pname: str, line_info: dict[str, set[int]]):
+def writeLineFile(pname: str, line_info: dict[str, list[set[int], dict[int, int]]]):
     filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-    line_info_json = {funcname: list(line_nums) for funcname, line_nums in line_info.items()}
+    line_info_json = {funcname: [list(line_nums), loop_line_nums] for funcname, (line_nums, loop_line_nums) in line_info.items()}
     with open(filename, 'w') as f:
         json.dump(line_info_json, f)

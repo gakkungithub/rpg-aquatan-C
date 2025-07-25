@@ -220,7 +220,7 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
-    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, set[int]]):
+    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, list[set[int], dict[int, int]]]):
         defaultMapChips = [503, 113, 343, 160, 32]
         floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
         # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
@@ -502,7 +502,7 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'hexagon':
             if self.mapInfo.condition_move.get(nodeID, None):
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
-                if self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
+                if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
                     self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158, nodeID)
                     loopBackID = None
                 elif self.getNodeShape(nextNodeID) == 'diamond':

@@ -1897,14 +1897,17 @@ class Player(Character):
         if isinstance(event, Door):
             # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
             if isinstance(event, SmallDoor):
-                if event.direction == self.direction:
-                    event.open()
-                    MSGWND.set(f"{event.doorname}を開けた！")
-                    if self.door is not None:
-                        self.door.close()
-                        self.door = None
+                if event.status == 0:
+                    if event.direction == self.direction:
+                        event.open()
+                        MSGWND.set(f"{event.doorname}を開けた！")
+                        if self.door is not None:
+                            self.door.close()
+                            self.door = None
+                    else:
+                        MSGWND.set('この方向から扉は開けません!!')
                 else:
-                    MSGWND.set('この方向から扉は開けません!!')
+                    return None
             else:
                 mymap.remove_event(event)
             return event
@@ -2359,7 +2362,7 @@ class MessageWindow(Window):
                 if self.selectMsgText[self.selectingIndex] == "はい":
                     self.sender.send_event({"skip": True})
                     skipResult = self.sender.receive_json()
-                    if skipResult['type'] == 'whileIn':
+                    if skipResult['type'] == 'doWhile':
                         move = PLAYER.move5History.pop()
                         # 暗転
                         DIMWND.setdf(200)
