@@ -571,7 +571,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         skipStart = next_line_number
                                         skipEnd = line_data[func_name][1][str(next_line_number)]
                                         # ここでスキップするかどうかを確認する
-                                        event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
+                                        event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
                                         event = event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= next_line_number <= skipEnd:
@@ -583,7 +583,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while"})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values})
                                             continue
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -600,7 +600,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if type == 'doWhileTrue':
                                     if len(line_loop) and line_loop[-1] == next_line_number:
                                         # ここでスキップするかどうを確認する
-                                        event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
+                                        event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
                                         event = event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= next_line_number <= skipEnd:
@@ -612,7 +612,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile"})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values})
                                             continue
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -632,7 +632,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     skipEnd = line_data[func_name][1][str(line_number)]
                                     if skipStart <= next_line_number <= skipEnd:
                                         # ここでスキップするかどうかを確認する
-                                        event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
+                                        event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
                                         event = event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= next_line_number <= skipEnd:
@@ -644,9 +644,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while"})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": varsTracker.previous_values})
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                                    else:
+                                        event_sender({"message": "", "status": "ok"})
                                 else:
                                     event_sender({"message": "", "status": "ok"})
                                     line_loop.append(line_number)
@@ -661,7 +663,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         skipEnd = line_data[func_name][1][str(line_number)]
                                         if skipStart <= next_line_number <= skipEnd:
                                             # ここでスキップするかどうかを確認する
-                                            event_sender({"message": "ループ出る直前までスキップしますか?", "status": "ok", "skip": True})
+                                            event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
                                             event = event_reciever()
                                             if event.get('skip', False):
                                                 while skipStart <= next_line_number <= skipEnd:
@@ -673,9 +675,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                         vars_changed = varsTracker.trackStart(frame)
                                                     else:
                                                         isEnd = True
-                                                event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while"})
+                                                event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": varsTracker.previous_values})
                                             else:
                                                 event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                                        else:
+                                            event_sender({"message": "", "status": "ok"})
                                     else:
                                         event_sender({"message": "", "status": "ok"})
                                         line_loop.append(line_number)

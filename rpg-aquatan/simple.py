@@ -95,10 +95,6 @@ PLAYER = None
 e = []
 AUTOMOVE = 1
 
-
-
-## start
-
 BUTTON_WINDOW = None
 BUTTON_WIDTH = 50
 PATH = 'foot_print.csv'
@@ -106,7 +102,6 @@ TXTBOX_HEIGHT = 40
 SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
 TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
-## JK add here!!
 ## ミニマップの表示座標を設定する
 MIN_MAP_SIZE = 300
 MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
@@ -114,7 +109,6 @@ MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
 ## デバッグコードの表示座標を設定する
 MIN_CODE_SIZE_Y = 600
 MCODE_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_CODE_SIZE_Y)
-
 
 cmd = "aquatan"
 # time [ms]
@@ -129,7 +123,6 @@ def start_timer():
     pygame.time.set_timer(LONGPRESS_EVENT, 200)
 def end_timer():
     pygame.time.set_timer(LONGPRESS_EVENT, 0)
-## end 
 
 #                                               
 #                               88              
@@ -178,6 +171,11 @@ def main():
             scropt = DOUBLEBUF | HWSURFACE
         screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, scropt)
 
+    # region スタート画面の描画
+    SBWND = StageButtonWindow()
+    SBWND.draw(screen)
+    # endregion
+
     # region コマンドラインの設定
     pygame.draw.rect(screen, (0,0,0), TXTBOX_RECT)
 
@@ -189,6 +187,9 @@ def main():
     screen.blit(input_surface, (10, SCR_RECT.height + 40))
 
     pygame.display.update()
+
+    while True:
+        pass
     atxt = ""
     # endregion
 
@@ -222,7 +223,7 @@ def main():
     PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
     # endregion
 
-    BTNWND = buttonWindow()
+    BTNWND = ArrowButtonWindow()
     BTNWND.show()
     mouse_down = False
     
@@ -280,7 +281,7 @@ def main():
     if len(messages) > 0:
         MSGWND.set("/".join(messages))
 
-    PLAYER.fp.write( "start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+    PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
     start_time = time.time()
 
 #    if args.screenshot:
@@ -295,6 +296,7 @@ def main():
     #current_place = OMZN_STATUS.current_place()
 
     last_mouse_pos = None
+    
     while True:
         messages = []
         clock.tick(MAX_FRAME_PER_SEC)
@@ -363,7 +365,6 @@ def main():
         STATUSWND.draw(screen)
         ITEMWND.draw(screen)
         BTNWND.draw(screen)
-
         MMAPWND.draw(screen, fieldmap)
         CODEWND.draw(screen)
 
@@ -462,6 +463,7 @@ def main():
                     mouse_down = False
                     last_mouse_pos = None
                     end_timer()
+
             if mouse_down:
                 if event.type == pygame.MOUSEMOTION and last_mouse_pos:
                     dy = - (event.pos[1] - last_mouse_pos[1])
@@ -2362,7 +2364,7 @@ class MessageWindow(Window):
                 if self.selectMsgText[self.selectingIndex] == "はい":
                     self.sender.send_event({"skip": True})
                     skipResult = self.sender.receive_json()
-                    if skipResult['type'] == 'doWhile':
+                    if skipResult.get('type', None) == 'doWhile':
                         move = PLAYER.move5History.pop()
                         # 暗転
                         DIMWND.setdf(200)
@@ -2373,6 +2375,13 @@ class MessageWindow(Window):
                         PLAYER.itembag.items[-1] = move['items']
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                     self.set(skipResult['message'])
+                    for itemName in skipResult.get('items', {}):
+                        item = PLAYER.commonItembag.find(itemName)
+                        if item is None:
+                            item = PLAYER.itembag.find(itemName)
+                        if item is not None:
+                            if item.get_value() != skipResult['items'][itemName]:
+                                item.set_value(skipResult['items'][itemName])
                 else:
                     self.sender.send_event({"skip": False})
                     skipResult = self.sender.receive_json()
@@ -2392,7 +2401,6 @@ class MessageWindow(Window):
                     self.cur_pos = 0
                     self.next_flag = False
             self.msgwincount = 0
-
 
 
 #                                                                                                                          
@@ -2987,47 +2995,6 @@ class Object:
     def __str__(self):
         return f"OBJECT,{self.x},{self.y},{self.mapchip}"
 
-#                                                                             
-# 88                                      88888888ba                          
-# 88   ,d                                 88      "8b                         
-# 88   88                                 88      ,8P                         
-# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  88aaaaaa8P' ,adPPYYba,  ,adPPYb,d8  
-# 88   88   a8P_____88 88P'   "88"    "8a 88""""""8b, ""     `Y8 a8"    `Y88  
-# 88   88   8PP""""""" 88      88      88 88      `8b ,adPPPPP88 8b       88  
-# 88   88,  "8b,   ,aa 88      88      88 88      a8P 88,    ,88 "8a,   ,d88  
-# 88   "Y888 `"Ybbd8"' 88      88      88 88888888P"  `"8bbdP"Y8  `"YbbdP"Y8  
-#                                                                 aa,    ,88  
-#                                                                  "Y8bbdP"   
-# 
-
-class ItemBag:
-    """アイテム袋(現在のマップによって中身を変える)"""
-    def __init__(self):
-        self.items = [[]]
-
-    def add(self,item):
-        """袋にアイテムを追加"""
-        inbag = self.find(item.name)
-        if inbag:
-            inbag.value += 1
-            #print(f"append item {item.name} + 1")
-        else:
-            self.items[-1].append(item)
-            #print(f"append item {item.name}")
-
-    def find(self,name):
-        """袋からアイテムを探す"""
-        for i,n in enumerate(self.items[-1]):
-            if n.name == name:
-                return n
-        return None
-
-    def remove(self,name):
-        """袋からアイテムを取り除く"""
-        for i,n in enumerate(self.items[-1]):
-            if n.name == name:
-                return self.items[-1].pop(i)
-        return None
 #                                          
 # 88                                       
 # 88   ,d                                  
@@ -3060,18 +3027,136 @@ class Item:
             self.value = val
             self.undefined = False
 
-                                                                                                                                              
-# 88                                                           I8,        8        ,8I 88                      88                                 
-# 88                        ,d      ,d                         `8b       d8b       d8' ""                      88                                 
-# 88                        88      88                          "8,     ,8"8,     ,8"                          88                                 
-# 88,dPPYba,  88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
-# 88P'    "8a 88       88   88      88   a8"     "8a 88P'   `"8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
-# 88       d8 88       88   88      88   8b       d8 88       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
-# 88b,   ,a8" "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
-# 8Y"Ybbd8"'   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                             
+# 88                                      88888888ba                          
+# 88   ,d                                 88      "8b                         
+# 88   88                                 88      ,8P                         
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  88aaaaaa8P' ,adPPYYba,  ,adPPYb,d8  
+# 88   88   a8P_____88 88P'   "88"    "8a 88""""""8b, ""     `Y8 a8"    `Y88  
+# 88   88   8PP""""""" 88      88      88 88      `8b ,adPPPPP88 8b       88  
+# 88   88,  "8b,   ,aa 88      88      88 88      a8P 88,    ,88 "8a,   ,d88  
+# 88   "Y888 `"Ybbd8"' 88      88      88 88888888P"  `"8bbdP"Y8  `"YbbdP"Y8  
+#                                                                 aa,    ,88  
+#                                                                  "Y8bbdP"   
+# 
 
-class buttonWindow:
-    """ボタンウィンドウ"""
+class ItemBag:
+    """アイテム袋(現在のマップによって中身を変える)"""
+    def __init__(self):
+        self.items = [[]]
+
+    def add(self,item):
+        """袋にアイテムを追加"""
+        inbag = self.find(item.name)
+        if inbag:
+            inbag.value += 1
+            #print(f"append item {item.name} + 1")
+        else:
+            self.items[-1].append(item)
+            #print(f"append item {item.name}")
+
+    def find(self,name) -> Item | None:
+        """袋からアイテムを探す"""
+        for i,n in enumerate(self.items[-1]):
+            if n.name == name:
+                return n
+        return None
+
+    def remove(self,name):
+        """袋からアイテムを取り除く"""
+        for i,n in enumerate(self.items[-1]):
+            if n.name == name:
+                return self.items[-1].pop(i)
+        return None
+    
+                                                                                                                                                                                                     
+#  ad88888ba                                          88888888ba                                                   I8,        8        ,8I 88                      88                                 
+# d8"     "8b ,d                                      88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
+# Y8,         88                                      88      ,8P               88      88                          "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa, MM88MMM ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, 88    ""     `Y8 a8"    `Y88 a8P_____88 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 88    ,adPPPPP88 8b       88 8PP""""""" 88      `8b 88       88   88      88   8b       d8 88       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P 88,   88,    ,88 "8a,   ,d88 "8b,   ,aa 88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"  "Y888 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                               aa,    ,88                                                                                                                                                            
+#                                "Y8bbdP"                                                                                                                                                             
+
+class StageButtonWindow:
+    """ステージセレクトボタンウィンドウ"""
+    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break"]
+    SB_WIDTH = (SCR_WIDTH - 60) // 5
+    SB_HEIGHT = SCR_HEIGHT // 2
+
+    def __init__(self):
+        self.rect = pygame.Rect(0, 0, SCR_WIDTH , SCR_HEIGHT)
+        self.surface = pygame.Surface((self.rect[2], self.rect[3]))
+        self.surface.fill((128, 128, 128))
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.button_stages: list[StageButton] = self.load_sb()
+
+    def load_sb(self):
+        x = 10
+        y = SCR_HEIGHT // 4
+        button_stages = []
+        for i, code_name in enumerate(self.code_names):
+            button_stages.append(StageButton(code_name, i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+            x += self.SB_WIDTH + 10
+
+        return button_stages
+
+    def blit(self, screen):
+        """blit"""
+        screen.blit(self.surface, (self.rect[0], self.rect[1]))
+
+    def draw(self, screen):
+        self.blit(screen)
+        for button in self.button_stages:
+            button.draw(screen)
+    
+
+                                                                                                                     
+#  ad88888ba                                          88888888ba                                                      
+# d8"     "8b ,d                                      88      "8b               ,d      ,d                            
+# Y8,         88                                      88      ,8P               88      88                            
+# `Y8aaaaa, MM88MMM ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,   
+#   `"""""8b, 88    ""     `Y8 a8"    `Y88 a8P_____88 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a  
+#         `8b 88    ,adPPPPP88 8b       88 8PP""""""" 88      `8b 88       88   88      88   8b       d8 88       88  
+# Y8a     a8P 88,   88,    ,88 "8a,   ,d88 "8b,   ,aa 88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88  
+#  "Y88888P"  "Y888 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88  
+#                               aa,    ,88                                                                            
+#                                "Y8bbdP"                                                                             
+
+class StageButton:
+    """ボタン"""
+    BG_COLOR = (0, 0, 255)
+    FONT_COLOR = (255, 255, 255)
+
+    def __init__(self, code_name, stage_num, pos_x, pos_y, button_w, button_h):
+        self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
+        self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
+        self.code_name = code_name
+        self.stage_num = stage_num + 1
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 24)
+    
+    def draw(self, surface: pygame.Surface):
+        pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
+        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.FONT_COLOR)
+        text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
+        self.surface.blit(text_surf, text_rect)
+        surface.blit(self.surface, self.rect)
+
+
+#        db                                                             88888888ba                                                   I8,        8        ,8I 88                      88                                 
+#       d88b                                                            88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
+#      d8'`8b                                                           88      ,8P               88      88                          "8,     ,8"8,     ,8"                          88                                 
+#     d8'  `8b     8b,dPPYba, 8b,dPPYba,  ,adPPYba,  8b      db      d8 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#    d8YaaaaY8b    88P'   "Y8 88P'   "Y8 a8"     "8a `8b    d88b    d8' 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#   d8""""""""8b   88         88         8b       d8  `8b  d8'`8b  d8'  88      `8b 88       88   88      88   8b       d8 88       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  d8'        `8b  88         88         "8a,   ,a8"   `8bd8'  `8bd8'   88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# d8'          `8b 88         88          `"YbbdP"'      YP      YP     88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                                                                                                                                                                                      
+class ArrowButtonWindow:
+    """矢印ボタンウィンドウ"""
     def __init__(self):
         self.rect = pygame.Rect(SCR_WIDTH - 3*BUTTON_WIDTH, SCR_HEIGHT - 2*BUTTON_WIDTH, BUTTON_WIDTH, BUTTON_WIDTH)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
@@ -3081,6 +3166,7 @@ class buttonWindow:
         self.button_up = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0,90)
         self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH,-90)
         self.button_return = Button("return.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
+
     def blit(self,screen):
         """blit"""
         screen.blit(self.surface, (self.rect[0], self.rect[1]))
@@ -3126,8 +3212,7 @@ class buttonWindow:
                                                                 
 class Button:
     """ボタン"""
-
-    def __init__(self,file_plase,pos_x,pos_y,angle):
+    def __init__(self, file_plase, pos_x, pos_y, angle):
         self.button_image = pygame.image.load(file_plase).convert_alpha()
         self.button_image = pygame.transform.scale(self.button_image, (BUTTON_WIDTH, BUTTON_WIDTH))
         self.button_image = pygame.transform.rotate(self.button_image, angle)
