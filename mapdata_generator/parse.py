@@ -8,7 +8,7 @@ import json
 import ctypes
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/data'
+DATA_DIR = BASE_DIR + '/mapdata'
 
 def parseIndex(c_files):
     index = clang.cindex.Index.create()

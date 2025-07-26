@@ -10,7 +10,7 @@ import mapChipID as mcID
 import fileGenerator as fg
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/data'
+DATA_DIR = BASE_DIR + '/mapdata'
 
 class TileFixed(Tile):
     def update_origin(self, current):

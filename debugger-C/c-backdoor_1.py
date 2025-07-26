@@ -10,7 +10,7 @@ import json
 from collections import Counter
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/data'
+DATA_DIR = BASE_DIR + '/mapdata'
 
 class VarsTracker:
     def __init__(self):

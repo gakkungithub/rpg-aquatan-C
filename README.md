@@ -1,53 +1,80 @@
-# rpg-aquatan-C
+<<<<<<< HEAD
+C言語プログラム探索RPG_あくあたん
+=========================
 
-マップデータの生成, デバッグシステム(サーバ)とRPGシステム(クライアント)の通信処理を一度にまとめて行えるようにしました.
+* 水槽モニターRPG
+* 行き先表示RPG
 
-## コマンド
-python rpg-aquatan-C.py [-p PROGRAM] [-c CFILE]
+Original program is taken from http://aidiary.hatenablog.com/entry/20080507/1269694935
 
-Options:
+Scripts
+----------
 
-  -p, --program    実行するプログラムの名前を指定します（例: compiled_binary）
-  
-  -c, --cfiles     使用する C ソースファイルを指定します（例: source.c）
+* monitor.py: メインプログラム
+* omznmon.sh: pi95用omzn在室表示
+* aquamon.sh: pi96用学生在室表示
 
-例:
+年次更新手順
+-----------
 
-  python rpg-aquatan-C.py -p myprogram -c main.c
-  
-  python rpg-aquatan-C.py --program myprogram --cfiles main.c
+1. charchip に対応するNPCのID名(例:15160.png)でPNGを置く．
+2. data/charachip.datに新しいpng(15160.png)を登録する
+3. mapeditor.pyでroomを読み込み，NPCを新規登録する．("4"コマンド)
+4. 新規NPC一人につき，かならず各部屋の居場所を"p"で登録する．PLACE?と訊かれたところでは，{away, 8-302, 8-302, 8-303, 8-321, 8-322, 8-417} を登録．足りないと実行時にエラーとなる．
 
-将来cファイル名は複数選べるようにしますが, 現在は一つだけしか受け付けていません.
+GUIここまで
 
-## 現在できていること
-コマンドラインの入力 (cを入力すると画面下部に表示されます.)
+4. IDのビーコンを作成する
+5. aqualog:ble_tagにIDを登録する
+6. aqualog:logにtarget_id_status=Lostを覚えさせる
 
-スカラー変数に対応したアイテムを取得した時の種類とタイミングの正誤の確認
+7. 部屋を増やす場合は ibeacon_scannerで対応するconfigを増やすして，detectorを設置すれば勝手に増える．
+8. 増えた部屋に対する定義をroom.evtに書かないと，keyerrorになる．
 
-一方通行パネルを通るタイミングの正誤の確認
+部屋のロック状態の反映
+-------
+/api/lock/status から，各部屋のロック状態を取得できる．
+RPG側では，DOORオブジェクトに部屋の名前を与え，-l オプションを付けて起動することでロック状態の反映がなされる．
 
-アイテムの値の変化のタイミングの正誤の確認 (コマンドラインにて)
+なお，DOORオブジェクトには開閉に関わらず当たり判定は無い．これはNPCが経路判定するときにドアが閉まっていると解が得られなくなり，謎の挙動を起こすためである．
 
-アイテムの取得を3回連続で間違えた時のヒントの表示
+## バグ
 
-現在のコードの何行目を実行しているかについて視認できるUI (色は今後考える)
+linuxで実行する時，monitor.pyのload_charachipsにて
+load_imageの引数にTRANS_COLORを入れるとキャラクタの透過処理が為されない．
+たぶん，convertを2回やってるからだと思われるが…
 
-if~switchの全ての構文の解析
+## Acknowledgment
 
-## 今後実装したいこと
-ワープゾーンでの移動の正誤の確認 (50%ぐらい)
+マップチップ素材はぴぽ屋さん(pipoya.net)のものを利用しています．
 
-関数キャラによるワープの正誤の確認
+=========================
 
-全体マップの描画 (ほぼ完成 by kondo君) 
+rpg-aquqtan for OJT
+=========================
+## commands
+キーボードでcを入力するとコマンドラインが表示されて入力できます.
 
-間違った時のダメージ処理
+undo        : 関数からの出入りと井戸ワープの巻き戻し機能　最大５回まで巻き戻せます
+break       : 関数から出ます　returnキャラに話すのと同じ意味です
+restart     : ゲームの初期状態に戻ります
+itemget [x] : アイテム[x : アイテム名]を取得
+itemset [x] [y] : アイテム[x : アイテム名]に値（今の所integerのみ）をセット
+goto x,y    : 任意の座標x,yにワープ（壁の中にも行けてしまう）
+jumo [x]    : 関数[x : 関数名]の入り口にワープ　必要アイテムが不足しているとワープできない(その関数がない時エラーになってしまうので要修正)
+up, down, right, left   : 指定の方向へ動けるならば１マス動く
 
-## 今後修正したいこと
-特になし
+## TCP connection to the debug system by socket module
+senderクラスでソケットによるTCP通信を管理しています.
+=========================
 
-## 今後考えたいこと
-配列、構造体、ポインタをどのようにゲーム内要素で表現するか
+tips for developing this system
+=========================
+"region 〇〇" のコメントアウトは折り畳めます. 
+コードが見やすくなるのでなるべく使いたいです.
 
-複数のcファイルへの対応
+コード内の巨大アスキーアートは「VScode Banner Comment Generator」拡張機能で生成できます.
+拡張機能を追加した後、figletを忘れずにインストールしてください.
+=========================
 
+>>>>>>> 4a58b39d7f3c703ddffc2ef1a0809085e7d3db6c
