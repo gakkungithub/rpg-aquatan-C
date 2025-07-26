@@ -140,6 +140,27 @@ def end_timer():
 def main():
     """Main"""
     global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, cmd
+
+    def selectStage(sbwnd: StageButtonWindow):
+        code_name = None
+        while True:
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    print('ゲームを終了しました')
+                    sys.exit()
+                if event.type == KEYDOWN and event.key == K_ESCAPE:
+                    print('ゲームを終了しました')
+                    sys.exit()
+
+                # region mouse click event
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1 and sbwnd.is_visible:
+                        code_name = sbwnd.is_clicked(event.pos)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1 and sbwnd.is_visible:
+                        if code_name == sbwnd.is_clicked(event.pos):
+                            sbwnd.hide()
+                            return code_name
     pygame.init()
 
     if os.uname()[0] != 'Darwin':
@@ -173,6 +194,7 @@ def main():
 
     # region スタート画面の描画
     SBWND = StageButtonWindow()
+    SBWND.show()
     SBWND.draw(screen)
     # endregion
 
@@ -188,8 +210,9 @@ def main():
 
     pygame.display.update()
 
-    while True:
-        pass
+    stage_name = selectStage(SBWND)
+    print(stage_name)
+
     atxt = ""
     # endregion
 
@@ -3094,6 +3117,13 @@ class StageButtonWindow:
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = self.load_sb()
 
+    def show(self):
+        """ウィンドウを表示"""
+        self.is_visible = True
+    
+    def hide(self):
+        self.is_visible = False
+
     def load_sb(self):
         x = 10
         y = SCR_HEIGHT // 4
@@ -3109,9 +3139,16 @@ class StageButtonWindow:
         screen.blit(self.surface, (self.rect[0], self.rect[1]))
 
     def draw(self, screen):
-        self.blit(screen)
+        if self.is_visible:
+            self.blit(screen)
+            for button in self.button_stages:
+                button.draw(screen)
+
+    def is_clicked(self,pos):
         for button in self.button_stages:
-            button.draw(screen)
+            if button.rect.collidepoint(pos):
+                return button.code_name
+        return None
     
 
                                                                                                                      
