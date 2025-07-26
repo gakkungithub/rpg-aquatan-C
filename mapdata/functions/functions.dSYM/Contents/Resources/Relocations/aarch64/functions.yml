@@ -1,9 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C/data/functions/functions'
-relocations:
-  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _funcA, symObjAddr: 0x0, symBinAddr: 0x100003EE8, symSize: 0x40 }
-  - { offsetInCU: 0x33, offset: 0x33, size: 0x8, addend: 0x0, symName: _funcA, symObjAddr: 0x0, symBinAddr: 0x100003EE8, symSize: 0x40 }
-  - { offsetInCU: 0x69, offset: 0x69, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x40, symBinAddr: 0x100003F28, symSize: 0x48 }
-  - { offsetInCU: 0x9F, offset: 0x9F, size: 0x8, addend: 0x0, symName: _funcB, symObjAddr: 0x88, symBinAddr: 0x100003F70, symSize: 0x30 }
-...
