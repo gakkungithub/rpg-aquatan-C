@@ -1,0 +1,5 @@
+CHARA,white_cat,10,7,0,0,おかえりなさい。/現在の室温は{temp_air}℃です。/気圧は{pressure}hPaです。/空調は{ac1}です。/主照明は{light1}です。/副照明は{light2}です。%見回り気をつけてくださいね。
+OBJECT,13,2,3
+TREASURE,14,2,サカマキの貝殻
+#
+MOVE,10,14,159,mymap,8,13

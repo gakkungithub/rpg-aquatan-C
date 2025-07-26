@@ -1,4 +1,4 @@
-data/*
+mapdata/*
 .mypy_cache/
 charachip/.DS_Store
 .DS_Store
