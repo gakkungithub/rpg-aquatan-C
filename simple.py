@@ -136,506 +136,632 @@ def main():
         size = (pygame.display.Info().current_w,
                 pygame.display.Info().current_h)
         print(f"Framebuffer size: {size[0]} x {size[1]}")
-        screen = pygame.display.set_mode(SBW_RECT.size, FULLSCREEN)
+        stage_select_screen = pygame.display.set_mode(SBW_RECT.size, FULLSCREEN)
     else:
         scropt = DOUBLEBUF | HWSURFACE
-        screen = pygame.display.set_mode(SBW_RECT.size, scropt)
+        stage_select_screen = pygame.display.set_mode(SBW_RECT.size, scropt)
 
     SBWND = StageButtonWindow()
-    SBWND.show()
-    SBWND.draw(screen)
     # endregion
 
-    pygame.display.update()
-
-    # region ステージ選択メニュー
-    stage_name = selectStage(SBWND)
-    print(stage_name)
-    # endregion
-
-    # region マップデータ生成
-    programpath = f"{DATA_DIR}/{stage_name}/{stage_name}"
-    # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
-    cfiles = [f"{programpath}.c"]
-
-    # cプログラムを整形する
-    subprocess.run(["clang-format", "-i", f"{programpath}.c"])
-
-    # cファイルを解析してマップデータを生成する
-    # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
-    cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
-    # if args.universal:
-    #     cfcode.append("-u")
-    subprocess.run(cfcode, cwd="mapdata_generator")
-
-    subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
-
-    # サーバを立てる
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.path.abspath("modules") + (
-        ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
-    )
-    server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
-    # endregion
-
-    # region マップの初期設定
-    config = ConfigParser()
-    config.read(f"mapdata/{stage_name}/{stage_name}.ini")
-    SCR_WIDTH = int(config.get('screen', 'width'))
-    SCR_HEIGHT = int(config.get('screen', 'height'))
-
-    SCR_RECT = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
-    DB_CHECK_WAIT = 30 * MAX_FRAME_PER_SEC
-    SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
-    TXTBOX_HEIGHT = 40
-    TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
-
-    ## ミニマップの表示座標を設定する
-    MIN_MAP_SIZE = 300
-    MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
-
-    ## デバッグコードの表示座標を設定する
-    MIN_CODE_SIZE_Y = 600
-    MCODE_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_CODE_SIZE_Y)
-
-    if os.uname()[0] != 'Darwin':
-        drivers = ['fbcon', 'directfb', 'svgalib']
-        found = False
-        for driver in drivers:
-            # Make sure that SDL_VIDEODRIVER is set
-            if not os.getenv('SDL_VIDEODRIVER'):
-                os.putenv('SDL_VIDEODRIVER', driver)
-            try:
-                pygame.display.init()
-            except pygame.error:
-                print(f'Driver: {driver} failed.')
-                continue
-            found = True
-            break
-        if not found:
-            raise Exception('No suitable video driver found!')
-
-        size = (pygame.display.Info().current_w,
-                pygame.display.Info().current_h)
-        print(f"Framebuffer size: {size[0]} x {size[1]}")
-        screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, FULLSCREEN)
-    else:
-        scropt = DOUBLEBUF | HWSURFACE
-        screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, scropt)
-
-    # region コマンドラインの設定
-    pygame.draw.rect(screen, (0,0,0), TXTBOX_RECT)
-    font = pygame.font.Font(None, 36)
-    text_surface = font.render("Command Box:", True, (255, 255, 255))
-    screen.blit(text_surface, (10, SCR_RECT.height + 10))
-    input_text = "hogehoge"
-    input_surface = font.render(input_text, True, (255, 255, 255))
-    screen.blit(input_surface, (10, SCR_RECT.height + 40))
-    # endregion
-
-    atxt = ""
-    # endregion
-
-    print("1")
-    ## set mouse visible for debug
-    ##pygame.mouse.set_visible(0)
-    print("2")
-    # pygame.display.set_caption("あくあたんクエスト")
-    # キャラクターチップをロード
-    load_charachips("data", "charachip.dat")
-    print("3")
-    # マップチップをロード
-    load_mapchips("data", "mapchip.dat")
-    # マップとプレイヤー作成
-    print("4")
-
-    # region キャラクターの初期設定
-    player_chara = str(config.get("game", "player"))
-    player_x = int(config.get("game", "player_x"))
-    player_y = int(config.get("game", "player_y"))
-    mapname = str(config.get("game", "map"))
-
-    # グローバル変数 = 初期アイテム
-    # このevalはast.literal_evalを使った方が良いかもしれません
-    items = eval(config.get("game", "items"))
-
-    ## コードウィンドウを作る
-    CODEWND = CodeWindow(MCODE_RECT, mapname)
-
-    sender = EventSender(CODEWND)
-    PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
-    # endregion
-
-    BTNWND = ArrowButtonWindow()
-    BTNWND.show()
-    mouse_down = False
-    
-    # 初期アイテムの設定(グローバル変数)
-    for itemName in items.keys():
-        # このitemValueをアイテムの初期値として設定するつもりです!!
-        # ここも後のグローバル変数の解析を考える時に修正する
-        item = Item(itemName)
-        # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
-        item.set_value(get_exp_value(items[itemName]))
-        PLAYER.commonItembag.add(item)
-
-    fieldmap = Map(mapname)
-    fieldmap.add_chara(PLAYER)
-
-    # region ウィンドウの設定
-    message_engine = MessageEngine()
-    MSGWND = MessageWindow(
-        Rect(SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
-             SCR_WIDTH // 2, SCR_HEIGHT // 4), message_engine, sender)
-    DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
-    DIMWND.hide()
-    LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
-    LIGHTWND.set_color_scene("normal")
-    LIGHTWND.show()
-
-    STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
-    STATUSWND.show()
-
-    ITEMWND = ItemWindow(Rect(10, 10 + SCR_HEIGHT // 5 ,
-                                  SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10),PLAYER)
-    ITEMWND.show()
-
-    CMNDWND = CommandWindow(TXTBOX_RECT)
-    CMNDWND.show()
-
-    ## ミニマップを作る
-    MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
-    MMAPWND.show()
-
-    # endregion
-    clock = pygame.time.Clock()
-    print("5")
-
-    PLAYER.append_automove(e)
-    db_check_count = 0
-    ss_check_count = 0
-
-    print("6")
-    lightrooms = []
-    messages = []
-    lightrooms = list(set(lightrooms))
-    LIGHTWND.set_rooms(lightrooms)
-    if len(messages) > 0:
-        MSGWND.set("/".join(messages))
-
-    PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-
-#    if args.screenshot:
-#        MSGWND.hide()
-#        offset = calc_offset(PLAYER)
-#        fieldmap.update()
-#        fieldmap.draw(screen, offset)
-#        pygame.display.update()
-#        pygame.image.save(screen, "screenshot.png")
-#        sys.exit()
-
-    #current_place = OMZN_STATUS.current_place()
-
-    last_mouse_pos = None
-    
     while True:
-        messages = []
-        clock.tick(MAX_FRAME_PER_SEC)
-        # メッセージウィンドウ表示中は更新を中止
-        if not MSGWND.is_visible:
-            fieldmap.update()
-
-        MSGWND.update()
-        offset = calc_offset(PLAYER)
-        if not DIMWND.is_visible:
-            fieldmap.draw(screen, offset)
-        else:
-            DIMWND.dim()
-
-        # For every interval
-        if db_check_count > DB_CHECK_WAIT:
-            db_check_count = 0
-            lightrooms = []
-            lightrooms = list(set(lightrooms))
-            LIGHTWND.set_rooms(lightrooms)
-            if len(messages) > 0:
-                MSGWND.set("/".join(messages))
-
-        db_check_count = db_check_count + 1
-
-        LIGHTWND.draw(offset)
-        MSGWND.draw(screen)
-        STATUSWND.draw(screen)
-        ITEMWND.draw(screen)
-        BTNWND.draw(screen)
-        MMAPWND.draw(screen, fieldmap)
-        CODEWND.draw(screen)
-
-        draw_string(screen, SCR_WIDTH-60, 10,
-                    f"{PLAYER.x},{PLAYER.y}", Color(255, 255, 255, 128))  # プレイヤー座標
+        SBWND.show()
+        SBWND.draw(stage_select_screen)
         pygame.display.update()
 
-        if MSGWND.is_visible:
-            MSGWND.msgwincount += 1
+        # region ステージ選択メニュー
+        stage_name = selectStage(SBWND)
+        # endregion
 
-        n_move = PLAYER.get_next_automove()
-        if n_move is not None and n_move == 's':
-            PLAYER.pop_automove()
-            # 足元にあるのが宝箱かワープゾーンかを調べる
-            event_underfoot = PLAYER.search(fieldmap)
-            if isinstance(event_underfoot, Treasure):
-                ### 宝箱を開けることの情報を送信する
-                sender.send_event({"item": event_underfoot.item})
-                itemResult = sender.receive_json()
-                if itemResult is not None:
-                    if itemResult['status'] == "ok":
-                        event_underfoot.open(itemResult['value'], itemResult['undefined'])
-                        item_comments = "%".join(event_underfoot.comments)
-                        if item_comments:
-                            MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
-                        else:
-                            MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
-                        fieldmap.remove_event(event_underfoot)
-                        PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
-                    else:
-                        MSGWND.set(itemResult['message'])
-                continue
-            elif isinstance(event_underfoot, MoveEvent):
-                ### ワープゾーンに入ろうとしていることの情報を送信する
-                sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo})
-                moveResult = sender.receive_json()
-                if moveResult and moveResult['status'] == "ok":
-                    dest_map = event_underfoot.dest_map
-                    dest_x = event_underfoot.dest_x
-                    dest_y = event_underfoot.dest_y
+        # region マップデータ生成
+        programpath = f"{DATA_DIR}/{stage_name}/{stage_name}"
+        # 現在は一つのcファイルにしか対応してないので、下記のようにリストに要素を一つだけ入れる
+        # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+        cfiles = [f"{programpath}.c"]
 
-                    # region command
-                    from_map = fieldmap.name
-                    PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
-                    if len(PLAYER.move5History) > 5:
-                        PLAYER.move5History.pop(0)
-                    # endregion
-                    # 暗転
-                    DIMWND.setdf(200)
-                    DIMWND.show()
-                    fieldmap.create(dest_map)  # 移動先のマップで再構成
-                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                    fieldmap.add_chara(PLAYER)  # マップに再登録
-                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    # skipアクション
-                    if moveResult.get('skip', False):
-                        MSGWND.set(moveResult['message'], ['はい', 'いいえ'])
-                else:
-                    MSGWND.set(moveResult['message'])
-                continue
+        # cプログラムを整形する
+        subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
-            chara = PLAYER.talk(fieldmap)
-            if chara is not None:
-                ### ここで話しかけたことの情報を送信する
-                msg = chara.message
-                MSGWND.set(msg)
-            else:
-                MSGWND.set("そのほうこうには　だれもいない。")
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                PLAYER.fp.close()
-                sys.exit()
-            if event.type == KEYDOWN and event.key == K_ESCAPE:
-                PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                PLAYER.fp.close()
-                sys.exit()
+        # cファイルを解析してマップデータを生成する
+        # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
+        cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+        # if args.universal:
+        #     cfcode.append("-u")
+        subprocess.run(cfcode, cwd="mapdata_generator")
 
-            # region mouse click event
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    mouse_down = True
-                    start_timer()
-                    if CODEWND.is_visible:
-                        if CODEWND.isCursorInWindow(event.pos):
-                            last_mouse_pos = event.pos
-                    cmd = BTNWND.is_clicked(event.pos)
-                
-            elif event.type == pygame.MOUSEBUTTONUP:
-                if event.button == 1:
-                    mouse_down = False
-                    last_mouse_pos = None
-                    end_timer()
+        subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
-            if mouse_down:
-                if event.type == pygame.MOUSEMOTION and last_mouse_pos:
-                    dy = - (event.pos[1] - last_mouse_pos[1])
-                    dx = - (event.pos[0] - last_mouse_pos[0])
-                    if CODEWND.scrollY + dy > 0:
-                        CODEWND.scrollY += dy
-                    else:
-                        CODEWND.scrollY = 0
-                    if CODEWND.scrollX + dx > 0:
-                        CODEWND.scrollX += dx
-                    else:
-                        CODEWND.scrollX = 0
-                    last_mouse_pos = event.pos
-                cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
-            # endregion
-            
-            # region keydown event
-            ## open map
-            if event.type == KEYDOWN and event.key == K_i:
-                PLAYER.set_game_mode("item")
-            if event.type == KEYDOWN and event.key == K_m:
-                if MMAPWND.is_visible:
-                    MMAPWND.hide()
-                    CODEWND.show()
-                elif CODEWND.is_visible:
-                    CODEWND.hide()
-                else:
-                    MMAPWND.show()
+        # サーバを立てる
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.path.abspath("modules") + (
+            ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
+        )
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
+        # endregion
 
-            if event.type == KEYDOWN and event.key == K_c:
-                if MSGWND.is_visible:
-                    break
-                atxt = CMNDWND.draw(screen, font)
+        # region マップの初期設定
+        config = ConfigParser()
+        config.read(f"mapdata/{stage_name}/{stage_name}.ini")
+        SCR_WIDTH = int(config.get('screen', 'width'))
+        SCR_HEIGHT = int(config.get('screen', 'height'))
 
-                #atxt=txtbox.tbox(screen,font,0,SCR_HEIGHT,SCR_WIDTH,TXTBOX_HEIGHT,20)
-                cmd = ""
-                if atxt is None:
-                    break
-                parts = atxt.split(' ', 1)
-                cmd = parts[0]
-                atxt = parts[1] if len(parts) > 1 else ''
+        SCR_RECT = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
+        DB_CHECK_WAIT = 30 * MAX_FRAME_PER_SEC
+        SCR_RECT_WITH_TXTBOX = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
+        TXTBOX_HEIGHT = 40
+        TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
-                if cmd == "":
+        ## ミニマップの表示座標を設定する
+        MIN_MAP_SIZE = 300
+        MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
+
+        ## デバッグコードの表示座標を設定する
+        MIN_CODE_SIZE_Y = 600
+        MCODE_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_CODE_SIZE_Y)
+
+        if os.uname()[0] != 'Darwin':
+            drivers = ['fbcon', 'directfb', 'svgalib']
+            found = False
+            for driver in drivers:
+                # Make sure that SDL_VIDEODRIVER is set
+                if not os.getenv('SDL_VIDEODRIVER'):
+                    os.putenv('SDL_VIDEODRIVER', driver)
+                try:
+                    pygame.display.init()
+                except pygame.error:
+                    print(f'Driver: {driver} failed.')
                     continue
-                elif cmd == "undo":
-                    if len(PLAYER.move5History) < 1:
-                        MSGWND.set("No history...")
-                    else:
-                        move = PLAYER.move5History.pop()
-                        if move["return"]:
-                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
-                        # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
-                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                        PLAYER.commonItembag.items[-1] = move['cItems']
-                        PLAYER.itembag.items[-1] = move['items']
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                    cmd = "\0"
-                    atxt = "\0"
-                    PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif cmd == "break":
-                    try:
-                        move = PLAYER.moveHistory.pop()
-                        # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
-                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                    except IndexError:
-                        MSGWND.set("No history.")
-                    cmd = "\0"
-                    atxt = "\0"
-                    PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif cmd == "restart":
-                    dest_x = int(config.get("game", "player_x"))
-                    dest_y = int(config.get("game", "player_y"))
-                    dest_map =  str(config.get("game", "map"))
-                    # 暗転
-                    DIMWND.setdf(200)
-                    DIMWND.show()
-                    fieldmap.create(dest_map)
-                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                    fieldmap.add_chara(PLAYER)  # マップに再登録
-                    cmd = "\0"
-                    atxt = "\0"
-                    PLAYER.fp.write( "restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif cmd == "echo":
-                    MSGWND.set(atxt)
-                    atxt = "\0"
-                    cmd = "\0"
-                elif cmd == "itemget":
-                    try:
-                        itemname = atxt.strip()
-                        if not itemname:
-                            raise ValueError("No item name provided.")
-                        item = PLAYER.commonItembag.find(itemname)
-                        if item is None:
-                            item = PLAYER.itembag.find(itemname)
-                        if item:
-                            if(item.get_value() != None):
-                                MSGWND.set(f"アイテム {itemname} の値は {str(item.get_value())} です")
-                        else:
-                            MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                    except Exception:
-                        MSGWND.set("ERROR...")
-                    cmd = "\0"
-                    atxt = "\0"
-                elif cmd == "itemset":
-                    ## suit for integer item
-                    ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
-                    try:
-                        parts = atxt.split(' ', 1)
-                        itemname = parts[0]
-                        value = parts[1]
-                        item = PLAYER.commonItembag.find(itemname)
-                        if item is None:
-                            item = PLAYER.itembag.find(itemname)
-                        if item:
-                            current_value = item.get_value()
-                            if value == "++":
-                                value = str(int(current_value) + 1)
-                            elif value == "--":
-                                value = str(int(current_value) - 1)
-                            # この下の計算式コマンドは j = -5 と被るので今は無視
-                            # elif value.startswith("+"):
-                            #     value = str(int(current_value) + int(value[1:]))
-                            # elif value.startswith("-"):
-                            #     value = str(int(current_value) - int(value[1:]))
+                found = True
+                break
+            if not found:
+                raise Exception('No suitable video driver found!')
 
-                            sender.send_event({"itemset": [itemname, value]})
-                            itemsetResult = sender.receive_json()
-                            if itemsetResult is not None:
-                                if itemsetResult['status'] == "ok":
-                                    item.set_value(value)
-                                MSGWND.set(itemsetResult['message'])
+            size = (pygame.display.Info().current_w,
+                    pygame.display.Info().current_h)
+            print(f"Framebuffer size: {size[0]} x {size[1]}")
+            screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, FULLSCREEN)
+        else:
+            scropt = DOUBLEBUF | HWSURFACE
+            screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, scropt)
+
+        # region コマンドラインの設定
+        pygame.draw.rect(screen, (0,0,0), TXTBOX_RECT)
+        font = pygame.font.Font(None, 36)
+        text_surface = font.render("Command Box:", True, (255, 255, 255))
+        screen.blit(text_surface, (10, SCR_RECT.height + 10))
+        input_text = "hogehoge"
+        input_surface = font.render(input_text, True, (255, 255, 255))
+        screen.blit(input_surface, (10, SCR_RECT.height + 40))
+        # endregion
+
+        atxt = ""
+        # endregion
+
+        print("1")
+        ## set mouse visible for debug
+        ##pygame.mouse.set_visible(0)
+        print("2")
+        # pygame.display.set_caption("あくあたんクエスト")
+        # キャラクターチップをロード
+        load_charachips("data", "charachip.dat")
+        print("3")
+        # マップチップをロード
+        load_mapchips("data", "mapchip.dat")
+        # マップとプレイヤー作成
+        print("4")
+
+        # region キャラクターの初期設定
+        player_chara = str(config.get("game", "player"))
+        player_x = int(config.get("game", "player_x"))
+        player_y = int(config.get("game", "player_y"))
+        mapname = str(config.get("game", "map"))
+
+        # グローバル変数 = 初期アイテム
+        # このevalはast.literal_evalを使った方が良いかもしれません
+        items = eval(config.get("game", "items"))
+
+        ## コードウィンドウを作る
+        CODEWND = CodeWindow(MCODE_RECT, mapname)
+
+        sender = EventSender(CODEWND)
+        PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
+        # endregion
+
+        BTNWND = ArrowButtonWindow()
+        BTNWND.show()
+        mouse_down = False
+        
+        # 初期アイテムの設定(グローバル変数)
+        for itemName in items.keys():
+            # このitemValueをアイテムの初期値として設定するつもりです!!
+            # ここも後のグローバル変数の解析を考える時に修正する
+            item = Item(itemName)
+            # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
+            item.set_value(get_exp_value(items[itemName]))
+            PLAYER.commonItembag.add(item)
+
+        fieldmap = Map(mapname)
+        fieldmap.add_chara(PLAYER)
+
+        # region ウィンドウの設定
+        message_engine = MessageEngine()
+        MSGWND = MessageWindow(
+            Rect(SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
+                SCR_WIDTH // 2, SCR_HEIGHT // 4), message_engine, sender)
+        DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
+        DIMWND.hide()
+        LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
+        LIGHTWND.set_color_scene("normal")
+        LIGHTWND.show()
+
+        STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
+        STATUSWND.show()
+
+        ITEMWND = ItemWindow(Rect(10, 10 + SCR_HEIGHT // 5 ,
+                                    SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10),PLAYER)
+        ITEMWND.show()
+
+        CMNDWND = CommandWindow(TXTBOX_RECT)
+        CMNDWND.show()
+
+        ## ミニマップを作る
+        MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
+        MMAPWND.show()
+
+        # endregion
+        clock = pygame.time.Clock()
+        print("5")
+
+        PLAYER.append_automove(e)
+        db_check_count = 0
+
+        print("6")
+        lightrooms = []
+        messages = []
+        lightrooms = list(set(lightrooms))
+        LIGHTWND.set_rooms(lightrooms)
+        if len(messages) > 0:
+            MSGWND.set("/".join(messages))
+
+        PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+
+    #    if args.screenshot:
+    #        MSGWND.hide()
+    #        offset = calc_offset(PLAYER)
+    #        fieldmap.update()
+    #        fieldmap.draw(screen, offset)
+    #        pygame.display.update()
+    #        pygame.image.save(screen, "screenshot.png")
+    #        sys.exit()
+
+        #current_place = OMZN_STATUS.current_place()
+
+        last_mouse_pos = None
+        isFinished = False
+        
+        while not isFinished:
+            messages = []
+            clock.tick(MAX_FRAME_PER_SEC)
+            # メッセージウィンドウ表示中は更新を中止
+            if not MSGWND.is_visible:
+                fieldmap.update()
+
+            MSGWND.update()
+            offset = calc_offset(PLAYER)
+            if not DIMWND.is_visible:
+                fieldmap.draw(screen, offset)
+            else:
+                DIMWND.dim()
+
+            # For every interval
+            if db_check_count > DB_CHECK_WAIT:
+                db_check_count = 0
+                lightrooms = []
+                lightrooms = list(set(lightrooms))
+                LIGHTWND.set_rooms(lightrooms)
+                if len(messages) > 0:
+                    MSGWND.set("/".join(messages))
+
+            db_check_count = db_check_count + 1
+
+            LIGHTWND.draw(offset)
+            MSGWND.draw(screen)
+            STATUSWND.draw(screen)
+            ITEMWND.draw(screen)
+            BTNWND.draw(screen)
+            MMAPWND.draw(screen, fieldmap)
+            CODEWND.draw(screen)
+
+            draw_string(screen, SCR_WIDTH-60, 10,
+                        f"{PLAYER.x},{PLAYER.y}", Color(255, 255, 255, 128))  # プレイヤー座標
+            pygame.display.update()
+
+            if MSGWND.is_visible:
+                MSGWND.msgwincount += 1
+
+            n_move = PLAYER.get_next_automove()
+            if n_move is not None and n_move == 's':
+                PLAYER.pop_automove()
+                # 足元にあるのが宝箱かワープゾーンかを調べる
+                event_underfoot = PLAYER.search(fieldmap)
+                if isinstance(event_underfoot, Treasure):
+                    ### 宝箱を開けることの情報を送信する
+                    sender.send_event({"item": event_underfoot.item})
+                    itemResult = sender.receive_json()
+                    if itemResult is not None:
+                        if itemResult['status'] == "ok":
+                            event_underfoot.open(itemResult['value'], itemResult['undefined'])
+                            item_comments = "%".join(event_underfoot.comments)
+                            if item_comments:
+                                MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                            else:
+                                MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                            fieldmap.remove_event(event_underfoot)
+                            PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                         else:
-                            MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                    except (IndexError, ValueError):
-                        MSGWND.set("ERROR...")
-                    cmd = "\0"
-                    atxt = "\0"
-                elif cmd == "goto":
-                    ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
-                    parts = atxt.split(",", 1)
-                    dest_x = int(parts[0])
-                    dest_y = int(parts[1])
-                    # 暗転
-                    DIMWND.setdf(200)
-                    DIMWND.show()
-                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                    fieldmap.add_chara(PLAYER)  # マップに再登録
-                    cmd = "\0"
-                    atxt = "\0"
-                    PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif cmd == "jump":
-                    ## 関数の入り口まで飛ばしてくれる　同じマップ内だけ hogehoge
-                    msg = "\u95a2\u6570 " + atxt + " \u306b\u9077\u79fb\u3057\u307e\u3059!!"
-                    MSGWND.set("Jump to \'"+atxt+"\' !!")
-                    for chara in fieldmap.charas:
-                        if chara.message is not None:
-                            if chara.message == msg:
-                                target_chara = chara
-                                ##print(chara.message)
-                    chara = target_chara
-                    if chara is None:
-                        MSGWND.set("Function \'"+atxt+"\' is not found...")
+                            MSGWND.set(itemResult['message'])
+                    continue
+                elif isinstance(event_underfoot, MoveEvent):
+                    ### ワープゾーンに入ろうとしていることの情報を送信する
+                    sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo})
+                    moveResult = sender.receive_json()
+                    if moveResult and moveResult['status'] == "ok":
+                        dest_map = event_underfoot.dest_map
+                        dest_x = event_underfoot.dest_x
+                        dest_y = event_underfoot.dest_y
+
+                        # region command
+                        from_map = fieldmap.name
+                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
+                        if len(PLAYER.move5History) > 5:
+                            PLAYER.move5History.pop(0)
+                        # endregion
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        fieldmap.create(dest_map)  # 移動先のマップで再構成
+                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                        # skipアクション
+                        if moveResult.get('skip', False):
+                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
                     else:
-                        if isinstance(chara, Character):
-                            msg = chara.message
-                            MSGWND.set(msg)
-                            if isinstance(chara, CharaMoveEvent):
+                        MSGWND.set(moveResult['message'])
+                    continue
+
+                chara = PLAYER.talk(fieldmap)
+                if chara is not None:
+                    ### ここで話しかけたことの情報を送信する
+                    msg = chara.message
+                    MSGWND.set(msg)
+                else:
+                    MSGWND.set("そのほうこうには　だれもいない。")
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.close()
+                    server.terminate()
+                    sys.exit()
+                if event.type == KEYDOWN and event.key == K_ESCAPE:
+                    PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.close()
+                    server.terminate()
+                    sys.exit()
+
+                # region mouse click event
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        mouse_down = True
+                        start_timer()
+                        if CODEWND.is_visible:
+                            if CODEWND.isCursorInWindow(event.pos):
+                                last_mouse_pos = event.pos
+                        cmd = BTNWND.is_clicked(event.pos)
+                    
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1:
+                        mouse_down = False
+                        last_mouse_pos = None
+                        end_timer()
+
+                if mouse_down:
+                    if event.type == pygame.MOUSEMOTION and last_mouse_pos:
+                        dy = - (event.pos[1] - last_mouse_pos[1])
+                        dx = - (event.pos[0] - last_mouse_pos[0])
+                        if CODEWND.scrollY + dy > 0:
+                            CODEWND.scrollY += dy
+                        else:
+                            CODEWND.scrollY = 0
+                        if CODEWND.scrollX + dx > 0:
+                            CODEWND.scrollX += dx
+                        else:
+                            CODEWND.scrollX = 0
+                        last_mouse_pos = event.pos
+                    cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
+                # endregion
+                
+                # region keydown event
+                ## open map
+                if event.type == KEYDOWN and event.key == K_i:
+                    PLAYER.set_game_mode("item")
+                if event.type == KEYDOWN and event.key == K_m:
+                    if MMAPWND.is_visible:
+                        MMAPWND.hide()
+                        CODEWND.show()
+                    elif CODEWND.is_visible:
+                        CODEWND.hide()
+                    else:
+                        MMAPWND.show()
+
+                if event.type == KEYDOWN and event.key == K_c:
+                    if MSGWND.is_visible:
+                        break
+                    atxt = CMNDWND.draw(screen, font)
+
+                    #atxt=txtbox.tbox(screen,font,0,SCR_HEIGHT,SCR_WIDTH,TXTBOX_HEIGHT,20)
+                    cmd = ""
+                    if atxt is None:
+                        break
+                    parts = atxt.split(' ', 1)
+                    cmd = parts[0]
+                    atxt = parts[1] if len(parts) > 1 else ''
+
+                    if cmd == "":
+                        continue
+                    elif cmd == "undo":
+                        if len(PLAYER.move5History) < 1:
+                            MSGWND.set("No history...")
+                        else:
+                            move = PLAYER.move5History.pop()
+                            if move["return"]:
+                                PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                            # 暗転
+                            DIMWND.setdf(200)
+                            DIMWND.show()
+                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                            PLAYER.commonItembag.items[-1] = move['cItems']
+                            PLAYER.itembag.items[-1] = move['items']
+                            fieldmap.add_chara(PLAYER)  # マップに再登録
+                        cmd = "\0"
+                        atxt = "\0"
+                        PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    elif cmd == "break":
+                        try:
+                            move = PLAYER.moveHistory.pop()
+                            # 暗転
+                            DIMWND.setdf(200)
+                            DIMWND.show()
+                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                            fieldmap.add_chara(PLAYER)  # マップに再登録
+                        except IndexError:
+                            MSGWND.set("No history.")
+                        cmd = "\0"
+                        atxt = "\0"
+                        PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    elif cmd == "restart":
+                        dest_x = int(config.get("game", "player_x"))
+                        dest_y = int(config.get("game", "player_y"))
+                        dest_map =  str(config.get("game", "map"))
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        fieldmap.create(dest_map)
+                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                        cmd = "\0"
+                        atxt = "\0"
+                        PLAYER.fp.write( "restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    elif cmd == "echo":
+                        MSGWND.set(atxt)
+                        atxt = "\0"
+                        cmd = "\0"
+                    elif cmd == "itemget":
+                        try:
+                            itemname = atxt.strip()
+                            if not itemname:
+                                raise ValueError("No item name provided.")
+                            item = PLAYER.commonItembag.find(itemname)
+                            if item is None:
+                                item = PLAYER.itembag.find(itemname)
+                            if item:
+                                if(item.get_value() != None):
+                                    MSGWND.set(f"アイテム {itemname} の値は {str(item.get_value())} です")
+                            else:
+                                MSGWND.set(f"アイテム {itemname} は持っていません!!")
+                        except Exception:
+                            MSGWND.set("ERROR...")
+                        cmd = "\0"
+                        atxt = "\0"
+                    elif cmd == "itemset":
+                        ## suit for integer item
+                        ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
+                        try:
+                            parts = atxt.split(' ', 1)
+                            itemname = parts[0]
+                            value = parts[1]
+                            item = PLAYER.commonItembag.find(itemname)
+                            if item is None:
+                                item = PLAYER.itembag.find(itemname)
+                            if item:
+                                current_value = item.get_value()
+                                if value == "++":
+                                    value = str(int(current_value) + 1)
+                                elif value == "--":
+                                    value = str(int(current_value) - 1)
+                                # この下の計算式コマンドは j = -5 と被るので今は無視
+                                # elif value.startswith("+"):
+                                #     value = str(int(current_value) + int(value[1:]))
+                                # elif value.startswith("-"):
+                                #     value = str(int(current_value) - int(value[1:]))
+
+                                sender.send_event({"itemset": [itemname, value]})
+                                itemsetResult = sender.receive_json()
+                                if itemsetResult is not None:
+                                    if itemsetResult['status'] == "ok":
+                                        item.set_value(value)
+                                    MSGWND.set(itemsetResult['message'])
+                            else:
+                                MSGWND.set(f"アイテム {itemname} は持っていません!!")
+                        except (IndexError, ValueError):
+                            MSGWND.set("ERROR...")
+                        cmd = "\0"
+                        atxt = "\0"
+                    elif cmd == "goto":
+                        ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
+                        parts = atxt.split(",", 1)
+                        dest_x = int(parts[0])
+                        dest_y = int(parts[1])
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                        cmd = "\0"
+                        atxt = "\0"
+                        PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    elif cmd == "jump":
+                        ## 関数の入り口まで飛ばしてくれる　同じマップ内だけ hogehoge
+                        msg = "\u95a2\u6570 " + atxt + " \u306b\u9077\u79fb\u3057\u307e\u3059!!"
+                        MSGWND.set("Jump to \'"+atxt+"\' !!")
+                        for chara in fieldmap.charas:
+                            if chara.message is not None:
+                                if chara.message == msg:
+                                    target_chara = chara
+                                    ##print(chara.message)
+                        chara = target_chara
+                        if chara is None:
+                            MSGWND.set("Function \'"+atxt+"\' is not found...")
+                        else:
+                            if isinstance(chara, Character):
+                                msg = chara.message
+                                MSGWND.set(msg)
+                                if isinstance(chara, CharaMoveEvent):
+                                    if isinstance(chara, CharaMoveItemsEvent):
+                                        itemsLacked_list = []
+                                        for items in chara.items:
+                                            if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
+                                                itemsLacked_list.append(itemsLacked)
+                                        #アイテムが不足
+                                        if itemsLacked_list:
+                                            itemsLackedmessage_list = []
+                                            for itemsLacked in itemsLacked_list:
+                                                itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
+                                            MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
+                                        #必要なアイテムが存在
+                                        else:
+                                            PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                                            if len(PLAYER.move5History) > 5:
+                                                PLAYER.move5History.pop(0)
+                                            #グローバル変数のアイテムを設定する
+                                            newItems = []
+                                            for argument in chara.arguments:
+                                                # ここは後に関数キャラを考える時に修正する
+                                                item = Item(argument)
+                                                item.value = 1
+                                                newItems.append(item)
+                                            PLAYER.itembag.items.append(newItems)
+                                            PLAYER.waitingMove = chara
+                                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                                    else:
+                                        PLAYER.waitingMove = chara
+                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                                        PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                                        if len(PLAYER.move5History) > 5:
+                                            PLAYER.move5History.pop(0)
+                                elif isinstance(chara, CharaReturn):
+                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
+                                    if len(PLAYER.move5History) > 5:
+                                        PLAYER.move5History.pop(0)
+                                    PLAYER.waitingMove = chara
+                                    PLAYER.set_waitingMove_return()
+                                    if len(PLAYER.itembag.items) != 1:
+                                        PLAYER.itembag.items.pop()
+                        PLAYER.fp.write( "jump:" + atxt + ", " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                        cmd = "\0"
+                        atxt = "\0"
+                    elif cmd == "aquatan":
+                        MSGWND.set("Make aquatan/Grate Again!!!")
+                        atxt = "\0"
+                        cmd = "\0"
+                    elif cmd == "down" or cmd == "left" or cmd == "right" or cmd == "up":
+                        if atxt != "":
+                            cmd = "\0"
+                        continue
+                    else:
+                        MSGWND.set("Undefined command")
+                        atxt = "\0"
+                        cmd = "\0"
+
+                if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
+                    MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+
+                if (event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN)) or cmd == "action":
+                    cmd = ""
+                    if MSGWND.is_visible:
+                        # メッセージウィンドウ表示中なら次ページへ
+                        MSGWND.next(fieldmap, force_next=True)
+                    else:
+                        # 足元にあるのが宝箱かワープゾーンかを調べる
+                        event_underfoot = PLAYER.search(fieldmap)
+                        if isinstance(event_underfoot, Treasure):
+                            ### ここで宝箱を開けたことの情報を送信する
+                            sender.send_event({"item": event_underfoot.item})
+                            itemResult = sender.receive_json()
+                            if itemResult is not None:
+                                if itemResult['status'] == "ok":
+                                    event_underfoot.open(itemResult['value'], itemResult['undefined'])
+                                    item_comments = "%".join(event_underfoot.comments)
+                                    if item_comments:
+                                        MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                                    else:
+                                        MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                                    fieldmap.remove_event(event_underfoot)
+                                    PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
+                                else:
+                                    MSGWND.set(itemResult['message'])
+                            continue
+                        elif isinstance(event_underfoot, MoveEvent):
+                            sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo})
+                            moveResult = sender.receive_json()
+                            if moveResult and moveResult['status'] == "ok":
+                                dest_map = event_underfoot.dest_map
+                                dest_x = event_underfoot.dest_x
+                                dest_y = event_underfoot.dest_y
+
+                                from_map = fieldmap.name
+                                PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
+                                if len(PLAYER.move5History) > 5:
+                                    PLAYER.move5History.pop(0)
+
+                                # 暗転
+                                DIMWND.setdf(200)
+                                DIMWND.show()
+                                fieldmap.create(dest_map)  # 移動先のマップで再構成
+                                PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                                fieldmap.add_chara(PLAYER)  # マップに再登録
+                                PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                                # skipアクション
+                                if moveResult.get('skip', False):
+                                    MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                            else:
+                                MSGWND.set(moveResult['message'])
+                            continue
+
+                        # ドアを開ける
+                        door = PLAYER.unlock(fieldmap)
+                        if door is not None:
+                            continue
+
+                        # 表示中でないならはなす
+                        chara = PLAYER.talk(fieldmap)
+                        if chara is not None:
+                            if isinstance(chara, Character):
+                                msg = chara.message
+                                MSGWND.set(msg)
+                                # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
                                 if isinstance(chara, CharaMoveItemsEvent):
                                     itemsLacked_list = []
                                     for items in chara.items:
@@ -649,176 +775,59 @@ def main():
                                         MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
                                     #必要なアイテムが存在
                                     else:
+                                        # ここでchara.itemsとchara情報?を送信してその合致を確かめる
+                                        # グローバル変数のアイテムを設定する
                                         PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
                                         if len(PLAYER.move5History) > 5:
                                             PLAYER.move5History.pop(0)
-                                        #グローバル変数のアイテムを設定する
                                         newItems = []
                                         for argument in chara.arguments:
-                                            # ここは後に関数キャラを考える時に修正する
+                                            # ここも関数を考える時に後々修正する
                                             item = Item(argument)
                                             item.value = 1
                                             newItems.append(item)
                                         PLAYER.itembag.items.append(newItems)
                                         PLAYER.waitingMove = chara
                                         PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
-                                else:
+                                        msg = chara.message
+                                        parts = msg.split(" ", 1)
+                                        parts1 = parts[1].split(" ",1)
+                                        PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                                elif isinstance(chara, CharaMoveEvent):   
                                     PLAYER.waitingMove = chara
                                     PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
                                     PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
                                     if len(PLAYER.move5History) > 5:
                                         PLAYER.move5History.pop(0)
-                            elif isinstance(chara, CharaReturn):
-                                PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
-                                if len(PLAYER.move5History) > 5:
-                                    PLAYER.move5History.pop(0)
-                                PLAYER.waitingMove = chara
-                                PLAYER.set_waitingMove_return()
-                                if len(PLAYER.itembag.items) != 1:
-                                    PLAYER.itembag.items.pop()
-                    PLAYER.fp.write( "jump:" + atxt + ", " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    cmd = "\0"
-                    atxt = "\0"
-                elif cmd == "aquatan":
-                    MSGWND.set("Make aquatan/Grate Again!!!")
-                    atxt = "\0"
-                    cmd = "\0"
-                elif cmd == "down" or cmd == "left" or cmd == "right" or cmd == "up":
-                    if atxt != "":
-                        cmd = "\0"
-                    continue
-                else:
-                    MSGWND.set("Undefined command")
-                    atxt = "\0"
-                    cmd = "\0"
-
-            if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
-                MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
-
-            if (event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN)) or cmd == "action":
-                cmd = ""
-                if MSGWND.is_visible:
-                    # メッセージウィンドウ表示中なら次ページへ
-                    MSGWND.next(fieldmap, force_next=True)
-                else:
-                    # 足元にあるのが宝箱かワープゾーンかを調べる
-                    event_underfoot = PLAYER.search(fieldmap)
-                    if isinstance(event_underfoot, Treasure):
-                        ### ここで宝箱を開けたことの情報を送信する
-                        sender.send_event({"item": event_underfoot.item})
-                        itemResult = sender.receive_json()
-                        if itemResult is not None:
-                            if itemResult['status'] == "ok":
-                                event_underfoot.open(itemResult['value'], itemResult['undefined'])
-                                item_comments = "%".join(event_underfoot.comments)
-                                if item_comments:
-                                    MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
-                                else:
-                                    MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
-                                fieldmap.remove_event(event_underfoot)
-                                PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
-                            else:
-                                MSGWND.set(itemResult['message'])
-                        continue
-                    elif isinstance(event_underfoot, MoveEvent):
-                        sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo})
-                        moveResult = sender.receive_json()
-                        if moveResult and moveResult['status'] == "ok":
-                            dest_map = event_underfoot.dest_map
-                            dest_x = event_underfoot.dest_x
-                            dest_y = event_underfoot.dest_y
-
-                            from_map = fieldmap.name
-                            PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
-                            if len(PLAYER.move5History) > 5:
-                                PLAYER.move5History.pop(0)
-
-                            # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
-                            fieldmap.create(dest_map)  # 移動先のマップで再構成
-                            PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                            fieldmap.add_chara(PLAYER)  # マップに再登録
-                            PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                            # skipアクション
-                            if moveResult.get('skip', False):
-                                MSGWND.set(moveResult['message'], ['はい', 'いいえ'])
-                        else:
-                            MSGWND.set(moveResult['message'])
-                        continue
-
-                    # ドアを開ける
-                    door = PLAYER.unlock(fieldmap)
-                    if door is not None:
-                        continue
-
-                    # 表示中でないならはなす
-                    chara = PLAYER.talk(fieldmap)
-                    if chara is not None:
-                        if isinstance(chara, Character):
-                            msg = chara.message
-                            MSGWND.set(msg)
-                            # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
-                            if isinstance(chara, CharaMoveItemsEvent):
-                                itemsLacked_list = []
-                                for items in chara.items:
-                                    if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
-                                        itemsLacked_list.append(itemsLacked)
-                                #アイテムが不足
-                                if itemsLacked_list:
-                                    itemsLackedmessage_list = []
-                                    for itemsLacked in itemsLacked_list:
-                                        itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
-                                    MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
-                                #必要なアイテムが存在
-                                else:
-                                    # ここでchara.itemsとchara情報?を送信してその合致を確かめる
-                                    # グローバル変数のアイテムを設定する
-                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                    if len(PLAYER.move5History) > 5:
-                                        PLAYER.move5History.pop(0)
-                                    newItems = []
-                                    for argument in chara.arguments:
-                                        # ここも関数を考える時に後々修正する
-                                        item = Item(argument)
-                                        item.value = 1
-                                        newItems.append(item)
-                                    PLAYER.itembag.items.append(newItems)
-                                    PLAYER.waitingMove = chara
-                                    PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
                                     msg = chara.message
                                     parts = msg.split(" ", 1)
                                     parts1 = parts[1].split(" ",1)
                                     PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                            elif isinstance(chara, CharaMoveEvent):   
-                                PLAYER.waitingMove = chara
-                                PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
-                                PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                if len(PLAYER.move5History) > 5:
-                                    PLAYER.move5History.pop(0)
-                                msg = chara.message
-                                parts = msg.split(" ", 1)
-                                parts1 = parts[1].split(" ",1)
-                                PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                            elif isinstance(chara, CharaReturn):
-                                # ここでreturnの是非を確かめる (キャラ分けは行数で行う)
-                                sender.send_event({"return": chara.line})
-                                returnResult = sender.receive_json()
-                                if returnResult['status'] == 'ok':
-                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
-                                    if len(PLAYER.move5History) > 5:
-                                        PLAYER.move5History.pop(0)
-                                    PLAYER.waitingMove = chara
-                                    PLAYER.set_waitingMove_return()
-                                    if len(PLAYER.itembag.items) != 1:
-                                        PLAYER.itembag.items.pop()
-                                    PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                                MSGWND.set(returnResult['message'])
-                    else:
-                        MSGWND.set("そのほうこうには　だれもいない。")
-            # endregion
-        MSGWND.next(fieldmap)
-        pygame.display.flip()
+                                elif isinstance(chara, CharaReturn):
+                                    # ここでreturnの是非を確かめる (キャラ分けは行数で行う)
+                                    sender.send_event({"return": chara.line})
+                                    returnResult = sender.receive_json()
+                                    if returnResult['status'] == 'ok':
+                                        PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
+                                        if len(PLAYER.move5History) > 5:
+                                            PLAYER.move5History.pop(0)
+                                        PLAYER.waitingMove = chara
+                                        PLAYER.set_waitingMove_return()
+                                        if len(PLAYER.itembag.items) != 1:
+                                            PLAYER.itembag.items.pop()
+                                        PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                                    if returnResult.get('finished', False):
+                                        MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
+                                        isfinished = True
+                                    else:
+                                        MSGWND.set(returnResult['message'])
+                        else:
+                            MSGWND.set("そのほうこうには　だれもいない。")
+                # endregion
+            MSGWND.next(fieldmap)
+            pygame.display.flip()
+
+        server.terminate()
 
 def get_exp_value(expList):
     value = None
@@ -1413,7 +1422,6 @@ class Map:
         arguments = data["arguments"]
         chara = CharaMoveItemsEvent(name, (x, y), direction, movetype, message, errmessage,
                                 dest_map, (dest_x, dest_y), items, funcName, arguments)
-
         #print(chara)
         self.charas.append(chara)
 
@@ -1771,7 +1779,7 @@ class Player(Character):
                                 self.door = None
                             # skipアクション
                             if automoveResult.get('skip', False):
-                                MSGWND.set(automoveResult['message'], ['はい', 'いいえ'])
+                                MSGWND.set(automoveResult['message'],(['はい', 'いいえ'], 'loop_skip'))
                     self.pop_automoveFromTo()
                     self.pop_automove()
             elif direction == 'x':
@@ -2224,13 +2232,14 @@ class MessageWindow(Window):
             self.max_lines_per_page  # 1ページの最大文字数
         self.msgwincount = 0
         self.selectMsgText = None
+        self.select_type = None
         self.selectingIndex = 0
 
     def set(self, message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if message:
             if selectMessages is not None:
-                self.selectMsgText = selectMessages
+                self.selectMsgText, self.select_type = selectMessages
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -2327,32 +2336,36 @@ class MessageWindow(Window):
         if (self.msgwincount > self.MSGWAIT and self.selectMsgText is None) or force_next:
             # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
             if self.selectMsgText:
-                if self.selectMsgText[self.selectingIndex] == "はい":
-                    self.sender.send_event({"skip": True})
-                    skipResult = self.sender.receive_json()
-                    if skipResult.get('type', None) == 'doWhile':
-                        move = PLAYER.move5History.pop()
-                        # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
-                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                        PLAYER.commonItembag.items[-1] = move['cItems']
-                        PLAYER.itembag.items[-1] = move['items']
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                    self.set(skipResult['message'])
-                    for itemName in skipResult.get('items', {}):
-                        item = PLAYER.commonItembag.find(itemName)
-                        if item is None:
-                            item = PLAYER.itembag.find(itemName)
-                        if item is not None:
-                            if item.get_value() != skipResult['items'][itemName]:
-                                item.set_value(skipResult['items'][itemName])
-                else:
-                    self.sender.send_event({"skip": False})
-                    skipResult = self.sender.receive_json()
-                    self.set(skipResult['message'])
+                if self.select_type == 'loop_skip':
+                    if self.selectMsgText[self.selectingIndex] == "はい":
+                        self.sender.send_event({"skip": True})
+                        skipResult = self.sender.receive_json()
+                        if skipResult.get('type', None) == 'doWhile':
+                            move = PLAYER.move5History.pop()
+                            # 暗転
+                            DIMWND.setdf(200)
+                            DIMWND.show()
+                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                            PLAYER.commonItembag.items[-1] = move['cItems']
+                            PLAYER.itembag.items[-1] = move['items']
+                            fieldmap.add_chara(PLAYER)  # マップに再登録
+                        self.set(skipResult['message'])
+                        for itemName in skipResult.get('items', {}):
+                            item = PLAYER.commonItembag.find(itemName)
+                            if item is None:
+                                item = PLAYER.itembag.find(itemName)
+                            if item is not None:
+                                if item.get_value() != skipResult['items'][itemName]:
+                                    item.set_value(skipResult['items'][itemName])
+                    else:
+                        self.sender.send_event({"skip": False})
+                        skipResult = self.sender.receive_json()
+                        self.set(skipResult['message'])
+                elif self.select_type == 'finished':
+                    pass
                 self.selectMsgText = None
+                self.select_type = None
                 self.msgwincount = 0
                 self.selectingIndex = 0
                 return
@@ -3386,7 +3399,7 @@ class CodeWindow(Window, Map):
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         
-        self.c_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", name.lower(), name.lower() + ".c")
+        self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
         self.linenum = self.load_first_code_line()
         self.hide()
@@ -3459,16 +3472,23 @@ class CodeWindow(Window, Map):
 
 class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.code_window = code_window
-        self.sock.settimeout(timeout)
 
-        self.wait_for_connection(host, port, wait_timeout)  # ← 接続可能になるまで待つ
-        try:
-            self.sock.connect((host, port))
-        except Exception as e:
-            print(f"Error connecting to {host}:{port} -> {e}")
-            raise
+        start = time.time()
+        last_error = None
+        while time.time() - start < wait_timeout:
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(timeout)
+                self.sock.connect((host, port))
+                print("[Client] 接続成功")
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                last_error = e
+                time.sleep(0.1)
+        else:
+            print(f"[Client] 接続失敗: {last_error}")
+            raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
 
     def wait_for_connection(self, host, port, timeout):
         """接続可能になるまで最大timeout秒待つ"""
