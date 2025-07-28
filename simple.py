@@ -455,7 +455,12 @@ def main():
                         mouse_down = True
                         start_timer()
                         if CODEWND.is_visible:
-                            if CODEWND.isCursorInWindow(event.pos):
+                            local_pos = (event.pos[0] - CODEWND.x, event.pos[1] - CODEWND.y)
+                            if CODEWND.auto_scroll_button_rect.collidepoint(local_pos):
+                                CODEWND.is_auto_scroll = True
+                                CODEWND.scrollY = 0
+                                CODEWND.scrollX = 0
+                            elif CODEWND.isCursorInWindow(event.pos):
                                 last_mouse_pos = event.pos
                         cmd = BTNWND.is_clicked(event.pos)
                     
@@ -3087,7 +3092,6 @@ class StageButtonWindow:
         for i, code_name in enumerate(self.code_names):
             button_stages.append(StageButton(code_name, i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
             x += self.SB_WIDTH + 10
-
         return button_stages
 
     def blit(self, screen):
@@ -3389,8 +3393,6 @@ class CodeWindow(Window, Map):
 
     def __init__(self, rect, name):
         Window.__init__(self, rect)
-        # Map.__init__(self, name)
-
         self.maxX = self.x + self.width
         self.maxY = self.y + self.height
         self.scrollX = 0
@@ -3402,6 +3404,9 @@ class CodeWindow(Window, Map):
         self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
         self.linenum = self.load_first_code_line()
+        self.is_auto_scroll = True
+
+        self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
         self.hide()
 
     def load_code_lines(self):
@@ -3427,22 +3432,20 @@ class CodeWindow(Window, Map):
 
     def update_code_line(self, linenum):
         self.linenum = linenum
-
+        
     def draw(self, screen):
         if not self.is_visible:
             return
-
         Window.draw(self)
-
         x_offset = 10 - self.scrollX
         y_offset = 10 - self.scrollY
-
         for i, line in enumerate(self.lines):
+            # 自動調整onの時は現在の行の3行前から表示するようにする
+            if self.is_auto_scroll and i < self.linenum - 3:
+                continue
             if y_offset > self.maxY:
                 break
-            
             text = line.rstrip()
-
             if (i + 1) == self.linenum:
                 bg_rect = pygame.Rect(
                     x_offset - 5,
@@ -3451,15 +3454,22 @@ class CodeWindow(Window, Map):
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
-
             # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
             self.draw_string(x_offset, y_offset, text, self.TEXT_COLOR)
             y_offset += self.FONT_SIZE + 4
-
+        if not self.is_auto_scroll:
+            pygame.draw.rect(self.surface, (100, 100, 100), self.auto_scroll_button_rect)  # グレーのボタン
+            label_surf, _ = self.font.render("自動スクロール", (255, 255, 255))
+            label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
+            self.surface.blit(label_surf, label_rect)
         Window.blit(self, screen)
     
     def isCursorInWindow(self, pos : tuple[int, int]):
-        return True if self.x <= pos[0] <= self.maxX and self.y <= pos[1] <= self.maxY else False
+        if self.x <= pos[0] <= self.maxX and self.y <= pos[1] <= self.maxY:
+            self.is_auto_scroll = False
+            return True
+        else:
+            return False
 
 # 88888888888                                        ad88888ba                                  88                        
 # 88                                          ,d    d8"     "8b                                 88                        
@@ -3489,18 +3499,6 @@ class EventSender:
         else:
             print(f"[Client] 接続失敗: {last_error}")
             raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
-
-    def wait_for_connection(self, host, port, timeout):
-        """接続可能になるまで最大timeout秒待つ"""
-        start = time.time()
-        while time.time() - start < timeout:
-            try:
-                test_sock = socket.create_connection((host, port), timeout=1)
-                test_sock.close()
-                return  # 接続成功
-            except (ConnectionRefusedError, OSError):
-                time.sleep(0.1)
-        raise TimeoutError(f"{host}:{port} への接続が {timeout:.1f} 秒以内に確立できませんでした。")
 
     def send_event(self, event):
         self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
