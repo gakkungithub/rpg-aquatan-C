@@ -111,42 +111,43 @@ def main():
                     if event.button == 1 and sbwnd.is_visible:
                         if code_name == sbwnd.is_clicked(event.pos):
                             sbwnd.hide()
-                            return code_name
+                            if code_name is not None:
+                                return code_name
     pygame.init()
 
     # region スタート画面の描画
     SBW_RECT = Rect(0, 0, SBW_WIDTH, SBW_HEIGHT)
-    if os.uname()[0] != 'Darwin':
-        drivers = ['fbcon', 'directfb', 'svgalib']
-        found = False
-        for driver in drivers:
-            # Make sure that SDL_VIDEODRIVER is set
-            if not os.getenv('SDL_VIDEODRIVER'):
-                os.putenv('SDL_VIDEODRIVER', driver)
-            try:
-                pygame.display.init()
-            except pygame.error:
-                print(f'Driver: {driver} failed.')
-                continue
-            found = True
-            break
-        if not found:
-            raise Exception('No suitable video driver found!')
-
-        size = (pygame.display.Info().current_w,
-                pygame.display.Info().current_h)
-        print(f"Framebuffer size: {size[0]} x {size[1]}")
-        stage_select_screen = pygame.display.set_mode(SBW_RECT.size, FULLSCREEN)
-    else:
-        scropt = DOUBLEBUF | HWSURFACE
-        stage_select_screen = pygame.display.set_mode(SBW_RECT.size, scropt)
-
-    SBWND = StageButtonWindow()
     # endregion
 
     while True:
+        if os.uname()[0] != 'Darwin':
+            drivers = ['fbcon', 'directfb', 'svgalib']
+            found = False
+            for driver in drivers:
+                # Make sure that SDL_VIDEODRIVER is set
+                if not os.getenv('SDL_VIDEODRIVER'):
+                    os.putenv('SDL_VIDEODRIVER', driver)
+                try:
+                    pygame.display.init()
+                except pygame.error:
+                    print(f'Driver: {driver} failed.')
+                    continue
+                found = True
+                break
+            if not found:
+                raise Exception('No suitable video driver found!')
+
+            size = (pygame.display.Info().current_w,
+                    pygame.display.Info().current_h)
+            print(f"Framebuffer size: {size[0]} x {size[1]}")
+            screen = pygame.display.set_mode(SBW_RECT.size, FULLSCREEN)
+        else:
+            scropt = DOUBLEBUF | HWSURFACE
+            screen = pygame.display.set_mode(SBW_RECT.size, scropt)
+
+        SBWND = StageButtonWindow()
         SBWND.show()
-        SBWND.draw(stage_select_screen)
+        SBWND.draw(screen)
         pygame.display.update()
 
         # region ステージ選択メニュー
@@ -337,9 +338,8 @@ def main():
         #current_place = OMZN_STATUS.current_place()
 
         last_mouse_pos = None
-        isFinished = False
         
-        while not isFinished:
+        while not PLAYER.goaled:
             messages = []
             clock.tick(MAX_FRAME_PER_SEC)
             # メッセージウィンドウ表示中は更新を中止
@@ -823,7 +823,6 @@ def main():
                                         PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                                     if returnResult.get('finished', False):
                                         MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
-                                        isfinished = True
                                     else:
                                         MSGWND.set(returnResult['message'])
                         else:
@@ -1675,6 +1674,7 @@ class Player(Character):
         self.sender : EventSender = sender
         self.itemNameShow = False
         self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
+        self.goaled = False
 
         ## start
         self.fp = open(PATH, mode='w')
@@ -2368,7 +2368,7 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                 elif self.select_type == 'finished':
-                    pass
+                    PLAYER.goaled = True
                 self.selectMsgText = None
                 self.select_type = None
                 self.msgwincount = 0
@@ -3406,7 +3406,7 @@ class CodeWindow(Window, Map):
         self.linenum = self.load_first_code_line()
         self.is_auto_scroll = True
 
-        self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
+        self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
         self.hide()
 
     def load_code_lines(self):
