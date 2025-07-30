@@ -92,32 +92,9 @@ def main():
     # 現状はグローバル変数にしているが、今後どうするかは考える
     global SCR_RECT, SCR_WIDTH, SCR_HEIGHT, MIN_MAP_SIZE, TXTBOX_HEIGHT
 
-    def selectStage(sbwnd: StageButtonWindow):
-        code_name = None
-        while True:
-            for event in pygame.event.get():
-                if event.type == QUIT:
-                    print('ゲームを終了しました')
-                    sys.exit()
-                if event.type == KEYDOWN and event.key == K_ESCAPE:
-                    print('ゲームを終了しました')
-                    sys.exit()
-
-                # region mouse click event
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1 and sbwnd.is_visible:
-                        code_name = sbwnd.is_clicked(event.pos)
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1 and sbwnd.is_visible:
-                        if code_name == sbwnd.is_clicked(event.pos):
-                            sbwnd.hide()
-                            if code_name is not None:
-                                return code_name
     pygame.init()
 
-    # region スタート画面の描画
     SBW_RECT = Rect(0, 0, SBW_WIDTH, SBW_HEIGHT)
-    # endregion
 
     while True:
         if os.uname()[0] != 'Darwin':
@@ -151,7 +128,27 @@ def main():
         pygame.display.update()
 
         # region ステージ選択メニュー
-        stage_name = selectStage(SBWND)
+        stage_name = None
+        code_name = None
+        while stage_name is None:
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    print('ゲームを終了しました')
+                    sys.exit()
+                if event.type == KEYDOWN and event.key == K_ESCAPE:
+                    print('ゲームを終了しました')
+                    sys.exit()
+
+                # region mouse click event
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1 and SBWND.is_visible:
+                        code_name = SBWND.is_clicked(event.pos)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1 and SBWND.is_visible:
+                        if code_name == SBWND.is_clicked(event.pos):
+                            SBWND.hide()
+                            if code_name is not None:
+                                stage_name = code_name
         # endregion
 
         # region マップデータ生成
@@ -185,6 +182,8 @@ def main():
         config.read(f"mapdata/{stage_name}/{stage_name}.ini")
         SCR_WIDTH = int(config.get('screen', 'width'))
         SCR_HEIGHT = int(config.get('screen', 'height'))
+
+        PAUSE_RECT = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
 
         SCR_RECT = Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
         DB_CHECK_WAIT = 30 * MAX_FRAME_PER_SEC
@@ -224,6 +223,10 @@ def main():
         else:
             scropt = DOUBLEBUF | HWSURFACE
             screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, scropt)
+
+        # region ポーズ画面の設定
+        PAUSEWND = PauseWindow(PAUSE_RECT)
+        # endregion
 
         # region コマンドラインの設定
         pygame.draw.rect(screen, (0,0,0), TXTBOX_RECT)
@@ -469,6 +472,34 @@ def main():
                         mouse_down = False
                         last_mouse_pos = None
                         end_timer()
+                        if cmd == "pause" and cmd == BTNWND.is_clicked(event.pos):
+                            # ここより下の部分を関数化するかどうかは後で考える
+                            PAUSEWND.show()
+                            PAUSEWND.draw(screen)
+                            pygame.display.update()
+                            while PAUSEWND.is_visible:
+                                for event in pygame.event.get():
+                                    if event.type == QUIT:
+                                        server.terminate()
+                                        print('ゲームを終了しました')
+                                        sys.exit()
+                                    if event.type == KEYDOWN and event.key == K_ESCAPE:
+                                        server.terminate()
+                                        print('ゲームを終了しました')
+                                        sys.exit()
+
+                                    if event.type == pygame.MOUSEBUTTONDOWN:
+                                        if event.button == 1 and PAUSEWND.is_visible:
+                                            local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
+                                            if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
+                                                cmd = ""
+                                                PAUSEWND.hide()
+                                                print('ゲームに戻る')
+                                            elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
+                                                cmd = ""    
+                                                PAUSEWND.hide()
+                                                PLAYER.goaled = True 
+                                                print('ステージ選択に戻る')       
 
                 if mouse_down:
                     if event.type == pygame.MOUSEMOTION and last_mouse_pos:
@@ -699,6 +730,35 @@ def main():
                         MSGWND.set("Undefined command")
                         atxt = "\0"
                         cmd = "\0"
+
+                if event.type == KEYDOWN and event.key == K_p:
+                    PAUSEWND.show()
+                    PAUSEWND.draw(screen)
+                    pygame.display.update()
+                    while PAUSEWND.is_visible:
+                        for event in pygame.event.get():
+                            if event.type == QUIT:
+                                server.terminate()
+                                print('ゲームを終了しました')
+                                sys.exit()
+                            if event.type == KEYDOWN and event.key == K_ESCAPE:
+                                server.terminate()
+                                print('ゲームを終了しました')
+                                sys.exit()
+
+                            if event.type == pygame.MOUSEBUTTONDOWN:
+                                if event.button == 1 and PAUSEWND.is_visible:
+                                    local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
+                                    if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
+                                        cmd = ""
+                                        PAUSEWND.hide()
+                                        print('ゲームに戻る')
+                                    elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
+                                        cmd = ""    
+                                        PAUSEWND.hide()
+                                        PLAYER.goaled = True 
+                                        print('ステージ選択に戻る')       
+
 
                 if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
                     MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
@@ -2386,6 +2446,53 @@ class MessageWindow(Window):
                     self.next_flag = False
             self.msgwincount = 0
 
+                                                                                                                                          
+# 88888888ba                                            I8,        8        ,8I 88                      88                                 
+# 88      "8b                                           `8b       d8b       d8' ""                      88                                 
+# 88      ,8P                                            "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaaa8P' ,adPPYYba, 88       88 ,adPPYba,  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""""'   ""     `Y8 88       88 I8[    "" a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          ,adPPPPP88 88       88  `"Y8ba,  8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88,    ,88 "8a,   ,a88 aa    ]8I "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          `"8bbdP"Y8  `"YbbdP'Y8 `"YbbdP"'  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                          
+class PauseWindow(Window):
+    """ポーズウィンドウ"""
+    FONT_SIZE = 16
+    TEXT_COLOR = (255, 255, 255)
+    TO_GAME_BG_COLOR = (0, 0, 255) 
+    TO_GAME_FONT_COLOR = (255, 255, 255)
+    TO_SSELECT_BG_COLOR = (255, 0, 0) 
+    TO_SSELECT_FONT_COLOR = (255, 255, 255)   
+
+    def __init__(self, rect):
+        Window.__init__(self, rect)
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 2 - 30, 200, 60)
+        self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 2 - 30, 200, 60)
+
+    def draw(self, screen):
+        """ポーズ画面を描画する"""
+        Window.draw(self)
+        if self.is_visible is False:
+            return
+
+        surf, rect = self.font.render("Pause", self.TEXT_COLOR)
+        self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 2 - 100))
+
+        # ゲームボタン
+        pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
+        label_surf_toGame, _ = self.font.render("ゲームに戻る", self.TO_GAME_FONT_COLOR)
+        label_rect_toGame = label_surf_toGame.get_rect(center=self.button_toGame_rect.center)
+        self.surface.blit(label_surf_toGame, label_rect_toGame)
+
+        # ステージ選択メニューに戻るボタン
+        pygame.draw.rect(self.surface, self.TO_SSELECT_BG_COLOR, self.button_toStageSelect_rect)
+        label_surf_toStageSelect, _ = self.font.render("ステージ選択画面に戻る", self.TO_SSELECT_FONT_COLOR)
+        label_rect_toStageSelect = label_surf_toStageSelect.get_rect(center=self.button_toStageSelect_rect.center)
+        self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
+
+        Window.blit(self, screen)
 
 #                                                                                                                          
 # 88                                    I8,        8        ,8I 88                      88                                 
@@ -3070,6 +3177,8 @@ class StageButtonWindow:
     code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
+    FONT_SIZE = 32
+    FONT_COLOR = (255, 255, 255)
 
     def __init__(self):
         self.rect = pygame.Rect(0, 0, SBW_WIDTH , SBW_HEIGHT)
@@ -3077,6 +3186,7 @@ class StageButtonWindow:
         self.surface.fill((128, 128, 128))
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = self.load_sb()
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
 
     def show(self):
         """ウィンドウを表示"""
@@ -3101,6 +3211,7 @@ class StageButtonWindow:
     def draw(self, screen):
         if self.is_visible:
             self.blit(screen)
+            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択", self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
 
@@ -3162,6 +3273,7 @@ class ArrowButtonWindow:
         self.button_left = Button("arrow.png", self.rect[0] + 0, self.rect[1] + BUTTON_WIDTH, 180)
         self.button_up = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0,90)
         self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH,-90)
+        self.button_pause = Button("pause.png", self.rect[0] + 0, self.rect[1] + 0, 0)
         self.button_return = Button("return.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
 
     def blit(self,screen):
@@ -3180,6 +3292,7 @@ class ArrowButtonWindow:
         self.button_left.draw(screen)
         self.button_up.draw(screen)
         self.button_down.draw(screen)
+        self.button_pause.draw(screen)
         self.button_return.draw(screen)
         self.blit(screen)
     
@@ -3192,6 +3305,8 @@ class ArrowButtonWindow:
             return "up"
         elif self.button_down.rect.collidepoint(pos):
             return "down"
+        elif self.button_pause.rect.collidepoint(pos):
+            return "pause"
         elif self.button_return.rect.collidepoint(pos):
             return "action"
         else:
@@ -3305,7 +3420,6 @@ class CommandWindow(Window):
         result = self.read(screen, font)
         Window.blit(self, screen)
         return result
-
 
 
                                                                                                                                                                
