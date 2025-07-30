@@ -130,6 +130,9 @@ def main():
         # region ステージ選択メニュー
         stage_name = None
         code_name = None
+        last_mouse_pos = None
+        mouse_down = False
+        scroll_start = False
         while stage_name is None:
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -142,13 +145,32 @@ def main():
                 # region mouse click event
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1 and SBWND.is_visible:
+                        mouse_down = True
                         code_name = SBWND.is_clicked(event.pos)
+                        last_mouse_pos = event.pos
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button == 1 and SBWND.is_visible:
-                        if code_name == SBWND.is_clicked(event.pos):
+                        # ステージのボタンを押した場合
+                        if code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
                             SBWND.hide()
-                            if code_name is not None:
-                                stage_name = code_name
+                            stage_name = code_name
+                        mouse_down = False
+                        scroll_start = False
+                if mouse_down:
+                    if event.type == pygame.MOUSEMOTION:
+                        scroll_start = True
+                        dx = - (event.pos[0] - last_mouse_pos[0])
+                        if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
+                            SBWND.scrollX += dx
+                        elif SBWND.scrollX + dx < 0:
+                            SBWND.scrollX = 0
+                        else:
+                            SBWND.scrollX = SBWND.maxScrollX
+                        if dx != 0:
+                            SBWND.load_sb()
+                        last_mouse_pos = event.pos
+                SBWND.draw(screen)
+                pygame.display.update()
         # endregion
 
         # region マップデータ生成
@@ -3174,7 +3196,7 @@ class ItemBag:
 
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
-    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break"]
+    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
@@ -3185,7 +3207,10 @@ class StageButtonWindow:
         self.surface = pygame.Surface((self.rect[2], self.rect[3]))
         self.surface.fill((128, 128, 128))
         self.is_visible = False  # ウィンドウを表示中か？
-        self.button_stages: list[StageButton] = self.load_sb()
+        self.button_stages: list[StageButton] = []
+        self.scrollX = 0
+        self.maxScrollX = (len(self.code_names) - 5) * self.SB_WIDTH + 10
+        self.load_sb()
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
 
     def show(self):
@@ -3196,13 +3221,12 @@ class StageButtonWindow:
         self.is_visible = False
 
     def load_sb(self):
-        x = 10
+        x = 10 - self.scrollX
         y = SBW_HEIGHT // 4
-        button_stages = []
+        self.button_stages = []
         for i, code_name in enumerate(self.code_names):
-            button_stages.append(StageButton(code_name, i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+            self.button_stages.append(StageButton(code_name, i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
             x += self.SB_WIDTH + 10
-        return button_stages
 
     def blit(self, screen):
         """blit"""
