@@ -1,2 +1,4 @@
-start,06_function_definition,6, 11
-end, 06_function_definition,6, 11
+start,06_function_definition,21, 21
+itemget, 06_function_definition,25, 19,r1
+jump, 06_function_definition,33, 7
+end, 06_function_definition,33, 7

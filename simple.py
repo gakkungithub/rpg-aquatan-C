@@ -196,7 +196,7 @@ def main():
         env["PYTHONPATH"] = os.path.abspath("modules") + (
             ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
         )
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
         # endregion
 
         # region マップの初期設定
@@ -419,10 +419,15 @@ def main():
                             event_underfoot.open(itemResult['value'], itemResult['undefined'])
                             item_comments = "%".join(event_underfoot.comments)
                             if item_comments:
-                                MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                                item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments
                             else:
-                                MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                                item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！"
                             fieldmap.remove_event(event_underfoot)
+                            if itemResult.get('skip', False):
+                                item_get_message += f"%{itemResult['message']}"
+                                MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
+                            else:
+                                MSGWND.set(item_get_message)
                             PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                         else:
                             MSGWND.set(itemResult['message'])
@@ -795,7 +800,7 @@ def main():
                         # 足元にあるのが宝箱かワープゾーンかを調べる
                         event_underfoot = PLAYER.search(fieldmap)
                         if isinstance(event_underfoot, Treasure):
-                            ### ここで宝箱を開けたことの情報を送信する
+                            ### 宝箱を開けることの情報を送信する
                             sender.send_event({"item": event_underfoot.item, "funcWarp": event_underfoot.funcWarp})
                             itemResult = sender.receive_json()
                             if itemResult is not None:
@@ -803,10 +808,16 @@ def main():
                                     event_underfoot.open(itemResult['value'], itemResult['undefined'])
                                     item_comments = "%".join(event_underfoot.comments)
                                     if item_comments:
-                                        MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments)
+                                        item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments
                                     else:
-                                        MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
+                                        item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！"
                                     fieldmap.remove_event(event_underfoot)
+                                    if itemResult.get('skip', False):
+                                        item_get_message += f"%{itemResult['message']}"
+                                        MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
+                                    else:
+                                        MSGWND.set(item_get_message)
+                                    #########################################
                                     PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                                 else:
                                     MSGWND.set(itemResult['message'])
@@ -2400,7 +2411,7 @@ class MessageWindow(Window):
                 dy = self.text_rect[1] + \
                     (self.LINE_HEIGHT + MessageEngine.FONT_HEIGHT) * 4
                 self.surface.blit(self.cursor, (dx, dy))
-        if self.selectMsgText and self.hide_flag:
+        elif self.hide_flag and self.selectMsgText:
             dx = 5
             dy += MessageEngine.FONT_HEIGHT
             for i, text in enumerate(self.selectMsgText):
@@ -2421,11 +2432,11 @@ class MessageWindow(Window):
     def selectMsg(self, i):
         self.selectingIndex = (self.selectingIndex + i) % len(self.selectMsgText)
 
-    def next(self, fieldmap, force_next=False):
+    def next(self, fieldmap: Map, force_next=False):
         """メッセージを先に進める"""
-        if (self.msgwincount > self.MSGWAIT and self.selectMsgText is None) or force_next:
+        if (self.msgwincount > self.MSGWAIT and not (self.selectMsgText is not None and self.hide_flag)) or force_next:
             # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
-            if self.selectMsgText:
+            if self.selectMsgText and self.hide_flag:
                 if self.select_type == 'loop_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
@@ -2452,6 +2463,38 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                elif self.select_type == 'func_skip':
+                    if self.selectMsgText[self.selectingIndex] == "はい":
+                        self.sender.send_event({"skip": True})
+                        skipResult = self.sender.receive_json()
+                        self.set(skipResult['message'])
+                    else:
+                        self.sender.send_event({"skip": False})
+                        skipResult = self.sender.receive_json()
+                        self.set(skipResult['message'])
+                        # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
+                        dest_map = fieldmap.name
+                        dest_x = skipResult["skipTo"]["x"]
+                        dest_y = skipResult["skipTo"]["y"]
+
+                        from_map = fieldmap.name
+                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                        if len(PLAYER.move5History) > 5:
+                            PLAYER.move5History.pop(0)
+                        
+                        newItems = []
+                        for name, value in skipResult["skipTo"]["items"].items():
+                            item = Item(name, value, "int", False)
+                            newItems.append(item)
+                        PLAYER.itembag.items.append(newItems)
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        fieldmap.create(dest_map)  # 移動先のマップで再構成
+                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None

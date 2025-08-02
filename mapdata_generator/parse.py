@@ -217,6 +217,7 @@ class ASTtoFlowChart:
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
             returnNodeID = self.createNode(f"{cr.location.line}", 'lpromoter')
+            self.line_info[self.scanning_func][0].add(cr.location.line)
             self.createEdge(returnNodeID, self.get_exp(value_cursor))
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None
@@ -727,7 +728,6 @@ class ASTtoFlowChart:
                 nodeIDs = [trueEndNodeID] + self.parse_if_branch(else_cursor, condNodeID, edgeName="False", line_track=line_track)
             else:
                 # else
-
                 falseEndNodeID = self.createNode("", 'terminator')
                 in_else_cursor = list(else_cursor.get_children())
                 if len(in_else_cursor):

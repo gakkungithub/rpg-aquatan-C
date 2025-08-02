@@ -16,12 +16,25 @@ PROGRESS = 0
 
 class VarsTracker:
     def __init__(self):
-        self.previous_values = {}
-        self.vars_declared = []
+        self.previous_values: list[dict[str, str]] = []
+        self.vars_declared: list[list[str]] = []
         self.vars_removed = []
-        self.func_name = None
+        self.frames = ['start']
     
     def trackStart(self, frame, func_name):
+        current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
+                      for i in range(thread.GetNumFrames())]
+        # 何かしらの関数に遷移したとき
+        if len(current_frames) > len(self.frames):
+            self.previous_values.append({})
+            self.vars_declared.append([])
+            self.frames = current_frames
+        # 何かしらの関数から戻ってきたとき
+        elif len(current_frames) < len(self.frames):
+            self.previous_values.pop()
+            self.vars_declared.pop()
+            self.frames = current_frames
+        
         return self.track(frame.GetVariables(True, True, False, True))
 
     def track(self, vars, depth=0, max_depth=10, prefix="") -> list[str]:
@@ -38,7 +51,7 @@ class VarsTracker:
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
 
-            prev_value = self.previous_values.get(full_name)
+            prev_value = self.previous_values[-1].get(full_name)
             changed = (value != prev_value)
 
             if changed:
@@ -50,7 +63,7 @@ class VarsTracker:
             if depth == 0:
                 crnt_vars.append(name)
 
-            self.previous_values[full_name] = value
+            self.previous_values[-1][full_name] = value
 
             num_children = var.GetNumChildren()
             
@@ -110,20 +123,22 @@ class VarsTracker:
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
-
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
                 vars_changed += self.track(children, depth + 1, max_depth, full_name)
 
         if depth == 0:
-            self.vars_removed = list(set(self.vars_declared) - set(crnt_vars))
+            self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
         return vars_changed
     
     def getValue(self, varname):
-        return self.previous_values[varname]
+        return self.previous_values[-1][varname]
+    
+    def getValueBeforeFuncWarp(self, varname):
+        return self.previous_values[-2][varname]
     
     def setVarsDeclared(self, var):
-        return self.vars_declared.append(var)
+        return self.vars_declared[-1].append(var)
     
 def get_all_stdvalue(process):
     stdout_output = ""
@@ -252,7 +267,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
     def vars_checker(first_event=None):
         nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed
-        varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared))
+        varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared[-1]))
         getLine = (first_event is None)
 
         if len(varsDeclLines) != 0:
@@ -282,7 +297,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         for funcWarp in funcWarps.items():
                             funcWarpName, funcWarpInfo = funcWarp
                             if funcWarpName == func_crnt_name and funcWarpInfo["line"] == next_line_number:
-                                event_sender({"message": "遷移先の関数の処理をスキップしますか?", "value": varsTracker.getValue(item), "undefined": True, "status": "ok", "skip": True})
+                                event_sender({"message": "遷移先の関数の処理をスキップしますか?", "value": varsTracker.getValueBeforeFuncWarp(item), "undefined": True, "status": "ok", "skip": True})
                                 event = event_reciever()
                                 if event.get('skip', False):
                                     back_line_number = line_number
@@ -297,9 +312,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             isEnd = True
                                         if back_line_number == line_number:
                                             break
-                                        event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values})
+                                        event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
                                 else:
-                                    event_sender({f"message": "スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "skipTo": {"name": funcWarpName, "x": funcWarpInfo["x"], "y": funcWarpInfo["y"], "items": varsTracker.previous_values}})
+                                    event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "skipTo": {"name": funcWarpName, "x": funcWarpInfo["x"], "y": funcWarpInfo["y"], "items": varsTracker.previous_values[-1]}})
                                     back_line_number = line_number
                                     while 1:
                                         if analyze_frame():
@@ -323,7 +338,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     continue
 
         # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
-        common = list(set(vars_changed) & set(varsTracker.vars_declared))
+        common = list(set(vars_changed) & set(varsTracker.vars_declared[-1]))
         varsChanged = list(set(common) - set(varsDeclLines))
 
         if len(varsChanged) != 0:
@@ -414,7 +429,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         continue
 
     def analyze_frame():
-        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, line_data, isEnd
         if line_data.get(func_name, None) and line_number in line_data[func_name][0] and not isEnd:
             if (event := event_reciever()) is None:
                 return 
@@ -539,7 +554,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                         else:
                                             isEnd = True
-                                    event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values})
+                                    event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
                                     return CONTINUE
                                 else:
                                     event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -568,7 +583,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                         else:
                                             isEnd = True
-                                    event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values})
+                                    event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values[-1]})
                                     return CONTINUE
                                 else:
                                     event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -600,7 +615,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                         else:
                                             isEnd = True
-                                    event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": varsTracker.previous_values})
+                                    event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": varsTracker.previous_values[-1]})
                                 else:
                                     event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                             else:
@@ -631,7 +646,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                             else:
                                                 isEnd = True
-                                        event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": varsTracker.previous_values})
+                                        event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": varsTracker.previous_values[-1]})
                                     else:
                                         event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                 else:
@@ -826,7 +841,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
                                             continue
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -855,7 +870,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values[-1]})
                                             continue
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -887,7 +902,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                                 else:
                                                     isEnd = True
-                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": varsTracker.previous_values})
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": varsTracker.previous_values[-1]})
                                         else:
                                             event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                     else:
@@ -918,7 +933,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                         vars_changed = varsTracker.trackStart(frame, func_crnt_name)
                                                     else:
                                                         isEnd = True
-                                                event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": varsTracker.previous_values})
+                                                event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": varsTracker.previous_values[-1]})
                                             else:
                                                 event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                         else:
