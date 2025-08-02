@@ -54,7 +54,7 @@ class ASTtoFlowChart:
         self.varNode_info: dict[str, str] = {}
         self.expNode_info: dict[str, tuple[str, list[str], list[str], int]] = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
-        self.line_info : dict[str, list[set[int], dict[int, int]]] = {}
+        self.line_info : dict[str, tuple[set[int], dict[int, int], int]] = {}
         self.funcNum = 0
     
     def createNode(self, nodeLabel, shape='rect'):
@@ -143,8 +143,11 @@ class ASTtoFlowChart:
                 #関数の情報を取得し、ビットマップ描画時に取捨選択する
                 self.scanning_func = func_name
 
-                self.func_info[func_name] = {"start": f'"{nodeID}"', "refs": set()}
-                self.line_info[func_name] = [set(), {}]
+                statement_crs = list(cr.get_children())
+
+                self.func_info[func_name] = {"start": f'"{nodeID}"', "refs": set(), "line": statement_crs[0].location.line if len(statement_crs) != 0 else 0}
+                self.line_info[func_name] = (set(), {}, statement_crs[0].location.line if len(statement_crs) != 0 else 0)
+
                 #関数の最初の部屋情報を作る
                 self.roomSize_info[self.scanning_func] = {}
                 self.createRoomSizeEstimate(nodeID)
@@ -274,7 +277,12 @@ class ASTtoFlowChart:
                 self.gotoLabel_list[cr.spelling] = {"toNodeID": f'"{self.roomSizeEstimate[0]}"', "fromNodeID": []}
             nodeID = self.parse_stmt(exec_cr, toNodeID)
         elif cr.kind == clang.cindex.CursorKind.CALL_EXPR:
-            nodeID, _ = self.parse_call_expr(cr, nodeID)
+            # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
+            expNodeID = self.createNode("")
+            self.createEdge(nodeID, expNodeID)
+            exp_terms, comment, refspell = self.parse_call_expr(cr, expNodeID)
+            self.expNode_info[f'"{expNodeID}"'] = (exp_terms, [refspell], [comment], cr.location.line)
+            nodeID = expNodeID
         else:
             expNodeID = self.get_exp(cr, 'rect')
             self.createEdge(nodeID, expNodeID, edgeName)
@@ -496,7 +504,8 @@ class ASTtoFlowChart:
             exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, references, calc_order_comments, inNodeID), "]"])
         #関数
         elif cursor.kind == clang.cindex.CursorKind.CALL_EXPR:
-            exp_terms, refspell = self.parse_call_expr(cursor, inNodeID)
+            exp_terms, comment, refspell = self.parse_call_expr(cursor, inNodeID)
+            calc_order_comments.append(comment)
             references.append(refspell)
         #一項条件式
         elif cursor.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
@@ -583,21 +592,24 @@ class ASTtoFlowChart:
 
         ref_spell = next(func_cursor.get_tokens()).spelling
         self.func_info[self.scanning_func]["refs"].add(ref_spell)
-        ref_spell_w_id = f"{ref_spell} {self.funcNum}"
 
-        funcNodeID = self.createNode(ref_spell_w_id, 'oval')
+        funcNodeID = self.createNode(ref_spell, 'oval')
         self.funcNum += 1
 
-        # 呼び出し元とのエッジ
+        # 呼び出し元のノードと関数のノードをくっつける
         self.createEdge(inNodeID, funcNodeID)
 
+        arg_exps = []
         # --- 引数ノードとのエッジ作成 ---
-        for arg_cursor in children[1:]:
+        for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
             argNodeID = self.get_exp(arg_cursor, 'egg')
             self.createEdge(funcNodeID, argNodeID)
+            tokens = list(arg_cursor.get_tokens())
+            arg_exps.append(f"{''.join([t.spelling for t in tokens])}を{i+1}つ目の実引数")
 
-        return funcNodeID, ref_spell_w_id
+        func_exp_comment = ", ".join(arg_exps) + "として" + f"関数{ref_spell}を実行します" if len(arg_exps) else f"引数なしで、関数{ref_spell}を実行します"
+        return "".join(list([t.spelling for t in cursor.get_tokens()])), func_exp_comment, ref_spell
 
     #typedefの解析
     def parse_typedef(self, cursor):

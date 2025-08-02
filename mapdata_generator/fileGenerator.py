@@ -6,7 +6,7 @@ import random
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 
-def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInfo, chara_returnInfo, doorInfo, isUniversal, defaultMapChip=503):
+def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, chara_returnInfo, doorInfo, isUniversal, defaultMapChip=503):
     events = []
     characters = []
     vardecl_lines: dict[int, list[str]] = {}
@@ -25,7 +25,11 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
             vardecl_lines[exp_line_num].append(item[1])
         else:
             vardecl_lines[exp_line_num] = [item[1]]
-        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num})
+        item_func_warp = {}
+        for func in item[4]:
+            warp_pos, args, line = funcWarpInfo[func]
+            item_func_warp[func] = {"x": warp_pos[1], "y": warp_pos[0], "line": line}
+        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num, "funcWarp": item_func_warp})
 
     # 経路の一方通行情報
     for exit in exitInfo:
@@ -35,14 +39,14 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, chara_moveItemsInf
     for door in doorInfo:
         events.append({"type": "SDOOR", "x": door[0][1], "y": door[0][0], "doorname": door[1], "dir": door[2]})
 
-    # ワープキャラの情報
-    ### 関数の呼び出しに応じたキャラクターの情報
-    for chara_moveItems in chara_moveItemsInfo:
-        pos, warpTo, vars, funcName, arguments = chara_moveItems
-        # キャラの色をでランダムにする
-        color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+    # # ワープキャラの情報
+    # ### 関数の呼び出しに応じたキャラクターの情報
+    # for chara_moveItems in chara_moveItemsInfo:
+    #     pos, warpTo, vars, funcName, arguments = chara_moveItems
+    #     # キャラの色をでランダムにする
+    #     color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
         
-        characters.append({"type": "CHARAMOVEITEMS", "name": str(color), "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
+    #     characters.append({"type": "CHARAMOVEITEMS", "name": str(color), "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
     
     ### 関数の戻りに応じたキャラクターの情報
     for chara_return in chara_returnInfo:
@@ -88,9 +92,9 @@ def writeMapIni(pname, initPos, gvarString):
     with open(filename, 'w') as f:
         config.write(f)
 
-def writeLineFile(pname: str, line_info: dict[str, list[set[int], dict[int, int]]]):
+def writeLineFile(pname: str, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
     filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-    line_info_json = {funcname: [list(line_nums), loop_line_nums] for funcname, (line_nums, loop_line_nums) in line_info.items()}
+    line_info_json = {funcname: [list(line_nums), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
     with open(filename, 'w') as f:
         json.dump(line_info_json, f)

@@ -73,7 +73,6 @@ class AStarFixed(AStar):
 
         return neighbors
 
-
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
     ISEVENT = 2
@@ -84,7 +83,8 @@ class MapInfo:
         self.condition_move: dict[str, tuple[str, list[int | None]]] = condition_move
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
-        self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
+        self.treasure_info: list[tuple[str, list[str], list[str], int, list[str]]] = []
+        self.func_warp: dict[str, tuple[tuple[int, int], list[str]], int] = {}
         self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
         self.chara_return: list[tuple[tuple[int, int], str, int]] = []
         self.exit_info: list[tuple[int, int], str, list[int | None], str] = []
@@ -104,31 +104,42 @@ class MapInfo:
         else:
             print("generation failed: try again!! 0")
 
-    # 関数キャラの設定
-    def setFuncWarp(self, func_warp):
-        for funcName, funcWarp in func_warp.items():
-            if funcWarp[0] and funcWarp[1]:
-                wy, wx, wheight, wwidth = self.room_info[funcWarp[0]]
-                zero_elements = np.argwhere(self.eventMap[wy:wy+wheight, wx:wx+wwidth] == 0)
-                if zero_elements.size > 0:
-                    y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-                    warpPos = (int(wy+y), int(wx+x))
-                    self.eventMap[warpPos[0], warpPos[1]] = self.ISEVENT
-                    for warpFuncInfo in funcWarp[1]:
-                        self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
-
-    # 話しかけると別の関数に進むキャラの設定
-    def setCharaMoveItems(self, warpFuncInfo, warpTo, arguments):
-        roomNodeID, vars, funcName = warpFuncInfo
-        gy, gx, gheight, gwidth = self.room_info[roomNodeID]
-        zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+    def setFuncWarpStartPos(self, startNodeID):
+        sy, sx, sheight, swidth = self.room_info[startNodeID]
+        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            pos = (int(gy+y), int(gx+x))
+            pos = (int(sy+y), int(sx+x))
             self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            self.chara_moveItems.append((pos, warpTo, vars, funcName, arguments))
+            return pos
         else:
-            print("generation failed: try again!! 5")        
+            print("generation failed: try again!! 5")
+            return None
+    # 関数キャラの設定
+    # def setFuncWarp(self, func_warp):
+    #     for funcName, funcWarp in func_warp.items():
+    #         if funcWarp[0] and funcWarp[1]:
+    #             wy, wx, wheight, wwidth = self.room_info[funcWarp[0]]
+    #             zero_elements = np.argwhere(self.eventMap[wy:wy+wheight, wx:wx+wwidth] == 0)
+    #             if zero_elements.size > 0:
+    #                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+    #                 warpPos = (int(wy+y), int(wx+x))
+    #                 self.eventMap[warpPos[0], warpPos[1]] = self.ISEVENT
+    #                 for warpFuncInfo in funcWarp[1]:
+    #                     self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
+
+    # # 話しかけると別の関数に進むキャラの設定
+    # def setCharaMoveItems(self, warpFuncInfo, warpTo, arguments):
+    #     roomNodeID, vars, funcName = warpFuncInfo
+    #     gy, gx, gheight, gwidth = self.room_info[roomNodeID]
+    #     zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+    #     if zero_elements.size > 0:
+    #         y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+    #         pos = (int(gy+y), int(gx+x))
+    #         self.eventMap[pos[0], pos[1]] = self.ISEVENT
+    #         self.chara_moveItems.append((pos, warpTo, vars, funcName, arguments))
+    #     else:
+    #         print("generation failed: try again!! 5")        
 
     # 話しかけると戻るキャラの設定
     def setCharaReturn(self, roomNodeID, line, funcName):
@@ -184,14 +195,14 @@ class MapInfo:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定
-    def setItemBox(self, roomNodeID, itemName, item_exp_Info: tuple[str, list[str], list[str], int], var_type: str):
+    def setItemBox(self, roomNodeID, itemName, item_exp_Info: tuple[str, list[str], list[str], int], var_type: str, funcs):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             itemPos = (int(ry+y), int(rx+x))
             self.eventMap[itemPos[0], itemPos[1]] = self.ISEVENT
-            self.treasure_info.append((itemPos, itemName, item_exp_Info, var_type))
+            self.treasure_info.append((itemPos, itemName, item_exp_Info, var_type, funcs))
         else:
             print("generation failed: try again!! 3")
 
@@ -220,7 +231,7 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
-    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, list[set[int], dict[int, int]]]):
+    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
         defaultMapChips = [503, 113, 343, 160, 32]
         floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
         # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
@@ -228,7 +239,7 @@ class MapInfo:
         # self.floorMap = np.where(self.floorMap == 0, 31, self.floorMap) # dungeon_floor
 
         fg.writeMapIni(pname, self.initPos, gvar_str)
-        fg.writeMapJson(pname, floorMap, self.warp_info, self.treasure_info, self.exit_info, self.chara_moveItems, self.chara_return, self.door_info, isUniversal, defaultMapChips[0])
+        fg.writeMapJson(pname, floorMap, self.warp_info, self.treasure_info, self.exit_info, self.func_warp, self.chara_return, self.door_info, isUniversal, defaultMapChips[0])
         fg.writeLineFile(pname, line_info)
 
         plt.imshow(floorMap, cmap='gray', interpolation='nearest')
@@ -258,7 +269,6 @@ class GenBitMap:
         self.floorMap = None
         self.roomsMap = None
         self.gotoRoom_list: dict[str, dict[str, GotoRoomInfo]] = gotoRoom_list # gotoラベルによるワープゾーンを作るための変数
-        self.func_warp = {}
         self.mapInfo = MapInfo(condition_move)
 
     def setMapChip(self, pname, line_info, isUniversal):
@@ -307,7 +317,7 @@ class GenBitMap:
 
         self.floorMap = bitMap_padded[1:height+1, 1:width+1]
 
-        self.mapInfo.setFuncWarp(self.func_warp)
+        # self.mapInfo.setFuncWarp(self.func_warp)
 
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
 
@@ -346,11 +356,13 @@ class GenBitMap:
         nodeID = refInfo["start"]
         self.createRoom(nodeID)
         
-        #関数呼び出しのワープ情報を更新
-        if self.func_name in self.func_warp:
-            self.func_warp[self.func_name][0] = nodeID
+        # 関数呼び出しのワープ情報を更新
+        # キャラクターではなくなるが、この情報は流用可能
+        # ただし、ワープ元の部屋を表すノードは使わない(アイテムに対するワープ情報はアイテムの生成時にくっつける)
+        if self.func_name in self.mapInfo.func_warp:
+            self.mapInfo.func_warp[self.func_name][0] = self.mapInfo.setFuncWarpStartPos(nodeID)
         else:
-            self.func_warp[self.func_name] = [nodeID, [], []]
+            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), [], refInfo["line"])
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
@@ -367,7 +379,7 @@ class GenBitMap:
     def trackAST(self, crntRoomID, nodeID, loopBackID = None):
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
-            self.func_warp[self.func_name][2].append(self.getNodeLabel(nodeID))
+            self.mapInfo.func_warp[self.func_name][1].append(self.getNodeLabel(nodeID))
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
@@ -431,27 +443,6 @@ class GenBitMap:
                 # false
                 self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
 
-        #関数のワープ情報を更新する
-        elif self.getNodeShape(nodeID) == 'oval':
-            funcName = self.getNodeLabel(nodeID)
-            funcWarpInfo = [crntRoomID, [], funcName]
-            for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-                #関数の引数を関数遷移の鍵とする
-                if self.getNodeShape(toNodeID) == 'egg':
-                    eni = self.getExpNodeInfo(toNodeID)
-                    funcWarpInfo[1].append(eni[1])
-                    for eggFuncNodeID, edgeLabel in self.getNextNodeInfo(toNodeID):
-                        self.trackAST(crntRoomID, eggFuncNodeID)
-                #それ以外は次のノードに進む
-                else:
-                    self.trackAST(crntRoomID, toNodeID)
-            #関数のノードはidをつけて唯一性を確保している
-            funcType = f'{funcName.split()[0][1:]}'
-            if funcType in self.func_warp:
-                self.func_warp[funcType][1].append(tuple(funcWarpInfo))
-            else:
-                self.func_warp[funcType] = [None, [tuple(funcWarpInfo)], []]
-        
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
             # returnノードに行数ラベルをつけて、それで行数を確認する
@@ -483,7 +474,31 @@ class GenBitMap:
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
                     eni = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
+                    funcs = []
+                    funcNodeID_info = self.getNextNodeInfo(toNodeID)
+                    if len(funcNodeID_info) != 0:
+                        funcNodeID, edgeLabel = funcNodeID_info[0]
+                        # #関数のワープ情報を更新する
+                        # if self.getNodeShape(funcNodeID) == 'oval':
+                        #     funcName = self.getNodeLabel(nodeID)
+                        #     funcWarpInfo = [crntRoomID, [], funcName]
+                        #     for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
+                        #         #関数の引数を関数遷移の鍵とする
+                        #         if self.getNodeShape(toNodeID) == 'egg':
+                        #             eni = self.getExpNodeInfo(toNodeID)
+                        #             funcWarpInfo[1].append(eni[1])
+                        #             for eggFuncNodeID, edgeLabel in self.getNextNodeInfo(toNodeID):
+                        #                 self.trackAST(crntRoomID, eggFuncNodeID)
+                        #     #関数のノードはidをつけて唯一性を確保している
+                        #     funcType = f'{funcName.split()[0][1:]}'
+                        #     if funcType in self.func_warp:
+                        #         self.func_warp[funcType][1].append(tuple(funcWarpInfo))
+                        #     else:
+                        #         self.func_warp[funcType] = [None, [tuple(funcWarpInfo)], []]
+                        # とりあえずネストは考えない
+                        if self.getNodeShape(funcNodeID) == 'oval': 
+                            funcs.append(self.getNodeLabel(funcNodeID))
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type, funcs)
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -495,7 +510,7 @@ class GenBitMap:
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
                     eni = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type, [])
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)

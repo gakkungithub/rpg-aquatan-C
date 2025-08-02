@@ -290,8 +290,9 @@ def main():
         CODEWND = CodeWindow(MCODE_RECT, mapname)
 
         sender = EventSender(CODEWND)
+        
         PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
-        # endregion
+        _ = sender.receive_json()
 
         BTNWND = ArrowButtonWindow()
         BTNWND.show()
@@ -411,7 +412,7 @@ def main():
                 event_underfoot = PLAYER.search(fieldmap)
                 if isinstance(event_underfoot, Treasure):
                     ### 宝箱を開けることの情報を送信する
-                    sender.send_event({"item": event_underfoot.item})
+                    sender.send_event({"item": event_underfoot.item, "funcWarp": event_underfoot.funcWarp})
                     itemResult = sender.receive_json()
                     if itemResult is not None:
                         if itemResult['status'] == "ok":
@@ -422,7 +423,7 @@ def main():
                             else:
                                 MSGWND.set(f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！")
                             fieldmap.remove_event(event_underfoot)
-                            PLAYER.fp.write( "itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
+                            PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                         else:
                             MSGWND.set(itemResult['message'])
                     continue
@@ -795,7 +796,7 @@ def main():
                         event_underfoot = PLAYER.search(fieldmap)
                         if isinstance(event_underfoot, Treasure):
                             ### ここで宝箱を開けたことの情報を送信する
-                            sender.send_event({"item": event_underfoot.item})
+                            sender.send_event({"item": event_underfoot.item, "funcWarp": event_underfoot.funcWarp})
                             itemResult = sender.receive_json()
                             if itemResult is not None:
                                 if itemResult['status'] == "ok":
@@ -1372,6 +1373,7 @@ class Map:
             elif event_type == "SIGN":  # 任意の文字を書く看板
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
+                # 一度取得したアイテムの宝箱は現れないようにする
                 if PLAYER.commonItembag.find(event["item"]) is None and PLAYER.itembag.find(event["item"]) is None:
                     self.create_treasure_j(event)
             elif event_type == "DOOR":  # ドア
@@ -1433,7 +1435,8 @@ class Map:
         comments = data["comments"]
         vartype = data["vartype"]
         linenum = data["linenum"]
-        treasure = Treasure((x, y), item, exp, refs, comments, vartype, linenum)
+        funcWarp = data["funcWarp"]
+        treasure = Treasure((x, y), item, exp, refs, comments, vartype, linenum, funcWarp)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -2833,7 +2836,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exp, refs, comments, vartype, linenum):
+    def __init__(self, pos, item, exp, refs, comments, vartype, linenum, funcWarp):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -2845,6 +2848,7 @@ class Treasure():
         self.comments = comments # アイテムの値の設定(計算)がどのように行われたかを説明するコメント
         self.vartype = vartype # アイテムの型
         self.linenum = linenum # 宝箱を開けるタイミング
+        self.funcWarp = funcWarp # 関数による遷移
 
     def open(self, value, undefined):
         """宝箱をあける"""
@@ -3541,7 +3545,7 @@ class CodeWindow(Window, Map):
         
         self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
-        self.linenum = self.load_first_code_line()
+        self.linenum = 1
         self.is_auto_scroll = True
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
@@ -3558,15 +3562,6 @@ class CodeWindow(Window, Map):
         """文字列出力"""
         surf, rect = self.font.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
-
-    def load_first_code_line(self):
-        cnt = 0
-        for idx, line in enumerate(self.lines):
-            if line.strip() and not line.strip().startswith('//') and not line.strip().startswith('#'):
-                cnt += 1
-                if cnt == 2:
-                    return idx + 1  # 行番号として返す
-        return 1  # fallback
 
     def update_code_line(self, linenum):
         self.linenum = linenum

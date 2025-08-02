@@ -116,8 +116,8 @@ class VarsTracker:
             self.vars_removed = list(set(self.vars_declared) - set(crnt_vars))
         return vars_changed
     
-    def getValue(self, var):
-        return self.previous_values[var]
+    def getValue(self, varname):
+        return self.previous_values[varname]
     
     def setVarsDeclared(self, var):
         return self.vars_declared.append(var)
@@ -166,7 +166,89 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     class ProgramFinished(Exception):
         pass
 
-    def vars_checker(vars_changed, first_event=None):
+    def event_reciever():
+        # JSONが複数回に分かれて送られてくる可能性があるためパース
+        data = conn.recv(1024)
+        # ここは後々変えるかも
+        if not data:
+            return None
+        buffer = data.decode()
+        event = json.loads(buffer)
+        print(f"[受信イベント] {event}")
+        return event
+    
+    def event_sender(msgJson, getLine=True):
+        if getLine and msgJson["status"] == "ok":
+            target_lines = [line for line in varsDeclLines_list if line_number < int(line) < next_line_number]
+            # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
+            if len(target_lines) != 0 and line_number not in line_data[func_name][0]:
+                msgJson["line"] = int(target_lines[0])
+            else:
+                msgJson["line"] = next_line_number
+                msgJson["removed"] = varsTracker.vars_removed
+        send_data = json.dumps(msgJson)
+        conn.sendall(send_data.encode('utf-8'))
+
+    def step_conditionally(frame):
+        # プロセスの状態を更新
+        if isEnd:
+            while True:
+                if (event := event_reciever()) is None:
+                    continue
+                if (retValue := event.get('return', None)) is not None:
+                    event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
+                    print("プログラムは正常に終了しました")
+                    raise ProgramFinished()
+                else:
+                    event_sender({"message": "NG行動をしました1!!", "status": "ng"})
+
+        thread = frame.GetThread()
+        process = thread.GetProcess()
+        target = process.GetTarget()
+
+        # 現在の命令アドレス
+        pc_addr = frame.GetPCAddress()
+
+        # 現在の命令を取得（必要な数だけ、ここでは1つ）
+        instructions = target.ReadInstructions(pc_addr, 1)
+
+        inst = instructions[0]
+        
+        mnemonic = inst.GetMnemonic(target)
+
+        print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
+        
+        thread.StepInto()
+
+    def get_next_state():
+        state = process.GetState()
+
+        frame = thread.GetFrameAtIndex(0)
+
+        line_entry = frame.GetLineEntry()
+        file_name = line_entry.GetFileSpec().GetFilename()
+        line_number = line_entry.GetLine()
+        func_name = frame.GetFunctionName()
+
+        if func_name is None or file_name is None:
+            # state_checker(state)
+            return None
+        
+        print(f"{func_name} at {file_name}:{line_number}")
+        return state, frame, file_name, line_number, func_name
+
+    def get_std_outputs():
+        stdout_output, stderr_output = get_all_stdvalue(process)
+        if stdout_output:
+            print("[STDOUT]")
+            print(stdout_output)
+
+        if stderr_output:
+            print("[STDERR]")
+            print(stderr_output)
+
+    def vars_checker(first_event=None):
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed
         varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared))
         getLine = (first_event is None)
 
@@ -194,11 +276,35 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         continue
                     
                     vars_event.append(item)
+                    if (funcWarps := event.get('funcWarp', None)) is not None:
+                        for funcWarp in funcWarps.items():
+                            funcWarpName, funcWarpInfo = funcWarp
+                            if funcWarpName == func_crnt_name and funcWarpInfo["line"] == next_line_number:
+                                # event_sender({"message": "遷移先の関数をスキップしますか?", "status": "ok", "skip": True})
+                                # event = event_reciever()
+                                # if event.get('skip', False):
+                                back_line_number = line_number
+                                while 1:
+                                    step_conditionally(frame)
+                                    if (next_state := get_next_state()):
+                                        line_number = next_line_number
+                                        func_name = func_crnt_name
+                                        state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                        vars_changed = varsTracker.trackStart(frame)
+                                    else:
+                                        isEnd = True
+                                    if back_line_number == line_number:
+                                        break
+                                # event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values})
+                                # else:
+                                #     event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+
                     if Counter(vars_event) == Counter(varsDeclLines):
                         print("you selected correct vars")
                         event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, getLine)
                         varsTracker.setVarsDeclared(item)
                         break
+
                     event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, False)
                     varsTracker.setVarsDeclared(item)
                 else:
@@ -297,88 +403,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
                         event = event_reciever()
                         continue
-            
-    def event_reciever():
-        # JSONが複数回に分かれて送られてくる可能性があるためパース
-        data = conn.recv(1024)
-        # ここは後々変えるかも
-        if not data:
-            return None
-        buffer = data.decode()
-        event = json.loads(buffer)
-        print(f"[受信イベント] {event}")
-        return event
-    
-    def event_sender(msgJson, getLine=True):
-        if msgJson["status"] == "ok" and getLine:
-            target_lines = [line for line in varsDeclLines_list if line_number < int(line) < next_line_number]
-            # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
-            if len(target_lines) != 0 and line_number not in line_data[func_name][0]:
-                msgJson["line"] = int(target_lines[0])
-            else:
-                msgJson["line"] = next_line_number
-                msgJson["removed"] = varsTracker.vars_removed
-        send_data = json.dumps(msgJson)
-        conn.sendall(send_data.encode('utf-8'))
-
-    def step_conditionally(frame):
-        # プロセスの状態を更新
-        if isEnd:
-            while True:
-                if (event := event_reciever()) is None:
-                    continue
-                if (retValue := event.get('return', None)) is not None:
-                    event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
-                    print("プログラムは正常に終了しました")
-                    raise ProgramFinished()
-                else:
-                    event_sender({"message": "NG行動をしました1!!", "status": "ng"})
-
-        thread = frame.GetThread()
-        process = thread.GetProcess()
-        target = process.GetTarget()
-
-        # 現在の命令アドレス
-        pc_addr = frame.GetPCAddress()
-
-        # 現在の命令を取得（必要な数だけ、ここでは1つ）
-        instructions = target.ReadInstructions(pc_addr, 1)
-
-        inst = instructions[0]
-        
-        mnemonic = inst.GetMnemonic(target)
-
-        print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
-        
-        thread.StepInto()
-
-    def get_next_state():
-        state = process.GetState()
-
-        frame = thread.GetFrameAtIndex(0)
-
-        line_entry = frame.GetLineEntry()
-        file_name = line_entry.GetFileSpec().GetFilename()
-        line_number = line_entry.GetLine()
-        func_name = frame.GetFunctionName()
-
-        if func_name is None or file_name is None:
-            # state_checker(state)
-            return None
-        
-        print(f"{func_name} at {file_name}:{line_number}")
-        return state, frame, file_name, line_number, func_name
-
-    def get_std_outputs():
-        stdout_output, stderr_output = get_all_stdvalue(process)
-        if stdout_output:
-            print("[STDOUT]")
-            print(stdout_output)
-
-        if stderr_output:
-            print("[STDERR]")
-            print(stderr_output)
-
+       
     try:
         print(f"[接続] {addr} が接続しました")
 
@@ -390,64 +415,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             isEnd = False
 
             if (next_state := get_next_state()):
-                state, frame, file_name, line_number, func_name = next_state
+                state, frame, file_name, next_line_number, func_crnt_name = next_state
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                     line_data = json.load(f)
+                    func_name = func_crnt_name
+                    event_sender({"line": line_data[func_name][2]}, False)
+                    line_number = line_data[func_name][2] - 1
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_varDeclLines.json", 'r') as f:
                     varsDeclLines_list = json.load(f)
             else:
-                isEnd = True
-
-            step_conditionally(frame)
-            
-            if (next_state := get_next_state()):
-                state, frame, file_name, next_line_number, func_crnt_name = next_state
-            else:
+                event_sender({"end": True})
                 isEnd = True
 
             vars_changed = varsTracker.trackStart(frame)
-
-            # 変数が初期化されない時、スキップされるので、それも読み取る
-            target_lines = [line for line in varsDeclLines_list if int(line) < line_number]
-
-            # 最初の初期化されない変数があるかを見る
-            if len(target_lines) != 0 and line_number not in line_data[func_name][0]:
-                # 変数が合致していればstepinを実行して次に進む
-                for i, line in enumerate(target_lines):
-                    skipped_varDecls = varsDeclLines_list.pop(line)
-                    vars_event = []
-                    errorCnt = 0
-                    while True:
-                        if (event := event_reciever()) is None:
-                            continue
-                        if (item := event.get('item', None)) is not None:
-                            if not item in skipped_varDecls:
-                                errorCnt += 1
-                                print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
-                                # 複数回入力を間違えたらヒントをあげる
-                                if errorCnt >= 3:
-                                    event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
-                                else:
-                                    event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
-                                continue
-                            
-                            vars_event.append(item)
-                            if Counter(vars_event) == Counter(skipped_varDecls):
-                                print("you selected correct vars")
-                                event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok", "line": int(target_lines[i+1]) if len(target_lines) > i+1 else line_number}, False)
-                                varsTracker.setVarsDeclared(item)
-                                vars_changed.remove(item)
-                                break
-                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": True, "status": "ok"}, False)
-                            varsTracker.setVarsDeclared(item)
-                            vars_changed.remove(item)
-                        else:
-                            errorCnt += 1
-                            event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
-
-            get_std_outputs()
-
-            vars_checker(vars_changed)
+            vars_checker()
 
             line_loop = []
             skipStart = None
@@ -540,7 +521,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if not crntFromTo:
                                             event_sender({"message": "", "status": "ok"})
                                             vars_changed = varsTracker.trackStart(frame)
-                                            vars_checker(vars_changed)
+                                            vars_checker()
                                             break
                                 elif type == 'ifEnd':
                                     event_sender({"message": "", "status": "ok"})
@@ -707,7 +688,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 get_std_outputs()
 
                 # 変数は前回の処理で変更されていたら見る
-                vars_checker(vars_changed)
+                vars_checker()
     except:
         pass
 
