@@ -196,7 +196,7 @@ def main():
         env["PYTHONPATH"] = os.path.abspath("modules") + (
             ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
         )
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
         # endregion
 
         # region マップの初期設定
@@ -728,21 +728,15 @@ def main():
                                                 newItems.append(item)
                                             PLAYER.itembag.items.append(newItems)
                                             PLAYER.waitingMove = chara
-                                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
                                     else:
                                         PLAYER.waitingMove = chara
-                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
                                         PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
                                         if len(PLAYER.move5History) > 5:
                                             PLAYER.move5History.pop(0)
                                 elif isinstance(chara, CharaReturn):
-                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
-                                    if len(PLAYER.move5History) > 5:
-                                        PLAYER.move5History.pop(0)
-                                    PLAYER.waitingMove = chara
-                                    PLAYER.set_waitingMove_return()
-                                    if len(PLAYER.itembag.items) != 1:
-                                        PLAYER.itembag.items.pop()
+                                    PLAYER.set_waitingMove_return(mapname, chara, chara.line)
                         PLAYER.fp.write( "jump:" + atxt + ", " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                         cmd = "\0"
                         atxt = "\0"
@@ -817,7 +811,6 @@ def main():
                                         MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
                                     else:
                                         MSGWND.set(item_get_message)
-                                    #########################################
                                     PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
                                 else:
                                     MSGWND.set(itemResult['message'])
@@ -887,7 +880,7 @@ def main():
                                             newItems.append(item)
                                         PLAYER.itembag.items.append(newItems)
                                         PLAYER.waitingMove = chara
-                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
                                         msg = chara.message
                                         parts = msg.split(" ", 1)
                                         parts1 = parts[1].split(" ",1)
@@ -903,22 +896,7 @@ def main():
                                     parts1 = parts[1].split(" ",1)
                                     PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                                 elif isinstance(chara, CharaReturn):
-                                    # ここでreturnの是非を確かめる (キャラ分けは行数で行う)
-                                    sender.send_event({"return": chara.line})
-                                    returnResult = sender.receive_json()
-                                    if returnResult['status'] == 'ok':
-                                        PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':True})
-                                        if len(PLAYER.move5History) > 5:
-                                            PLAYER.move5History.pop(0)
-                                        PLAYER.waitingMove = chara
-                                        PLAYER.set_waitingMove_return()
-                                        if len(PLAYER.itembag.items) != 1:
-                                            PLAYER.itembag.items.pop()
-                                        PLAYER.fp.write("moveout, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                                    if returnResult.get('finished', False):
-                                        MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
-                                    else:
-                                        MSGWND.set(returnResult['message'])
+                                    PLAYER.set_waitingMove_return(mapname, chara, chara.line)
                         else:
                             MSGWND.set("そのほうこうには　だれもいない。")
                 # endregion
@@ -2020,15 +1998,36 @@ class Player(Character):
             chara.update(mymap)  # 向きを変えたので更新
         return chara
 
-    def set_waitingMove_return(self):
+    def set_waitingMove_return(self, mapname: str, chara: Character, fromLine):
         """returnの案内人に話しかけた時、動的にwaitingMoveを設定する"""
+        # main以外のreturnキャラ
         if self.moveHistory != []:
-            move = self.moveHistory.pop()
-            self.waitingMove.dest_map = move['mapname']
-            self.waitingMove.dest_x = move['x']
-            self.waitingMove.dest_y = move['y']
+            self.sender.send_event({"type": 'return', "fromTo": [fromLine, self.moveHistory[-1]['line']]})
+            returnResult = self.sender.receive_json()
+            if returnResult['status'] == 'ok':
+                self.move5History.append({'mapname': mapname, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':True})
+                if len(self.move5History) > 5:
+                    self.move5History.pop(0)
+                move = self.moveHistory.pop()
+                self.itembag.items.pop()
+                for name, value in returnResult["items"].items():
+                    if (item := self.itembag.find(name)) is not None:
+                        item.set_value(value)
+                self.waitingMove = chara
+                self.waitingMove.dest_map = move['mapname']
+                self.waitingMove.dest_x = move['x']
+                self.waitingMove.dest_y = move['y']
+                self.fp.write("moveout, " + mapname + "," + str(self.x)+", " + str(self.y) + "\n")
+                return      
+        # mainのreturnキャラ
         else:
-            self.waitingMove = None
+            self.sender.send_event({"return": fromLine})
+            returnResult = self.sender.receive_json()
+            if returnResult['status'] == 'ok' and returnResult.get('finished', False):
+                MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
+                self.fp.write("finished\n")
+                return
+        MSGWND.set(returnResult['message'])
     
     def set_game_mode(self, type):
         if type == "item":
@@ -2468,6 +2467,9 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                        for name, value in skipResult["items"].items():
+                            if (item := PLAYER.itembag.find(name)) is not None:
+                                item.set_value(value)
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
@@ -2481,6 +2483,7 @@ class MessageWindow(Window):
                         PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
                         if len(PLAYER.move5History) > 5:
                             PLAYER.move5History.pop(0)
+                        PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
                         
                         newItems = []
                         for name, value in skipResult["skipTo"]["items"].items():
@@ -2494,7 +2497,6 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None
@@ -2708,7 +2710,6 @@ class StatusWindow(Window):
 
 class AutoEvent():
     """自動イベント"""
-
     def __init__(self, pos, mapchip, sequence, type, fromTo):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
@@ -2743,6 +2744,7 @@ class AutoEvent():
 # 
 
 class CharaReturn(Character):
+    '''戻り値用のキャラクター'''
     def __init__(self, name, pos, direction, movetype, message, line):
         super().__init__(name, pos, direction, movetype, message)
         self.line = line
