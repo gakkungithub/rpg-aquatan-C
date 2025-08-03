@@ -84,7 +84,7 @@ class MapInfo:
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
         self.treasure_info: list[tuple[str, list[str], list[str], int, list[str]]] = []
-        self.func_warp: dict[str, tuple[tuple[int, int], list[str]], int] = {}
+        self.func_warp: dict[str, tuple[tuple[int, int], dict[str, str], int]] = {}
         self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
         self.chara_return: list[tuple[tuple[int, int], str, int]] = []
         self.exit_info: list[tuple[int, int], str, list[int | None], str] = []
@@ -360,9 +360,10 @@ class GenBitMap:
         # キャラクターではなくなるが、この情報は流用可能
         # ただし、ワープ元の部屋を表すノードは使わない(アイテムに対するワープ情報はアイテムの生成時にくっつける)
         if self.func_name in self.mapInfo.func_warp:
-            self.mapInfo.func_warp[self.func_name][0] = self.mapInfo.setFuncWarpStartPos(nodeID)
+            args = self.mapInfo.func_warp[self.func_name][1]
+            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), args, refInfo["line"])
         else:
-            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), [], refInfo["line"])
+            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), {}, refInfo["line"])
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
@@ -379,7 +380,7 @@ class GenBitMap:
     def trackAST(self, crntRoomID, nodeID, loopBackID = None):
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
-            self.mapInfo.func_warp[self.func_name][1].append(self.getNodeLabel(nodeID))
+            self.mapInfo.func_warp[self.func_name][1][self.getNodeLabel(nodeID)] = self.varNode_info[nodeID]
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []

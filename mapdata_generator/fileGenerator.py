@@ -28,7 +28,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
         item_func_warp = {}
         for func in item[4]:
             warp_pos, args, line = funcWarpInfo[func]
-            item_func_warp[func] = {"x": warp_pos[1], "y": warp_pos[0], "line": line}
+            item_func_warp[func] = {"x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line}
         events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num, "funcWarp": item_func_warp})
 
     # 経路の一方通行情報

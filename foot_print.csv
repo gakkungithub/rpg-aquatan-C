@@ -1,4 +1,3 @@
-start,06_function_definition,18, 27
-itemget, 06_function_definition,21, 20,r1
-itemget, 06_function_definition,18, 24,r2
-end, 06_function_definition,18, 24
+start,06_function_definition,10, 12
+itemget, 06_function_definition,11, 13,r1
+end, 06_function_definition,11, 13

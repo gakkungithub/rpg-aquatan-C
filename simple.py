@@ -2486,8 +2486,8 @@ class MessageWindow(Window):
                         PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
                         
                         newItems = []
-                        for name, value in skipResult["skipTo"]["items"].items():
-                            item = Item(name, value, "int", False)
+                        for name, itemInfo in skipResult["skipTo"]["items"].items():
+                            item = Item(name, itemInfo["value"], itemInfo["type"], False)
                             newItems.append(item)
                         PLAYER.itembag.items.append(newItems)
                         # 暗転
