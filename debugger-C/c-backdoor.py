@@ -35,7 +35,6 @@ class VarsTracker:
             self.vars_declared.pop()
             self.frames = current_frames
         
-        print(f"{current_frames}")
         return self.track(frame.GetVariables(True, True, False, True))
 
     def track(self, vars, depth=0, max_depth=10, prefix="") -> list[str]:
@@ -300,9 +299,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         continue
                     
                     if (funcWarps := event.get('funcWarp', None)) is not None:
-                        for funcWarp in funcWarps.items():
-                            funcWarpName, funcWarpInfo = funcWarp
-                            if funcWarpName == func_crnt_name and funcWarpInfo["line"] == next_line_number:
+                        for funcWarp in funcWarps:
+                            if funcWarp["name"] == func_crnt_name and funcWarp["line"] == next_line_number:
                                 event_sender({"message": "遷移先の関数の処理をスキップしますか?", "value": varsTracker.getValueBeforeFuncWarp(item), "undefined": True, "status": "ok", "skip": True})
                                 event = event_reciever()
                                 if event.get('skip', False):
@@ -322,9 +320,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
                                 else:
                                     items = {}
-                                    for argname, argtype in funcWarpInfo["args"].items():
+                                    for argname, argtype in funcWarp["args"].items():
                                         items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
-                                    event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": funcWarpName, "x": funcWarpInfo["x"], "y": funcWarpInfo["y"], "items": items}})
+                                    event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
                                     back_line_number = line_number
                                     while 1:
                                         if analyze_frame():

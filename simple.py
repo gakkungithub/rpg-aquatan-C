@@ -3245,7 +3245,7 @@ class ItemBag:
 
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
-    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition"]
+    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
@@ -3258,7 +3258,7 @@ class StageButtonWindow:
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = []
         self.scrollX = 0
-        self.maxScrollX = (len(self.code_names) - 5) * self.SB_WIDTH + 10
+        self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
         self.load_sb()
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
 

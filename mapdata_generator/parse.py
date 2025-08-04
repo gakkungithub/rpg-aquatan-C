@@ -1,11 +1,8 @@
 import sys
 import os
 import clang.cindex
-import subprocess
 import uuid
 from graphviz import Digraph
-import json
-import ctypes
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
@@ -52,10 +49,9 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
         self.roomSize_info = {}
         self.varNode_info: dict[str, str] = {}
-        self.expNode_info: dict[str, tuple[str, list[str], list[str], int]] = {}
+        self.expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]] = {}
         self.condition_move : dict[str, tuple[str, list[int | None]]] = {}
         self.line_info : dict[str, tuple[set[int], dict[int, int], int]] = {}
-        self.funcNum = 0
     
     def createNode(self, nodeLabel, shape='rect'):
         nodeID = str(uuid.uuid4())
@@ -283,8 +279,11 @@ class ASTtoFlowChart:
             # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
             expNodeID = self.createNode("")
             self.createEdge(nodeID, expNodeID)
-            exp_terms, comment, refspell = self.parse_call_expr(cr, expNodeID)
-            self.expNode_info[f'"{expNodeID}"'] = (exp_terms, [refspell], [comment], cr.location.line)
+            var_references = []
+            func_references = []
+            calc_order_comments = []
+            exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
+            self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
             nodeID = expNodeID
         else:
             expNodeID = self.get_exp(cr, 'rect')
@@ -339,7 +338,7 @@ class ASTtoFlowChart:
             #スカラー変数の初期化値が無い場合
             if nodeID is None:
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], cursor.location.line)
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], [], cursor.location.line)
                 self.createEdge(varNodeID, nodeID)
 
         return varNodeID
@@ -373,10 +372,11 @@ class ASTtoFlowChart:
     #式(一つのノードexpNodeに内容をまとめる)
     def get_exp(self, cursor, shape='square', label="") -> str:
         expNodeID = self.createNode(label, shape)
-        references = []
+        var_references = []
+        func_references = []
         calc_order_comments = []
-        exp_terms = self.parse_exp_term(cursor, references, calc_order_comments, expNodeID)
-        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, references, calc_order_comments, cursor.location.line)
+        exp_terms = self.parse_exp_term(cursor, var_references, func_references, calc_order_comments, expNodeID)
+        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cursor.location.line)
         return expNodeID
 
     def unwrap_unexposed(self, cursor):
@@ -386,7 +386,7 @@ class ASTtoFlowChart:
         return cursor
 
     #式の項を一つずつ解析
-    def parse_exp_term(self, cursor, references: list[str], calc_order_comments: list[str], inNodeID=None) -> str:
+    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str], inNodeID=None) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -484,8 +484,8 @@ class ASTtoFlowChart:
         if cursor.kind == clang.cindex.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            calc_order_comments.append(f"{''.join([t.spelling for t in list(cursor.get_tokens())])} : ()で囲まれている部分は先に計算します")
-            exp_terms = ''.join(["(", self.parse_exp_term(cr, references, calc_order_comments, inNodeID), ")"])
+            calc_order_comments.append(f"{''.join([t.spelling for t in list(cursor.get_tokens())])} : ( ) で囲まれている部分は先に計算します")
+            exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments, inNodeID), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
             exp_terms = next(cursor.get_tokens()).spelling
@@ -500,16 +500,14 @@ class ASTtoFlowChart:
             # グローバル変数ならグローバル変数のリファレンスを登録する
             if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
                 self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
-            references.append(exp_terms)
+            var_references.append(exp_terms)
         #配列
         elif cursor.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, references, calc_order_comments, inNodeID), "]"])
+            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, var_references, func_references, calc_order_comments, inNodeID), "]"])
         #関数
         elif cursor.kind == clang.cindex.CursorKind.CALL_EXPR:
-            exp_terms, comment, refspell = self.parse_call_expr(cursor, inNodeID)
-            calc_order_comments.append(comment)
-            references.append(refspell)
+            exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments)
         #一項条件式
         elif cursor.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
             #(++aでいうaのカーソル)
@@ -517,7 +515,7 @@ class ASTtoFlowChart:
             self.check_cursor_error(idf_cursor)
             operator = next(cursor.get_tokens())
             #前置(++a)
-            term = self.parse_exp_term(idf_cursor, references, calc_order_comments, inNodeID)
+            term = self.parse_exp_term(idf_cursor, var_references, func_references, calc_order_comments, inNodeID)
             if operator.location.offset < idf_cursor.location.offset:
                 exp_terms = ''.join([operator.spelling, term])
                 comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
@@ -546,8 +544,8 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            front = self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID)
-            back = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
+            front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID)
+            back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)
             exp_terms = ''.join([front, operator_spell, back])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
@@ -560,21 +558,21 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            exp_terms = ''.join([self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID), operator_spell, self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)])
+            exp_terms = ''.join([self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID), operator_spell, self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)])
         #三項条件式(c? a : b)
         elif cursor.kind == clang.cindex.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
-            condition = self.parse_exp_term(exps[0], references, calc_order_comments, inNodeID)
-            trueExp = self.parse_exp_term(exps[1], references, calc_order_comments, inNodeID)
-            falseExp = self.parse_exp_term(exps[2], references, calc_order_comments, inNodeID)
+            condition = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID)
+            trueExp = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)
+            falseExp = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments, inNodeID)
             exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
             calc_order_comments.append(f"{exp_terms} : {condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
         #キャスト型
         elif cursor.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            castedExp = self.parse_exp_term(cr, references, calc_order_comments, inNodeID)
+            castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments, inNodeID)
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
             castedExpType = self.unwrap_unexposed(cr).type.spelling
             if castedExpType:
@@ -582,9 +580,10 @@ class ASTtoFlowChart:
             else:
                 calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
         return exp_terms
-
-    #関数の呼び出し(変数と関数の呼び出しは分ける)
-    def parse_call_expr(self, cursor, inNodeID):
+    
+    # 関数の呼び出し(変数と関数の呼び出しは分ける) 
+    # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
+    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]):
         children = list(cursor.get_children())
         if not children:
             raise ValueError("CALL_EXPR に子ノードがありません")
@@ -596,23 +595,22 @@ class ASTtoFlowChart:
         ref_spell = next(func_cursor.get_tokens()).spelling
         self.func_info[self.scanning_func]["refs"].add(ref_spell)
 
-        funcNodeID = self.createNode(ref_spell, 'oval')
-        self.funcNum += 1
-
-        # 呼び出し元のノードと関数のノードをくっつける
-        self.createEdge(inNodeID, funcNodeID)
-
-        arg_exps = []
+        arg_exp_terms = []
+        arg_exp_comments = []
         # --- 引数ノードとのエッジ作成 ---
         for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
-            argNodeID = self.get_exp(arg_cursor, 'egg')
-            self.createEdge(funcNodeID, argNodeID)
-            tokens = list(arg_cursor.get_tokens())
-            arg_exps.append(f"{''.join([t.spelling for t in tokens])}を{i+1}つ目の実引数")
+            exp_term = self.parse_exp_term(arg_cursor, var_references, func_references, calc_order_comments)
+            arg_exp_terms.append(exp_term)
+            arg_exp_comments.append(f"{exp_term}を{i+1}つ目の実引数")
 
-        func_exp_comment = ", ".join(arg_exps) + "として" + f"関数{ref_spell}を実行します" if len(arg_exps) else f"引数なしで、関数{ref_spell}を実行します"
-        return "".join(list([t.spelling for t in cursor.get_tokens()])), func_exp_comment, ref_spell
+        exp_terms = f"{ref_spell}( {", ".join(arg_exp_terms)} )"
+        calc_order_comments.append(", ".join(arg_exp_comments) + "として" + f"関数{ref_spell}を実行します" if len(arg_exp_comments) else f"引数なしで、関数{ref_spell}を実行します")
+
+        # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
+        func_references.append(ref_spell)
+        
+        return exp_terms
 
     #typedefの解析
     def parse_typedef(self, cursor):

@@ -83,7 +83,7 @@ class MapInfo:
         self.condition_move: dict[str, tuple[str, list[int | None]]] = condition_move
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
-        self.treasure_info: list[tuple[str, list[str], list[str], int, list[str]]] = []
+        self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
         self.func_warp: dict[str, tuple[tuple[int, int], dict[str, str], int]] = {}
         self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
         self.chara_return: list[tuple[tuple[int, int], str, int]] = []
@@ -115,6 +115,7 @@ class MapInfo:
         else:
             print("generation failed: try again!! 5")
             return None
+    
     # 関数キャラの設定
     # def setFuncWarp(self, func_warp):
     #     for funcName, funcWarp in func_warp.items():
@@ -194,15 +195,15 @@ class MapInfo:
         else:
             print("generation failed: try again!! 2")
 
-    # スカラー変数に対応した宝箱の設定
-    def setItemBox(self, roomNodeID, itemName, item_exp_Info: tuple[str, list[str], list[str], int], var_type: str, funcs):
+    # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
+    def setItemBox(self, roomNodeID, itemName, item_exp_info: tuple[str, list[str], list[str], int], var_type: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             itemPos = (int(ry+y), int(rx+x))
             self.eventMap[itemPos[0], itemPos[1]] = self.ISEVENT
-            self.treasure_info.append((itemPos, itemName, item_exp_Info, var_type, funcs))
+            self.treasure_info.append((itemPos, itemName, item_exp_info, var_type))
         else:
             print("generation failed: try again!! 3")
 
@@ -256,7 +257,7 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], int]], 
+    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
@@ -392,16 +393,16 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
-                        self.createPath(crntRoomID, toNodeID)
+                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
                 for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.createPath(crntRoomID, toNodeID)
+                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         nodeIDs.append(toNodeID)
@@ -409,7 +410,7 @@ class GenBitMap:
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
-                        self.createPath(crntRoomID, toNodeID)
+                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'terminator':
                         self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -426,23 +427,29 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'pentagon':
             #条件文以前の処理を同部屋に含めてはいけない
             self.createRoom(nodeID)
+            #while, forの領域に入る
+            self.createPath(crntRoomID, nodeID)
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
             nodeIDs = []
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
-                    self.createPath(nodeID, toNodeID)
+                    self.createPath(nodeID, toNodeID) # 条件文の計算式を確かめる
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
-                    self.createPath(nodeID, toNodeID)
+                    self.createPath(nodeID, toNodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
-            if nodeIDs:
-                #whileの領域に入る
-                self.createPath(crntRoomID, nodeID)
-                # true
-                self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
-                # false
-                self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
+            # if nodeIDs:
+            #     #whileの領域に入る
+            #     self.createPath(crntRoomID, nodeID)
+            #     # true
+            #     self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
+            #     # false
+            #     self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
+            # true
+            self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
+            # false
+            self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
 
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
@@ -475,31 +482,7 @@ class GenBitMap:
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
                     eni = self.getExpNodeInfo(toNodeID)
-                    funcs = []
-                    funcNodeID_info = self.getNextNodeInfo(toNodeID)
-                    if len(funcNodeID_info) != 0:
-                        funcNodeID, edgeLabel = funcNodeID_info[0]
-                        # #関数のワープ情報を更新する
-                        # if self.getNodeShape(funcNodeID) == 'oval':
-                        #     funcName = self.getNodeLabel(nodeID)
-                        #     funcWarpInfo = [crntRoomID, [], funcName]
-                        #     for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-                        #         #関数の引数を関数遷移の鍵とする
-                        #         if self.getNodeShape(toNodeID) == 'egg':
-                        #             eni = self.getExpNodeInfo(toNodeID)
-                        #             funcWarpInfo[1].append(eni[1])
-                        #             for eggFuncNodeID, edgeLabel in self.getNextNodeInfo(toNodeID):
-                        #                 self.trackAST(crntRoomID, eggFuncNodeID)
-                        #     #関数のノードはidをつけて唯一性を確保している
-                        #     funcType = f'{funcName.split()[0][1:]}'
-                        #     if funcType in self.func_warp:
-                        #         self.func_warp[funcType][1].append(tuple(funcWarpInfo))
-                        #     else:
-                        #         self.func_warp[funcType] = [None, [tuple(funcWarpInfo)], []]
-                        # とりあえずネストは考えない
-                        if self.getNodeShape(funcNodeID) == 'oval': 
-                            funcs.append(self.getNodeLabel(funcNodeID))
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type, funcs)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
                 #初期化値なし(or次のノード)
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -511,7 +494,7 @@ class GenBitMap:
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
                     eni = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type, [])
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type)
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -527,10 +510,11 @@ class GenBitMap:
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
-                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158)
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158) # 条件文の計算式を確かめる
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
-                            self.createPath(nextNodeID, toNodeID)
+                            self.createPath(nextNodeID, toNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
+                # break
                 else:
                     self.createRoom(nextNodeID)
                     self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
@@ -541,7 +525,7 @@ class GenBitMap:
                     self.createRoom(nodeID)
 
                 if nodeID in self.mapInfo.room_info:
-                    self.mapInfo.setWarpZone(crntRoomID, nodeID, 158)
+                    self.mapInfo.setWarpZone(crntRoomID, nodeID, 158) # 条件文の計算式を確かめる?
                     crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
@@ -570,8 +554,7 @@ class GenBitMap:
         return self.nextNodeInfo.pop(fromNodeID, [])
     
     def getExpNodeInfo(self, nodeID):
-        # tuple[str, list[str], list[str], int]
-        return self.expNode_info.pop(nodeID, ("", [], [], 0))
+        return self.expNode_info.pop(nodeID, ("", [], [], [], 0))
 
     def createRoom(self, nodeID):
         if (size := self.roomSize_info[self.func_name].pop(nodeID, None)):
@@ -700,7 +683,7 @@ class GenBitMap:
             
             return (edge_point, dir)
 
-        sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
+        # sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
 
         room_reversed = self.roomsMap

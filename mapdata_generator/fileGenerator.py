@@ -20,16 +20,16 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
         
     # アイテムの情報
     for item in itemInfo:
-        exp_str, exp_refs, exp_comments, exp_line_num = item[2]
+        exp_str, var_refs, func_refs, exp_comments, exp_line_num = item[2]
         if exp_line_num in vardecl_lines:
             vardecl_lines[exp_line_num].append(item[1])
         else:
             vardecl_lines[exp_line_num] = [item[1]]
-        item_func_warp = {}
-        for func in item[4]:
+        item_func_warp = []
+        for func in func_refs:
             warp_pos, args, line = funcWarpInfo[func]
-            item_func_warp[func] = {"x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line}
-        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": exp_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num, "funcWarp": item_func_warp})
+            item_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": var_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num, "funcWarp": item_func_warp})
 
     # 経路の一方通行情報
     for exit in exitInfo:
