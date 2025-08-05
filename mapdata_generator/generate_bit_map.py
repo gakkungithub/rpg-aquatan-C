@@ -168,8 +168,9 @@ class MapInfo:
                 # pyramid mapchip = 105
                 self.setWarpZone(fromNodeID, toNodeID, 158)
 
-    # ワープゾーンの設定
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, mapChipNum: int, warpNodeID: str = None):
+    # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
+    # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, mapChipNum: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -186,10 +187,10 @@ class MapInfo:
                 warpTo = (int(gy+y), int(gx+x))
                 self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
                 c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
-                # doWhileTrue, ifEndについては上書きする
+                # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID:
                     c_move_type, c_move_fromTo = self.condition_move[warpNodeID]
-                self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo))
+                self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo, expNodeInfo[2] if expNodeInfo else []))
             else:
                 print("generation failed: try again!! 1")
         else:
@@ -208,23 +209,22 @@ class MapInfo:
             print("generation failed: try again!! 3")
 
     # 一方通行パネルの設定
-    def setOneWay(self, pos, dy, dx, condition_move):
+    def setOneWay(self, pos, dy, dx, condition_move, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
-        
         autoType, line_track = condition_move
 
         #left
         if dx == -1:
-            self.exit_info.append((pos, 7, autoType, line_track, "l"))
+            self.exit_info.append((pos, 7, autoType, line_track, "l", expNodeInfo[2] if expNodeInfo else []))
         #up
         elif dy == -1:
-            self.exit_info.append((pos, 6, autoType, line_track, "u"))
+            self.exit_info.append((pos, 6, autoType, line_track, "u", expNodeInfo[2] if expNodeInfo else []))
         #right
         elif dx == 1:
-            self.exit_info.append((pos, 7, autoType, line_track, "r"))
+            self.exit_info.append((pos, 7, autoType, line_track, "r", expNodeInfo[2] if expNodeInfo else []))
         #down
         elif dy == 1:
-            self.exit_info.append((pos, 6, autoType, line_track, "d"))
+            self.exit_info.append((pos, 6, autoType, line_track, "d", expNodeInfo[2] if expNodeInfo else []))
 
     # 出口のドア生成
     def setDoor(self, pos, dir):
@@ -393,24 +393,24 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
-                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
                 for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         nodeIDs.append(toNodeID)
-                    elif self.getNodeShape(toNodeID) == 'invtriangle':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158)
+                    elif self.getNodeShape(toNodeID) == 'invtriangle': # 条件文から派生するcase文なので、条件文の計算式を確かめる必要がある
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
-                        self.createPath(crntRoomID, toNodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'terminator':
                         self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -434,22 +434,19 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
-                    self.createPath(nodeID, toNodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
-                    self.createPath(nodeID, toNodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
-            # if nodeIDs:
-            #     #whileの領域に入る
-            #     self.createPath(crntRoomID, nodeID)
-            #     # true
-            #     self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
-            #     # false
-            #     self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
-            # true
-            self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
-            # false
-            self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
+            # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
+            if nodeIDs:
+                #whileの領域に入る
+                self.createPath(crntRoomID, nodeID)
+                # true
+                self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
+                # false
+                self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
 
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
@@ -465,7 +462,7 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'terminator':
             toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
             self.createRoom(toNodeID)
-            self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, nodeID)
+            self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, warpNodeID=nodeID)
             nodeID = toNodeID
             crntRoomID = nodeID
 
@@ -502,30 +499,31 @@ class GenBitMap:
             if self.mapInfo.condition_move.get(nodeID, None):
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
-                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158, nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158, warpNodeID=nodeID)
                     loopBackID = None
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
-                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158) # 条件文の計算式を確かめる
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
-                            self.createPath(nextNodeID, toNodeID) # 条件文の計算式を確かめる
+                            self.createPath(nextNodeID, toNodeID, expNodeID=nextNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
                 # break
                 else:
                     self.createRoom(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, warpNodeID=nodeID)
         else:
-            # switch構文でワープゾーンを繋げる or do_while構文のstartノードにくっつける
+            # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる or do_while構文に入った時にstart(True)ノードにくっつける
+            # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
             if crntRoomID != nodeID:
                 if nodeID in self.roomSize_info[self.func_name]:
                     self.createRoom(nodeID)
 
                 if nodeID in self.mapInfo.room_info:
-                    self.mapInfo.setWarpZone(crntRoomID, nodeID, 158) # 条件文の計算式を確かめる?
+                    self.mapInfo.setWarpZone(crntRoomID, nodeID, 158)
                     crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
@@ -554,7 +552,7 @@ class GenBitMap:
         return self.nextNodeInfo.pop(fromNodeID, [])
     
     def getExpNodeInfo(self, nodeID):
-        return self.expNode_info.pop(nodeID, ("", [], [], [], 0))
+        return self.expNode_info.get(nodeID, None)
 
     def createRoom(self, nodeID):
         if (size := self.roomSize_info[self.func_name].pop(nodeID, None)):
@@ -596,36 +594,36 @@ class GenBitMap:
             self.mapInfo.eventMap = expand_map(self.mapInfo.eventMap, mapSize, new_shape, fill_value=0)
             return self.findRoomArea(roomSize, (new_height, new_width), kernel)
 
-    def createPath(self, startNodeID, goalNodeID):
+    def createPath(self, startNodeID: str, goalNodeID: str, expNodeID: str = None):
         def get_edge_point(start, goal):
-            def random_edge_point(dir):
+            def random_edge_point(dir, roomPos):
+                ry, rx, rheight, rwidth = roomPos
                 candidates = []
-                # top edge (y = sy)
+                # top edge (y = ry)
                 if dir == 'u':
-                    for x in range(sx, sx + swidth):
-                        if (0 <= sy-1 < h and 0 <= x < w and self.floorMap[sy, x] != 0 and 
-                            self.mapInfo.eventMap[sy, x-1] == 0 and self.mapInfo.eventMap[sy-1, x] == 0 and self.mapInfo.eventMap[sy, x+1] == 0):
-                            candidates.append((sy, x))
-
-                # bottom edge (y = sy + height - 1)
+                    y = ry - 1
+                    for x in range(rx, rx + rwidth):
+                        if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
+                            self.mapInfo.eventMap[y, x-1] == 0 and self.mapInfo.eventMap[y-1, x] == 0 and self.mapInfo.eventMap[y, x+1] == 0):
+                            candidates.append((ry, x))
+                # bottom edge (y = ry + height - 1)
                 elif dir == 'd':
-                    y = sy + sheight
-                    for x in range(sx, sx + swidth):
+                    y = ry + rheight
+                    for x in range(rx, rx + rwidth):
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
                             self.mapInfo.eventMap[y, x-1] == 0 and self.mapInfo.eventMap[y+1, x] == 0 and self.mapInfo.eventMap[y, x+1] == 0):
                             candidates.append((y, x))
-
-                # left edge (x = sx)
+                # left edge (x = rx)
                 elif dir == 'l':
-                    for y in range(sy, sy + sheight):
-                        if (0 <= y < h and 0 <= sx-1 < w and self.floorMap[y, sx] != 0 and 
-                            self.mapInfo.eventMap[y-1, sx] == 0 and self.mapInfo.eventMap[y, sx-1] == 0 and self.mapInfo.eventMap[y+1, sx] == 0):
-                            candidates.append((y, sx))
-
-                # right edge (x = sx + width - 1)
+                    x = rx-1
+                    for y in range(ry, ry + rheight):
+                        if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
+                            self.mapInfo.eventMap[y-1, x] == 0 and self.mapInfo.eventMap[y, x-1] == 0 and self.mapInfo.eventMap[y+1, rx] == 0):
+                            candidates.append((y, x))
+                # right edge (x = rx + width - 1)
                 elif dir == 'r':
-                    x = sx + swidth
-                    for y in range(sy, sy + sheight):
+                    x = rx + rwidth
+                    for y in range(ry, ry + rheight):
                         if (0 <= y < h and 0 <= x < w and self.floorMap[y, x] != 0 and 
                             self.mapInfo.eventMap[y-1, x] == 0 and self.mapInfo.eventMap[y, x+1] == 0 and self.mapInfo.eventMap[y+1, x] == 0):
                             candidates.append((y, x))
@@ -646,92 +644,112 @@ class GenBitMap:
             dy = center_g[0] - center_s[0]
             dx = center_g[1] - center_s[1]
 
-            edge_point = None
+            start_edge_point = None
+            goal_edge_point = None
             dir = None
 
             # DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
             if abs(dy) > abs(dx):
                 if dy > 0:
-                    edge_point = random_edge_point('d')
+                    start_edge_point = random_edge_point('d', start)
                     dir = 0
                 else:
-                    edge_point = random_edge_point('u')
+                    start_edge_point = random_edge_point('u', start)
                     dir = 3
             else:
                 if dx > 0:
-                    edge_point = random_edge_point('r') 
+                    start_edge_point = random_edge_point('r', start)
                     dir = 2
                 else:
-                    edge_point = random_edge_point('l')
+                    start_edge_point = random_edge_point('l', start)
                     dir = 1
 
-            if edge_point is None:
+            if start_edge_point is None:
                 if abs(dy) > abs(dx):
                     if dx > 0:
-                        edge_point = random_edge_point('r') 
+                        start_edge_point = random_edge_point('r', start)
                         dir = 2
                     else:
-                        edge_point = random_edge_point('l')
+                        start_edge_point = random_edge_point('l', start)
                         dir = 1
                 else:
                     if dy > 0:
-                        edge_point = random_edge_point('d')
+                        start_edge_point = random_edge_point('d', start)
                         dir = 0
                     else:
-                        edge_point = random_edge_point('u')
+                        start_edge_point = random_edge_point('u', start)
                         dir = 3
             
-            return (edge_point, dir)
+            if start_edge_point is not None:
+                if dir == 0:
+                    goal_edge_point = random_edge_point('u', goal)
+                elif dir == 1:
+                    goal_edge_point = random_edge_point('r', goal)
+                elif dir == 2:
+                    goal_edge_point = random_edge_point('l', goal)
+                else: # dir == 3
+                    goal_edge_point = random_edge_point('d', goal)
+            
+            return (start_edge_point, goal_edge_point, dir)
 
-        # sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
+        sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
 
         room_reversed = self.roomsMap
-        # room_reversed[sy:sy+sheight, sx:sx+swidth] = 1
-        room_reversed[gy:gy+gheight, gx:gx+gwidth] = 1
         check_map = 1 - room_reversed
 
-        start, dir = get_edge_point(self.mapInfo.room_info[startNodeID], self.mapInfo.room_info[goalNodeID])
-        goal = (gy - 1 + random.randint(1, gheight), gx - 1 + random.randint(1, gwidth))
+        start, goal, dir = get_edge_point(self.mapInfo.room_info[startNodeID], self.mapInfo.room_info[goalNodeID])
 
+        print(start, goal)
         if start is None or goal is None:
-            self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158) 
-            # check_map[sy:sy+sheight, sx:sx+swidth] = 1
-            check_map[gy:gy+gheight, gx:gx+gwidth] = 1
+            self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             self.roomsMap = 1 - check_map
         else:
-            check_map[start] = 0
-            check_map[goal] = 0
+            if dir == 0: # u
+                sny = start[0] + 1
+                snx = start[1]
+                gny = goal[0] - 1
+                gnx = goal[1]
+            elif dir == 1: # r
+                sny = start[0]
+                snx = start[1] + 1
+                gny = goal[0]
+                gnx = goal[1] - 1
+            elif dir == 2: # l
+                sny = start[0]
+                snx = start[1] - 1            
+                gny = goal[0]
+                gnx = goal[1] + 1
+            else: # d
+                sny = start[0] - 1
+                snx = start[1]
+                gny = goal[0] + 1
+                gnx = goal[1]
+
+            check_map[(sny, snx)] = 0
+            check_map[(gny, gnx)] = 0
 
             path = AStarFixed(check_map).search(start, goal)
 
+            check_map[(sny, snx)] = 1
+            check_map[(gny, gnx)] = 1
+
             if path is None:
-                self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158) 
+                self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             else:
                 self.floorMap[path[0][0], path[0][1]] = 0
                 self.mapInfo.setDoor(path[0], dir)
-                setExit = False
                 for i in range(1, len(path)):
                     self.floorMap[path[i][0], path[i][1]] = 0
+                i = len(path) - 1
+                if gy-1 == path[i][0]:
+                    self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                elif gy+1 == path[i][0]:
+                    self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                elif gx-1 == path[i][1]:
+                    self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                else: # gx+1 == path[i][1]
+                    self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
 
-                    #出口のための一方通行パネルを設置する
-                    if setExit is False:
-                        if (gy-1 <= path[i][0] < gy+gheight+1 and gx <= path[i][1] < gx+gwidth) or (gy <= path[i][0] < gy+gheight and gx-1 <= path[i][1] < gx+gwidth+1):
-                            if gy <= path[i+1][0] < gy+gheight and gx <= path[i+1][1] < gx+gwidth:
-                                self.mapInfo.setOneWay(path[i], path[i+1][0]-path[i][0], path[i+1][1]-path[i][1], self.mapInfo.condition_move[goalNodeID])
-                            else:
-                                if gy-1 == path[i][0]:
-                                    self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_move[goalNodeID])
-                                elif gy+1 == path[i][0]:
-                                    self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_move[goalNodeID])
-                                elif gx-1 == path[i][1]:
-                                    self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_move[goalNodeID])
-                                else: # gx+1 == path[i][1]
-                                    self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_move[goalNodeID])
-                                break
-                            setExit = True
-
-        # check_map[sy:sy+sheight, sx:sx+swidth] = 1
-        check_map[gy:gy+gheight, gx:gx+gwidth] = 1
         self.roomsMap = 1 - check_map
            

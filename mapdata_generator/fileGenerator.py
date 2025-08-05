@@ -15,8 +15,14 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
 
     # ワープの情報
     for warp in warpInfo:
+        warp_func_warp = []
+        for func in warp[5]:
+            warp_pos, args, line = funcWarpInfo[func]
+            warp_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        if len(warp_func_warp) == 0:
+            warp_func_warp = None
         events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": warp[4],
-                       "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0]})
+                       "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0], "funcWarp": warp_func_warp})
         
     # アイテムの情報
     for item in itemInfo:
@@ -29,11 +35,19 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
         for func in func_refs:
             warp_pos, args, line = funcWarpInfo[func]
             item_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        if len(item_func_warp) == 0:
+            item_func_warp = None
         events.append({"type": "TREASURE", "x": item[0][1], "y": item[0][0], "item": item[1], "exp": exp_str, "refs": var_refs, "comments": exp_comments, "vartype": item[3], "linenum": exp_line_num, "funcWarp": item_func_warp})
 
     # 経路の一方通行情報
     for exit in exitInfo:
-        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4]})
+        exit_func_warp = []
+        for func in exit[5]:
+            warp_pos, args, line = funcWarpInfo[func]
+            exit_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        if len(exit_func_warp) == 0:
+            exit_func_warp = None
+        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4], "funcWarp": exit_func_warp})
  
     # 出口用のドアの情報
     for door in doorInfo:

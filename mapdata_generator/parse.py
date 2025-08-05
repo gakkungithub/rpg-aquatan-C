@@ -375,7 +375,7 @@ class ASTtoFlowChart:
         var_references = []
         func_references = []
         calc_order_comments = []
-        exp_terms = self.parse_exp_term(cursor, var_references, func_references, calc_order_comments, expNodeID)
+        exp_terms = self.parse_exp_term(cursor, var_references, func_references, calc_order_comments)
         self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cursor.location.line)
         return expNodeID
 
@@ -386,7 +386,7 @@ class ASTtoFlowChart:
         return cursor
 
     #式の項を一つずつ解析
-    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str], inNodeID=None) -> str:
+    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -485,7 +485,7 @@ class ASTtoFlowChart:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
             calc_order_comments.append(f"{''.join([t.spelling for t in list(cursor.get_tokens())])} : ( ) で囲まれている部分は先に計算します")
-            exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments, inNodeID), ")"])
+            exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
             exp_terms = next(cursor.get_tokens()).spelling
@@ -504,7 +504,7 @@ class ASTtoFlowChart:
         #配列
         elif cursor.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, var_references, func_references, calc_order_comments, inNodeID), "]"])
+            exp_terms = ''.join([name_cursor.spelling, "[", self.parse_exp_term(index_cursor, var_references, func_references, calc_order_comments), "]"])
         #関数
         elif cursor.kind == clang.cindex.CursorKind.CALL_EXPR:
             exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments)
@@ -515,7 +515,7 @@ class ASTtoFlowChart:
             self.check_cursor_error(idf_cursor)
             operator = next(cursor.get_tokens())
             #前置(++a)
-            term = self.parse_exp_term(idf_cursor, var_references, func_references, calc_order_comments, inNodeID)
+            term = self.parse_exp_term(idf_cursor, var_references, func_references, calc_order_comments)
             if operator.location.offset < idf_cursor.location.offset:
                 exp_terms = ''.join([operator.spelling, term])
                 comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
@@ -544,8 +544,8 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID)
-            back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)
+            front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
+            back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([front, operator_spell, back])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
@@ -558,21 +558,21 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            exp_terms = ''.join([self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID), operator_spell, self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)])
+            exp_terms = ''.join([self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments), operator_spell, self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)])
         #三項条件式(c? a : b)
         elif cursor.kind == clang.cindex.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
-            condition = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments, inNodeID)
-            trueExp = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments, inNodeID)
-            falseExp = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments, inNodeID)
+            condition = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
+            trueExp = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            falseExp = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
             calc_order_comments.append(f"{exp_terms} : {condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
         #キャスト型
         elif cursor.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments, inNodeID)
+            castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
             castedExpType = self.unwrap_unexposed(cr).type.spelling
             if castedExpType:
