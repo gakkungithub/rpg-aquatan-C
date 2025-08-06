@@ -16,12 +16,18 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
     # ワープの情報
     for warp in warpInfo:
         warp_func_warp = []
-        for func in warp[5]:
-            warp_pos, args, line = funcWarpInfo[func]
-            warp_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        converted_fromTo = []
+        for condLine in warp[4]:
+            if isinstance(condLine, str):
+                warp_pos, args, line = funcWarpInfo[condLine]
+                warp_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if line != 0:
+                    converted_fromTo.append(line)
+            else:
+                converted_fromTo.append(condLine)
         if len(warp_func_warp) == 0:
             warp_func_warp = None
-        events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": warp[4],
+        events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": converted_fromTo,
                        "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0], "funcWarp": warp_func_warp})
         
     # アイテムの情報
@@ -42,12 +48,18 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
     # 経路の一方通行情報
     for exit in exitInfo:
         exit_func_warp = []
-        for func in exit[5]:
-            warp_pos, args, line = funcWarpInfo[func]
-            exit_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+        converted_fromTo = []
+        for condLine in exit[3]:
+            if isinstance(condLine, str):
+                warp_pos, args, line = funcWarpInfo[condLine]
+                exit_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if line != 0:
+                    converted_fromTo.append(line)
+            else:
+                converted_fromTo.append(condLine)
         if len(exit_func_warp) == 0:
             exit_func_warp = None
-        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": exit[3], "sequence": exit[4], "funcWarp": exit_func_warp})
+        events.append({"type": "AUTO", "x": exit[0][1], "y": exit[0][0], "mapchip": exit[1], "autoType": exit[2], "fromTo": converted_fromTo, "sequence": exit[4], "funcWarp": exit_func_warp})
  
     # 出口用のドアの情報
     for door in doorInfo:

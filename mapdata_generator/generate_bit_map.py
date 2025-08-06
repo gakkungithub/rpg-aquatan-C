@@ -80,7 +80,7 @@ class MapInfo:
     def __init__(self, condition_move):
         self.eventMap = np.zeros((20,20))
         self.room_info: dict[str, tuple[int, int, int, int]] = {}
-        self.condition_move: dict[str, tuple[str, list[int | None]]] = condition_move
+        self.condition_move: dict[str, tuple[str, list[int | str | None]]] = condition_move
         self.initPos: tuple[int, int] | None = None
         self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
         self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
@@ -190,7 +190,7 @@ class MapInfo:
                 # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID:
                     c_move_type, c_move_fromTo = self.condition_move[warpNodeID]
-                self.warp_info.append((warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo, expNodeInfo[2] if expNodeInfo else []))
+                self.warp_info.append([warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo])
             else:
                 print("generation failed: try again!! 1")
         else:
@@ -215,16 +215,16 @@ class MapInfo:
 
         #left
         if dx == -1:
-            self.exit_info.append((pos, 7, autoType, line_track, "l", expNodeInfo[2] if expNodeInfo else []))
+            self.exit_info.append([pos, 7, autoType, line_track, "l"])
         #up
         elif dy == -1:
-            self.exit_info.append((pos, 6, autoType, line_track, "u", expNodeInfo[2] if expNodeInfo else []))
+            self.exit_info.append([pos, 6, autoType, line_track, "u"])
         #right
         elif dx == 1:
-            self.exit_info.append((pos, 7, autoType, line_track, "r", expNodeInfo[2] if expNodeInfo else []))
+            self.exit_info.append([pos, 7, autoType, line_track, "r"])
         #down
         elif dy == 1:
-            self.exit_info.append((pos, 6, autoType, line_track, "d", expNodeInfo[2] if expNodeInfo else []))
+            self.exit_info.append([pos, 6, autoType, line_track, "d"])
 
     # 出口のドア生成
     def setDoor(self, pos, dir):
