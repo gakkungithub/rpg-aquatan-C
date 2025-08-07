@@ -21,7 +21,7 @@ class VarsTracker:
         self.vars_removed = []
         self.frames = ['start']
     
-    def trackStart(self, frame, func_name):
+    def trackStart(self, frame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
                       for i in range(thread.GetNumFrames())]
         # 何かしらの関数に遷移したとき
@@ -254,8 +254,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # state_checker(state)
             return None
         
+        frame_num = thread.GetNumFrames()
+        
         print(f"{func_name} at {file_name}:{line_number}")
-        return state, frame, file_name, line_number, func_name
+        return state, frame, file_name, line_number, func_name, frame_num
 
     def get_std_outputs():
         stdout_output, stderr_output = get_all_stdvalue(process)
@@ -268,7 +270,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             print(stderr_output)
 
     def vars_checker(first_event=None):
-        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, isEnd
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, frame_num, next_frame_num, isEnd
         if isEnd:
             return
         
@@ -310,8 +312,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -444,7 +447,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         continue
 
     def analyze_frame():
-        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, isEnd
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, frame_num, next_frame_num, isEnd
         if line_data.get(func_name, None) and line_number in line_data[func_name][0] and not isEnd:
             if (event := event_reciever()) is None:
                 return 
@@ -473,46 +476,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if type == 'if':
                             errorCnt_if = 0
                             line_number_track = fromTo[:2]
+                            func_num = 0
                             while True:
                                 # まず、if文でどの行まで辿ったかを確かめる
                                 if fromTo[:len(line_number_track)] == line_number_track:
                                     # fromToの最後の行以外はifの条件文
                                     crntFromTo = fromTo[len(line_number_track):]
-                                    # if (funcWarps := event.get('funcWarp', None)) is not None:
-                                    #     for funcWarp in funcWarps:
-                                    #         if funcWarp["name"] == func_crnt_name and funcWarp["line"] == next_line_number:
-                                    #             event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skip": True})
-                                    #             event = event_reciever()
-                                    #             if event.get('skip', False):
-                                    #                 back_line_number = line_number
-                                    #                 while 1:
-                                    #                     step_conditionally(frame)
-                                    #                     if (next_state := get_next_state()):
-                                    #                         line_number = next_line_number
-                                    #                         func_name = func_crnt_name
-                                    #                         state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                    #                         vars_changed = varsTracker.trackStart(frame, func_crnt_name)
-                                    #                     else:
-                                    #                         isEnd = True
-                                    #                         line_number = next_line_number
-                                    #                     if back_line_number == line_number:
-                                    #                         break
-                                    #                 event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
-                                    #             else:
-                                    #                 items = {}
-                                    #                 for argname, argtype in funcWarp["args"].items():
-                                    #                     items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
-                                    #                 event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
-                                    #                 back_line_number = line_number
-                                    #                 while 1:
-                                    #                     if analyze_frame():
-                                    #                         continue
-                                    #                     if back_line_number == line_number:
-                                    #                         break
-                                    # else:
-                                    #     event_sender({"message": "", "status": "ok"})
-                                    #     vars_changed = varsTracker.trackStart(frame, func_crnt_name)
-                                    #     vars_checker()
+                                    funcWarp = event.get('funcWarp', [])
+                                    if len(funcWarp) < func_num:
+                                        continue
+                                    elif len(funcWarp) != 0:
+                                        funcWarp = funcWarp[func_num:]
                                 # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                                 else:
                                     errorCnt_if += 1
@@ -531,15 +505,68 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     continue
                                 # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
                                 while crntFromTo:
-                                    step_conditionally(frame)
-
-                                    if (next_state := get_next_state()):
-                                        line_number = next_line_number
-                                        func_name = func_crnt_name
-                                        state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                    # 何かしらの関数に遷移したとき
+                                    if next_frame_num > frame_num:
+                                        if line_number_track[-1] == next_line_number:
+                                            event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skipCond": True})
+                                            event = event_reciever()
+                                            # スキップする
+                                            if event.get('skip', False):
+                                                back_line_number = line_number
+                                                while 1:
+                                                    step_conditionally(frame)
+                                                    if (next_state := get_next_state()):
+                                                        line_number = next_line_number
+                                                        func_name = func_crnt_name
+                                                        frame_num = next_frame_num
+                                                        state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                        vars_changed = varsTracker.trackStart(frame)
+                                                    else:
+                                                        isEnd = True
+                                                        line_number = next_line_number
+                                                    if back_line_number == line_number:
+                                                        break
+                                                event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
+                                            # スキップしない
+                                            else:
+                                                items = {}
+                                                func_num += 1
+                                                func = funcWarp.pop(0)
+                                                for argname, argtype in func["args"].items():
+                                                    items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
+                                                event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                                back_line_number = line_number
+                                                step_conditionally(frame)
+                                                if (next_state := get_next_state()):
+                                                    line_number = next_line_number
+                                                    func_name = func_crnt_name
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
+                                                else:
+                                                    isEnd = True
+                                                    line_number = next_line_number
+                                                while 1:
+                                                    if analyze_frame():
+                                                        continue
+                                                    if back_line_number == line_number:
+                                                        # line_number_track.append(line_number)
+                                                        break
+                                        else:
+                                            event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
+                                        event = event_reciever()
+                                        break
                                     else:
-                                        isEnd = True
-                                        line_number = next_line_number
+                                        step_conditionally(frame)
+
+                                        if (next_state := get_next_state()):
+                                            line_number = next_line_number
+                                            func_name = func_crnt_name
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                        else:
+                                            isEnd = True
+                                            line_number = next_line_number
 
                                     if crntFromTo[0] != next_line_number:
                                         errorCnt_if += 1
@@ -562,7 +589,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 # crntFromToが 空 => 行番が完全一致になる
                                 if not crntFromTo:
                                     event_sender({"message": "", "status": "ok"})
-                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                    vars_changed = varsTracker.trackStart(frame)
                                     vars_checker()
                                     break
                         elif type == 'ifEnd':
@@ -580,8 +607,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 if (next_state := get_next_state()):
                                                     line_number = next_line_number
                                                     func_name = func_crnt_name
-                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
                                                     line_number = next_line_number
@@ -601,7 +629,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                             else:
                                 event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                vars_changed = varsTracker.trackStart(frame)
                                 vars_checker()
                             if type == 'whileFalse':
                                 line_loop.pop(-1)
@@ -620,8 +648,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 if (next_state := get_next_state()):
                                                     line_number = next_line_number
                                                     func_name = func_crnt_name
-                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
                                                     line_number = next_line_number
@@ -641,7 +670,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                             else:
                                 event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                vars_changed = varsTracker.trackStart(frame)
                                 vars_checker()
                             if type == 'forFalse':
                                 line_loop.pop(-1)
@@ -660,8 +689,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 if (next_state := get_next_state()):
                                                     line_number = next_line_number
                                                     func_name = func_crnt_name
-                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
                                                     line_number = next_line_number
@@ -681,7 +711,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                             else:
                                 event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                vars_changed = varsTracker.trackStart(frame)
                                 vars_checker()
                             line_loop.pop(-1)
                             skipEnd = None
@@ -698,8 +728,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 if (next_state := get_next_state()):
                                                     line_number = next_line_number
                                                     func_name = func_crnt_name
-                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
                                                     line_number = next_line_number
@@ -719,7 +750,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                             else:
                                 event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                vars_changed = varsTracker.trackStart(frame)
                                 vars_checker()
                         elif type == 'continue':
                             # type == while or forの場合
@@ -735,8 +766,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -751,8 +783,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if (next_state := get_next_state()):
                                     line_number = next_line_number
                                     func_name = func_crnt_name
-                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                    frame_num = next_frame_num
+                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                    vars_changed = varsTracker.trackStart(frame)
                                 else:
                                     isEnd = True
                                     line_number = next_line_number
@@ -769,8 +802,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             if (next_state := get_next_state()):
                                                 line_number = next_line_number
                                                 func_name = func_crnt_name
-                                                state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                frame_num = next_frame_num
+                                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                vars_changed = varsTracker.trackStart(frame)
                                             else:
                                                 isEnd = True
                                                 line_number = next_line_number
@@ -790,11 +824,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             if (next_state := get_next_state()):
                                 line_number = next_line_number
                                 func_name = func_crnt_name
-                                state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                frame_num = next_frame_num
+                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
                             else:
                                 isEnd = True
                                 line_number = next_line_number
-                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                            vars_changed = varsTracker.trackStart(frame)
                             get_std_outputs()
                             event_sender({"message": "元の関数に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1]})
                             return PROGRESS
@@ -818,8 +853,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 if (next_state := get_next_state()):
                                                     line_number = next_line_number
                                                     func_name = func_crnt_name
-                                                    state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
                                                 else:
                                                     isEnd = True
                                                     line_number = next_line_number
@@ -839,7 +875,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                             else:
                                 event_sender({"message": "", "status": "ok"})
-                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                vars_changed = varsTracker.trackStart(frame)
                                 vars_checker()
                         elif type == 'switchEnd':
                             event_sender({"message": "", "status": "ok"})
@@ -862,8 +898,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -888,8 +925,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if (next_state := get_next_state()):
                                         line_number = next_line_number
                                         func_name = func_crnt_name
-                                        state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                        vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                        frame_num = next_frame_num
+                                        state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                        vars_changed = varsTracker.trackStart(frame)
                                     else:
                                         isEnd = True
                                         line_number = next_line_number
@@ -913,8 +951,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             if (next_state := get_next_state()):
                                                 line_number = next_line_number
                                                 func_name = func_crnt_name
-                                                state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                frame_num = next_frame_num
+                                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                vars_changed = varsTracker.trackStart(frame)
                                             else:
                                                 isEnd = True
                                                 line_number = next_line_number
@@ -944,12 +983,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         if (next_state := get_next_state()):
             line_number = next_line_number
             func_name = func_crnt_name
-            state, frame, file_name, next_line_number, func_crnt_name = next_state
+            frame_num = next_frame_num
+            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
         else:
             isEnd = True
             line_number = next_line_number
 
-        vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+        vars_changed = varsTracker.trackStart(frame)
 
         get_std_outputs()
 
@@ -969,10 +1009,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             isEnd = False
 
             if (next_state := get_next_state()):
-                state, frame, file_name, next_line_number, func_crnt_name = next_state
+                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                     line_data = json.load(f)
                     func_name = func_crnt_name
+                    frame_num = 1
                     event_sender({"line": line_data[func_name][2]}, False)
                     line_number = line_data[func_name][2] - 1
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_varDeclLines.json", 'r') as f:
@@ -982,7 +1023,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 isEnd = True
                 line_number = line_data["main"][2]
 
-            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+            vars_changed = varsTracker.trackStart(frame)
             vars_checker()
 
             line_loop = []

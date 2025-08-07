@@ -405,72 +405,6 @@ def main():
             if MSGWND.is_visible:
                 MSGWND.msgwincount += 1
 
-            n_move = PLAYER.get_next_automove()
-            if n_move is not None and n_move == 's':
-                PLAYER.pop_automove()
-                # 足元にあるのが宝箱かワープゾーンかを調べる
-                event_underfoot = PLAYER.search(fieldmap)
-                if isinstance(event_underfoot, Treasure):
-                    ### 宝箱を開けることの情報を送信する
-                    sender.send_event({"item": event_underfoot.item, "funcWarp": event_underfoot.funcWarp})
-                    itemResult = sender.receive_json()
-                    if itemResult is not None:
-                        if itemResult['status'] == "ok":
-                            event_underfoot.open(itemResult['value'], itemResult['undefined'])
-                            item_comments = "%".join(event_underfoot.comments)
-                            if item_comments:
-                                item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments
-                            else:
-                                item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！"
-                            fieldmap.remove_event(event_underfoot)
-                            if itemResult.get('skip', False):
-                                item_get_message += f"%{itemResult['message']}"
-                                MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
-                            else:
-                                MSGWND.set(item_get_message)
-                            PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
-                        else:
-                            MSGWND.set(itemResult['message'])
-                    continue
-                elif isinstance(event_underfoot, MoveEvent):
-                    ### ワープゾーンに入ろうとしていることの情報を送信する
-                    sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo, "funcWarp": event_underfoot.funcWarp})
-                    moveResult = sender.receive_json()
-                    if moveResult and moveResult['status'] == "ok":
-                        # skipアクション
-                        if moveResult.get('skipCond', False):
-                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
-                        else:
-                            dest_map = event_underfoot.dest_map
-                            dest_x = event_underfoot.dest_x
-                            dest_y = event_underfoot.dest_y
-
-                            # region command
-                            from_map = fieldmap.name
-                            PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
-                            if len(PLAYER.move5History) > 5:
-                                PLAYER.move5History.pop(0)
-                            # endregion
-                            # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
-                            fieldmap.create(dest_map)  # 移動先のマップで再構成
-                            PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                            fieldmap.add_chara(PLAYER)  # マップに再登録
-                            PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                            if moveResult.get('skip', False):
-                                MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
-                    else:
-                        MSGWND.set(moveResult['message'])
-                    continue
-
-                chara = PLAYER.talk(fieldmap)
-                if chara is not None:
-                    ### ここで話しかけたことの情報を送信する
-                    msg = chara.message
-                    MSGWND.set(msg)
-                else:
-                    MSGWND.set("そのほうこうには　だれもいない。")
             for event in pygame.event.get():
                 if event.type == QUIT:
                     PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
@@ -795,118 +729,16 @@ def main():
                         MSGWND.next(fieldmap, force_next=True)
                     else:
                         # 足元にあるのが宝箱かワープゾーンかを調べる
-                        event_underfoot = PLAYER.search(fieldmap)
-                        if isinstance(event_underfoot, Treasure):
-                            ### 宝箱を開けることの情報を送信する
-                            sender.send_event({"item": event_underfoot.item, "funcWarp": event_underfoot.funcWarp})
-                            itemResult = sender.receive_json()
-                            if itemResult is not None:
-                                if itemResult['status'] == "ok":
-                                    event_underfoot.open(itemResult['value'], itemResult['undefined'])
-                                    item_comments = "%".join(event_underfoot.comments)
-                                    if item_comments:
-                                        item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！%" + item_comments
-                                    else:
-                                        item_get_message = f"宝箱を開けた！/「{event_underfoot.item}」を手に入れた！"
-                                    fieldmap.remove_event(event_underfoot)
-                                    if itemResult.get('skip', False):
-                                        item_get_message += f"%{itemResult['message']}"
-                                        MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
-                                    else:
-                                        MSGWND.set(item_get_message)
-                                    PLAYER.fp.write("itemget, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event_underfoot.item + "\n")
-                                else:
-                                    MSGWND.set(itemResult['message'])
-                            continue
-                        elif isinstance(event_underfoot, MoveEvent):
-                            ### ワープゾーンに入ろうとしていることの情報を送信する
-                            sender.send_event({"type": event_underfoot.type, "fromTo": event_underfoot.fromTo, "funcWarp": event_underfoot.funcWarp})
-                            moveResult = sender.receive_json()
-                            if moveResult and moveResult['status'] == "ok":
-                                # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
-                                if moveResult.get('skipCond', False):
-                                    MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
-                                else:
-                                    dest_map = event_underfoot.dest_map
-                                    dest_x = event_underfoot.dest_x
-                                    dest_y = event_underfoot.dest_y
-
-                                    # region command
-                                    from_map = fieldmap.name
-                                    PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
-                                    if len(PLAYER.move5History) > 5:
-                                        PLAYER.move5History.pop(0)
-                                    # endregion
-                                    # 暗転
-                                    DIMWND.setdf(200)
-                                    DIMWND.show()
-                                    fieldmap.create(dest_map)  # 移動先のマップで再構成
-                                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                                    fieldmap.add_chara(PLAYER)  # マップに再登録
-                                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                                    if moveResult.get('skip', False):
-                                        MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
-                            else:
-                                MSGWND.set(moveResult['message'])
+                        if PLAYER.search(fieldmap):
                             continue
 
                         # ドアを開ける
-                        door = PLAYER.unlock(fieldmap)
-                        if door is not None:
+                        if PLAYER.unlock(fieldmap):
                             continue
 
                         # 表示中でないならはなす
-                        chara = PLAYER.talk(fieldmap)
-                        if chara is not None:
-                            if isinstance(chara, Character):
-                                msg = chara.message
-                                MSGWND.set(msg)
-                                # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
-                                if isinstance(chara, CharaMoveItemsEvent):
-                                    itemsLacked_list = []
-                                    for items in chara.items:
-                                        if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
-                                            itemsLacked_list.append(itemsLacked)
-                                    #アイテムが不足
-                                    if itemsLacked_list:
-                                        itemsLackedmessage_list = []
-                                        for itemsLacked in itemsLacked_list:
-                                            itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
-                                        MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
-                                    #必要なアイテムが存在
-                                    else:
-                                        # ここでchara.itemsとchara情報?を送信してその合致を確かめる
-                                        # グローバル変数のアイテムを設定する
-                                        PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                        if len(PLAYER.move5History) > 5:
-                                            PLAYER.move5History.pop(0)
-                                        newItems = []
-                                        for argument in chara.arguments:
-                                            # ここも関数を考える時に後々修正する
-                                            item = Item(argument)
-                                            item.value = 1
-                                            newItems.append(item)
-                                        PLAYER.itembag.items.append(newItems)
-                                        PLAYER.waitingMove = chara
-                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
-                                        msg = chara.message
-                                        parts = msg.split(" ", 1)
-                                        parts1 = parts[1].split(" ",1)
-                                        PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                                elif isinstance(chara, CharaMoveEvent):   
-                                    PLAYER.waitingMove = chara
-                                    PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
-                                    PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                    if len(PLAYER.move5History) > 5:
-                                        PLAYER.move5History.pop(0)
-                                    msg = chara.message
-                                    parts = msg.split(" ", 1)
-                                    parts1 = parts[1].split(" ",1)
-                                    PLAYER.fp.write("movein:" + parts1[0] + "," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                                elif isinstance(chara, CharaReturn):
-                                    PLAYER.set_waitingMove_return(mapname, chara, chara.line)
-                        else:
-                            MSGWND.set("そのほうこうには　だれもいない。")
+                        PLAYER.talk(fieldmap, CODEWND.linenum)
+
                 # endregion
             MSGWND.next(fieldmap)
             pygame.display.flip()
@@ -1750,7 +1582,6 @@ class Player(Character):
         self.dest = {}
         self.place_label = "away"
         self.automove = []
-        # self.automoveFromTo: list[tuple[str, list[int | None]]] = []
         self.automoveFromTo = []
         self.waitingMove = None
         self.moveHistory = []
@@ -1944,12 +1775,63 @@ class Player(Character):
         self.automove.extend(ch)
         self.automoveFromTo.append((type, fromTo, funcWarp))
 
-    def search(self, mymap):
+    def search(self, mymap: Map):
         """足もとに宝箱またはワープゾーンがあるか調べる"""
         event = mymap.get_event(self.x, self.y)
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
-            return event
-        return None
+            if isinstance(event, Treasure):
+                ### 宝箱を開けることの情報を送信する
+                self.sender.send_event({"item": event.item, "funcWarp": event.funcWarp})
+                itemResult = self.sender.receive_json()
+                if itemResult is not None:
+                    if itemResult['status'] == "ok":
+                        event.open(itemResult['value'], itemResult['undefined'])
+                        item_comments = "%".join(event.comments)
+                        if item_comments:
+                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
+                        else:
+                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
+                        mymap.remove_event(event)
+                        if itemResult.get('skip', False):
+                            item_get_message += f"%{itemResult['message']}"
+                            MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
+                        else:
+                            MSGWND.set(item_get_message)
+                        PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
+                    else:
+                        MSGWND.set(itemResult['message'])
+            elif isinstance(event, MoveEvent):
+                ### ワープゾーンに入ろうとしていることの情報を送信する
+                self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
+                moveResult = self.sender.receive_json()
+                if moveResult and moveResult['status'] == "ok":
+                    # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
+                    if moveResult.get('skipCond', False):
+                        MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
+                    else:
+                        dest_map = event.dest_map
+                        dest_x = event.dest_x
+                        dest_y = event.dest_y
+
+                        # region command
+                        from_map = mymap.name
+                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
+                        if len(PLAYER.move5History) > 5:
+                            PLAYER.move5History.pop(0)
+                        # endregion
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        mymap.create(dest_map)  # 移動先のマップで再構成
+                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                        mymap.add_chara(PLAYER)  # マップに再登録
+                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                        if moveResult.get('skip', False):
+                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                else:
+                    MSGWND.set(moveResult['message'])
+            return True
+        return False
 
     def unlock(self, mymap: Map):
         """キャラクターが向いている方向にドアがあるか調べる"""
@@ -1978,13 +1860,13 @@ class Player(Character):
                     else:
                         MSGWND.set('この方向から扉は開けません!!')
                 else:
-                    return None
+                    return False
             else:
                 mymap.remove_event(event)
-            return event
-        return None
+            return True
+        return False
 
-    def talk(self, mymap):
+    def talk(self, mymap: Map, linenum: int):
         """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
         # 向いている方向のとなりの座標を求める
         nextx, nexty = self.x, self.y
@@ -2012,7 +1894,57 @@ class Player(Character):
             elif self.direction == UP:
                 chara.direction = DOWN
             chara.update(mymap)  # 向きを変えたので更新
-        return chara
+            if isinstance(chara, Character):
+                msg = chara.message
+                MSGWND.set(msg)
+                # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
+                if isinstance(chara, CharaMoveItemsEvent):
+                    itemsLacked_list = []
+                    for items in chara.items:
+                        if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
+                            itemsLacked_list.append(itemsLacked)
+                    #アイテムが不足
+                    if itemsLacked_list:
+                        itemsLackedmessage_list = []
+                        for itemsLacked in itemsLacked_list:
+                            itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
+                        MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
+                    #必要なアイテムが存在
+                    else:
+                        # ここでchara.itemsとchara情報?を送信してその合致を確かめる
+                        # グローバル変数のアイテムを設定する
+                        PLAYER.move5History.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                        if len(PLAYER.move5History) > 5:
+                            PLAYER.move5History.pop(0)
+                        newItems = []
+                        for argument in chara.arguments:
+                            # ここも関数を考える時に後々修正する
+                            item = Item(argument)
+                            item.value = 1
+                            newItems.append(item)
+                        PLAYER.itembag.items.append(newItems)
+                        PLAYER.waitingMove = chara
+                        PLAYER.moveHistory.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'line': linenum})
+                        msg = chara.message
+                        parts = msg.split(" ", 1)
+                        parts1 = parts[1].split(" ",1)
+                        PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif isinstance(chara, CharaMoveEvent):   
+                    PLAYER.waitingMove = chara
+                    PLAYER.moveHistory.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y})
+                    PLAYER.move5History.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                    if len(PLAYER.move5History) > 5:
+                        PLAYER.move5History.pop(0)
+                    msg = chara.message
+                    parts = msg.split(" ", 1)
+                    parts1 = parts[1].split(" ",1)
+                    PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif isinstance(chara, CharaReturn):
+                    PLAYER.set_waitingMove_return(mymap.name, chara, chara.line)
+            return True
+        else:
+            MSGWND.set("そのほうこうには　だれもいない。")
+            return False
 
     def set_waitingMove_return(self, mapname: str, chara: Character, fromLine):
         """returnの案内人に話しかけた時、動的にwaitingMoveを設定する"""
@@ -3749,10 +3681,6 @@ class EventSender:
                     if "removed" in msg:
                         for item in msg["removed"]:
                             PLAYER.itembag.remove(item)
-                    if "backTo" in msg:
-                        # ここでもう一度関数入り式の確認を行うメッセージを出す
-                        # backToキーの値のメッセージをもう一度出す。()
-                        pass
                     return msg
                 except json.JSONDecodeError:
                     continue  # JSONがまだ完全でないので続けて待つ
