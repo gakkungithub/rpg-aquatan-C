@@ -698,8 +698,10 @@ class ASTtoFlowChart:
         self.createEdge(nodeID, condNodeID, edgeName)
 
         line_track.append(cond_cursor.location.line)
+        # cond_func = list(self.expNode_info[f'"{condNodeID}"'][2])
+        # cond_func[1::2] = [line_track[0]] * (len(cond_func) - 1)
+        # line_track += cond_func
         line_track += self.expNode_info[f'"{condNodeID}"'][2]
-        print(line_track)
         self.line_info[self.scanning_func][0].add(cond_cursor.location.line)
 
         # --- then節の処理 ---

@@ -508,7 +508,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     # 何かしらの関数に遷移したとき
                                     if next_frame_num > frame_num:
                                         if line_number_track[-1] == next_line_number:
-                                            event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skipCond": True})
+                                            event_sender({"message": f"関数 {func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True})
                                             event = event_reciever()
                                             # スキップする
                                             if event.get('skip', False):
@@ -526,7 +526,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                         line_number = next_line_number
                                                     if back_line_number == line_number:
                                                         break
-                                                event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
+                                                event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1], "func": func_name})
                                             # スキップしない
                                             else:
                                                 items = {}
@@ -550,8 +550,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     if analyze_frame():
                                                         continue
                                                     if back_line_number == line_number:
-                                                        # line_number_track.append(line_number)
                                                         break
+                                            line_number_track.append(next_line_number)
                                         else:
                                             event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
                                         event = event_reciever()
@@ -568,23 +568,23 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             isEnd = True
                                             line_number = next_line_number
 
-                                    if crntFromTo[0] != next_line_number:
-                                        errorCnt_if += 1
-                                        event_sender({"message": f"ここから先は進入できません3!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        while True:
-                                            if (event := event_reciever()) is None:
-                                                continue
-                                            if (type := event.get('type', '')) != 'if':
-                                                errorCnt_if += 1
-                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                            elif (fromTo := event.get('fromTo', None)) is None:
-                                                errorCnt_if += 1
-                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                            else:
-                                                break
-                                        line_number_track.append(next_line_number)
-                                        break
-                                    line_number_track.append(crntFromTo.pop(0))
+                                        if crntFromTo[0] != next_line_number:
+                                            errorCnt_if += 1
+                                            event_sender({"message": f"ここから先は進入できません3!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                            while True:
+                                                if (event := event_reciever()) is None:
+                                                    continue
+                                                if (type := event.get('type', '')) != 'if':
+                                                    errorCnt_if += 1
+                                                    event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                                elif (fromTo := event.get('fromTo', None)) is None:
+                                                    errorCnt_if += 1
+                                                    event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
+                                                else:
+                                                    break
+                                            line_number_track.append(next_line_number)
+                                            break
+                                        line_number_track.append(crntFromTo.pop(0))
 
                                 # crntFromToが 空 => 行番が完全一致になる
                                 if not crntFromTo:
@@ -831,7 +831,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 line_number = next_line_number
                             vars_changed = varsTracker.trackStart(frame)
                             get_std_outputs()
-                            event_sender({"message": "元の関数に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1]})
+                            event_sender({"message": "元の関数に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1], "backTo": line_number})
                             return PROGRESS
                         else:
                             event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})

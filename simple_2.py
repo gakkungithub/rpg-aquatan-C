@@ -324,8 +324,7 @@ def main():
         STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
         STATUSWND.show()
 
-        ITEMWND = ItemWindow(Rect(10, 10 + SCR_HEIGHT // 5 ,
-                                    SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10),PLAYER)
+        ITEMWND = ItemWindow(Rect(10, 10 + SCR_HEIGHT // 5 , SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10),PLAYER)
         ITEMWND.show()
 
         CMNDWND = CommandWindow(TXTBOX_RECT)
@@ -378,6 +377,11 @@ def main():
                 fieldmap.draw(screen, offset)
             else:
                 DIMWND.dim()
+                if MSGWND.is_visible:
+                    MSGWND.msgwincount += 1
+                MSGWND.next(fieldmap)
+                pygame.display.update()
+                continue
 
             # For every interval
             if db_check_count > DB_CHECK_WAIT:
@@ -404,6 +408,8 @@ def main():
 
             if MSGWND.is_visible:
                 MSGWND.msgwincount += 1
+
+            # ここで、関数の繰り返しについて確認する
 
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -673,7 +679,7 @@ def main():
                                         if len(PLAYER.move5History) > 5:
                                             PLAYER.move5History.pop(0)
                                 elif isinstance(chara, CharaReturn):
-                                    PLAYER.set_waitingMove_return(mapname, chara, chara.line)
+                                    PLAYER.set_waitingMove_return(fieldmap, chara, chara.line)
                         PLAYER.fp.write( "jump:" + atxt + ", " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                         cmd = "\0"
                         atxt = "\0"
@@ -717,7 +723,6 @@ def main():
                                         PAUSEWND.hide()
                                         PLAYER.goaled = True 
                                         print('ステージ選択に戻る')       
-
 
                 if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
                     MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
@@ -1593,7 +1598,7 @@ class Player(Character):
         self.itemNameShow = False
         self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
         self.goaled = False
-
+        
         ## start
         self.fp = open(PATH, mode='w')
         ## end
@@ -1745,6 +1750,18 @@ class Player(Character):
         self.image = self.images[self.name][self.direction *
                                             4+(self.frame // self.animcycle % 4)]
 
+    def warp(self, mymap: Map, dest_map: str, dest_x: int, dest_y: int):
+        # 暗転
+        DIMWND.setdf(200)
+        DIMWND.show()
+        mymap.create(dest_map)  # 移動先のマップで再構成
+        self.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+        mymap.add_chara(self)  # マップに再登録
+        while DIMWND.is_visible:
+            DIMWND.dim()
+        offset = calc_offset(self)
+        mymap.draw(DIMWND.screen, offset)
+
     def set_automove(self, seq):
         """自動移動シーケンスをセットする"""
         self.automove = seq
@@ -1801,7 +1818,7 @@ class Player(Character):
                     else:
                         MSGWND.set(itemResult['message'])
             elif isinstance(event, MoveEvent):
-                ### ワープゾーンに入ろうとしていることの情報を送信する
+                ### ワープゾーンに入ろうとしていることの情報を送信する (もしfuncWarpが空でなければ戻ってきた時に関数の繰り返しの処理を行うフラグを立てる)
                 self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 moveResult = self.sender.receive_json()
                 if moveResult and moveResult['status'] == "ok":
@@ -1940,15 +1957,16 @@ class Player(Character):
                     parts1 = parts[1].split(" ",1)
                     PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif isinstance(chara, CharaReturn):
-                    PLAYER.set_waitingMove_return(mymap.name, chara, chara.line)
+                    PLAYER.set_waitingMove_return(mymap, chara, chara.line)
             return True
         else:
             MSGWND.set("そのほうこうには　だれもいない。")
             return False
 
-    def set_waitingMove_return(self, mapname: str, chara: Character, fromLine):
+    def set_waitingMove_return(self, mymap: Map, chara: Character, fromLine):
         """returnの案内人に話しかけた時、動的にwaitingMoveを設定する"""
         # main以外のreturnキャラ
+        mapname = mymap.name
         if self.moveHistory != []:
             self.sender.send_event({"type": 'return', "fromTo": [fromLine, self.moveHistory[-1]['line']]})
             returnResult = self.sender.receive_json()
@@ -2453,9 +2471,15 @@ class MessageWindow(Window):
                         for name, value in skipResult["items"].items():
                             if (item := PLAYER.itembag.find(name)) is not None:
                                 item.set_value(value)
+                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                        if isinstance(event, MoveEvent) and event.funcWarp is not None:
+                            event.moveEventInfoWindow.funcCheckedNum += 1
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
+                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                        if isinstance(event, MoveEvent) and event.funcWarp is not None:
+                            event.moveEventInfoWindow.funcCheckedNum += 1
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2803,6 +2827,8 @@ class MoveEvent():
         self.funcWarp = funcWarp
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+        self.func_rect = Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE)
+        self.moveEventInfoWindow = MoveEventInfoWindow(self.func_rect, self.funcWarp)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -2811,9 +2837,52 @@ class MoveEvent():
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
 
+        if PLAYER.x == self.x and PLAYER.y == self.y:
+            self.moveEventInfoWindow.draw(screen)
+
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
 
+class MoveEventInfoWindow(Window):
+    """デバッグコードウィンドウ"""
+    FONT_SIZE = 20
+    NOT_CHECKED_COLOR = (255, 0, 0)
+    CHECKED_COLOR = (0, 255, 0)
+    TEXT_COLOR = (255, 255, 255, 255)
+
+    def __init__(self, rect, funcs):
+        Window.__init__(self, rect)
+        # 日本語対応フォントの指定
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.funcs = funcs
+        self.funcCheckedNum = 0
+        self.show()
+
+    def draw_string(self, x, y, string, color):
+        """文字列出力"""
+        surf, rect = self.font.render(string, color)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        x_offset = 10
+        y_offset = 10
+        if self.funcs is not None:
+            for i, func in enumerate(self.funcs):
+                text = func["name"]
+                bg_rect = pygame.Rect(
+                    x_offset,
+                    y_offset,
+                    self.rect.width - 20,
+                    self.FONT_SIZE + 4
+                )
+                pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < self.funcCheckedNum else self.NOT_CHECKED_COLOR, bg_rect)
+                # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
+                self.draw_string(x_offset, y_offset+2, text, self.TEXT_COLOR)
+                y_offset += self.FONT_SIZE + 10
+        Window.blit(self, screen)
 
 #                                                                                                                                 
 # 88888888ba  88                                                               88888888888                                        
@@ -3557,7 +3626,7 @@ class MiniMapWindow(Window, Map):
 #  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
 #   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
                                                                                                                                                                                                                                                     
-class CodeWindow(Window, Map):
+class CodeWindow(Window):
     """デバッグコードウィンドウ"""
     FONT_SIZE = 12
     HIGHLIGHT_COLOR = (0, 0, 255)
