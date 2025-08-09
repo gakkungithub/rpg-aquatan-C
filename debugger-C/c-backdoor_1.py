@@ -531,11 +531,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             # スキップしない
                                             else:
                                                 items = {}
-                                                func_num += 1
                                                 func = funcWarp.pop(0)
                                                 for argname, argtype in func["args"].items():
                                                     items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
                                                 event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "func": func_name, "fromLine": line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                                print(func["name"])
                                                 back_line_number = line_number
                                                 step_conditionally(frame)
                                                 if (next_state := get_next_state()):
@@ -553,6 +553,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     if back_line_number == line_number:
                                                         break
                                             line_number_track.append(next_line_number)
+                                            func_num += 1
                                         else:
                                             event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
                                         event = event_reciever()

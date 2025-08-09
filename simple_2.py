@@ -1598,7 +1598,7 @@ class Player(Character):
         self.sender : EventSender = sender
         self.itemNameShow = False
         self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
-        self.checkedFuncs: dict[tuple[str, str, int], list[str]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
+        self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         
         ## start
@@ -1981,6 +1981,10 @@ class Player(Character):
                 for name, value in returnResult["items"].items():
                     if (item := self.itembag.find(name)) is not None:
                         item.set_value(value)
+                if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
+                    # ここは辞書を使うかどうかを考える
+                    checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
+                    PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1] = (checkedFunc[0], returnResult["retVal"])
                 self.waitingMove = chara
                 self.waitingMove.dest_map = move['mapname']
                 self.waitingMove.dest_x = move['x']
@@ -2476,18 +2480,18 @@ class MessageWindow(Window):
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and event.funcWarp is not None:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append(skipResult["skippedFunc"])
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [skipResult["skippedFunc"]]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and event.funcWarp is not None:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append(skipResult["skipTo"]["name"])
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [skipResult["skipTo"]["name"]]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2882,14 +2886,14 @@ class MoveEventInfoWindow(Window):
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         if self.funcs is not None:
             for i, func in enumerate(self.funcs):
-                text = func["name"]
+                text = f"{func["name"]} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
                 bg_rect = pygame.Rect(
                     x_offset,
                     y_offset,
                     self.rect.width - 20,
                     self.FONT_SIZE + 4
                 )
-                pygame.draw.rect(self.surface, self.CHECKED_COLOR if text in checkedFuncs else self.NOT_CHECKED_COLOR, bg_rect)
+                pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
                 # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
                 self.draw_string(x_offset, y_offset+2, text, self.TEXT_COLOR)
                 y_offset += self.FONT_SIZE + 10
