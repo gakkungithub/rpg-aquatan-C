@@ -160,17 +160,17 @@ class MapInfo:
             print("generation failed: try again!! 6")
 
     # gotoラベルによるワープゾーンの設定
-    def setGotoWarpZone(self, gotoRooms):
+    def setGotoWarpZone(self, gotoRooms, func_name):
         for gotoRoom in gotoRooms.values():
             toNodeID = gotoRoom["toNodeID"]
             fromNodeIDs = gotoRoom["fromNodeID"]
             for fromNodeID in fromNodeIDs:
                 # pyramid mapchip = 105
-                self.setWarpZone(fromNodeID, toNodeID, 158)
+                self.setWarpZone(fromNodeID, toNodeID, func_name, 158)
 
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, mapChipNum: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapChipNum: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -190,7 +190,7 @@ class MapInfo:
                 # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID:
                     c_move_type, c_move_fromTo = self.condition_move[warpNodeID]
-                self.warp_info.append([warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo])
+                self.warp_info.append([warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo, crnt_func_name])
             else:
                 print("generation failed: try again!! 1")
         else:
@@ -369,7 +369,7 @@ class GenBitMap:
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
         
-        self.mapInfo.setGotoWarpZone(self.gotoRoom_list[self.func_name])
+        self.mapInfo.setGotoWarpZone(self.gotoRoom_list[self.func_name], self.func_name)
 
         self.mapInfo.setPlayerInitPos(nodeID)
 
@@ -393,7 +393,7 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, self.func_name, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
@@ -407,7 +407,7 @@ class GenBitMap:
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'invtriangle': # 条件文から派生するcase文なので、条件文の計算式を確かめる必要がある
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
@@ -455,14 +455,14 @@ class GenBitMap:
         
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
-            self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158)
+            self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158)
             loopBackID = None
 
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
             toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
             self.createRoom(toNodeID)
-            self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, warpNodeID=nodeID)
+            self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, warpNodeID=nodeID)
             nodeID = toNodeID
             crntRoomID = nodeID
 
@@ -499,22 +499,22 @@ class GenBitMap:
             if self.mapInfo.condition_move.get(nodeID, None):
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
-                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158, warpNodeID=nodeID)
                     loopBackID = None
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, self.func_name, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
-                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
                             self.createPath(nextNodeID, toNodeID, expNodeID=nextNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
                 # break
                 else:
                     self.createRoom(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, self.func_name, 158, warpNodeID=nodeID)
         else:
             # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる or do_while構文に入った時にstart(True)ノードにくっつける
             # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
@@ -523,7 +523,7 @@ class GenBitMap:
                     self.createRoom(nodeID)
 
                 if nodeID in self.mapInfo.room_info:
-                    self.mapInfo.setWarpZone(crntRoomID, nodeID, 158)
+                    self.mapInfo.setWarpZone(crntRoomID, nodeID, self.func_name, 158)
                     crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
@@ -702,7 +702,7 @@ class GenBitMap:
 
         print(start, goal)
         if start is None or goal is None:
-            self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
+            self.mapInfo.setWarpZone(startNodeID, goalNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             self.roomsMap = 1 - check_map
         else:
             if dir == 0: # u
@@ -735,7 +735,7 @@ class GenBitMap:
             check_map[(gny, gnx)] = 1
 
             if path is None:
-                self.mapInfo.setWarpZone(startNodeID, goalNodeID, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
+                self.mapInfo.setWarpZone(startNodeID, goalNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             else:
                 self.floorMap[path[0][0], path[0][1]] = 0
                 self.mapInfo.setDoor(path[0], dir)

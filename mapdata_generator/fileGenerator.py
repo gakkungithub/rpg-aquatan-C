@@ -28,7 +28,7 @@ def writeMapJson(pname, bitMap, warpInfo, itemInfo, exitInfo, funcWarpInfo, char
         if len(warp_func_warp) == 0:
             warp_func_warp = None
         events.append({"type": "MOVE", "x": warp[0][1], "y": warp[0][0], "mapchip": warp[2], "warpType": warp[3], "fromTo": converted_fromTo,
-                       "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0], "funcWarp": warp_func_warp})
+                       "dest_map": pname, "dest_x": warp[1][1], "dest_y": warp[1][0], "func": warp[5], "funcWarp": warp_func_warp})
         
     # アイテムの情報
     for item in itemInfo:

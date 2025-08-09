@@ -1356,9 +1356,10 @@ class Map:
         type = data.get("warpType", "")
         fromTo = data.get("fromTo", [0,0])
         dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
+        func = data["func"]
         funcWarp = data["funcWarp"]
         # print(funcWarp)
-        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), funcWarp)
+        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, funcWarp, self.name.lower())
         self.events.append(move)
 
     def create_plpath_j(self, data):
@@ -1597,6 +1598,7 @@ class Player(Character):
         self.sender : EventSender = sender
         self.itemNameShow = False
         self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
+        self.checkedFuncs: dict[tuple[str, str, int], list[str]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         
         ## start
@@ -2473,13 +2475,19 @@ class MessageWindow(Window):
                                 item.set_value(value)
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and event.funcWarp is not None:
-                            event.moveEventInfoWindow.funcCheckedNum += 1
+                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append(skipResult["skippedFunc"])
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [skipResult["skippedFunc"]]
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and event.funcWarp is not None:
-                            event.moveEventInfoWindow.funcCheckedNum += 1
+                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append(skipResult["skipTo"]["name"])
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [skipResult["skipTo"]["name"]]
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2817,18 +2825,19 @@ class CharaMoveItemsEvent(CharaMoveEvent):
 class MoveEvent():
     """移動イベント"""
 
-    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, funcWarp):
+    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, funcWarp, mapname):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.dest_map = dest_map  # 移動先マップ名
         self.type: str = type
         self.fromTo: list[int | None] = fromTo
         self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
+        self.func = func
         self.funcWarp = funcWarp
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
         self.func_rect = Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE)
-        self.moveEventInfoWindow = MoveEventInfoWindow(self.func_rect, self.funcWarp)
+        self.moveEventInfoWindow = MoveEventInfoWindow(self.func_rect, self.funcWarp, (mapname, self.func, fromTo[0]))
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -2850,12 +2859,13 @@ class MoveEventInfoWindow(Window):
     CHECKED_COLOR = (0, 255, 0)
     TEXT_COLOR = (255, 255, 255, 255)
 
-    def __init__(self, rect, funcs):
+    def __init__(self, rect, funcs, warpPos):
         Window.__init__(self, rect)
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs = funcs
-        self.funcCheckedNum = 0
+        self.warpPos = warpPos
+        # self.funcCheckedNum = 0
         self.show()
 
     def draw_string(self, x, y, string, color):
@@ -2869,6 +2879,7 @@ class MoveEventInfoWindow(Window):
         Window.draw(self)
         x_offset = 10
         y_offset = 10
+        checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         if self.funcs is not None:
             for i, func in enumerate(self.funcs):
                 text = func["name"]
@@ -2878,7 +2889,7 @@ class MoveEventInfoWindow(Window):
                     self.rect.width - 20,
                     self.FONT_SIZE + 4
                 )
-                pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < self.funcCheckedNum else self.NOT_CHECKED_COLOR, bg_rect)
+                pygame.draw.rect(self.surface, self.CHECKED_COLOR if text in checkedFuncs else self.NOT_CHECKED_COLOR, bg_rect)
                 # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
                 self.draw_string(x_offset, y_offset+2, text, self.TEXT_COLOR)
                 y_offset += self.FONT_SIZE + 10

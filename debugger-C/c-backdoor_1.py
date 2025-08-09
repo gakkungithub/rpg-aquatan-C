@@ -238,7 +238,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
         
-        thread.StepInto()
+        # とりあえず現在はvoid型の関数も扱わないし、戻り値の計算式に関数が含まれるものはないので、
+        # func_crnt_nameの最終行とnext_line_numberが合致するかを確認して、合致していればstepOutする。
+        # つまり、line_numberがreturn文の行の時に戻り値を取得できる
+        # そのうち、returnの場所を予め取得して参照するようにする
+        if line_data[func_crnt_name][0][-1] == next_line_number:
+            thread.StepOut()
+        else:
+            thread.StepInto()
 
     def get_next_state():
         state = process.GetState()
@@ -446,27 +453,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event = event_reciever()
                         continue
 
-    def analyze_frame():
+    def analyze_frame(backToLine: int = None):
         nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, frame_num, next_frame_num, isEnd
         if line_data.get(func_name, None) and line_number in line_data[func_name][0] and not isEnd:
             if (event := event_reciever()) is None:
-                return 
+                return PROGRESS
             if (ngname := event.get('ng', None)) is not None:
                 if ngname == "notEnter":
                     event_sender({"message": "ここから先は進入できません1!!", "status": "ng"})
                 else:
                     event_sender({"message": "NG行動をしました2!!", "status": "ng"})
                 return CONTINUE
-            # elif func_crnt_name != func_name:
-            #     if (funcChange := event.get('funcChange', None)) is not None:
-            #     # func_event = [event['roomname']]
-            #     # if func_event != func_name:
-            #     #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
-            #     #     return CONTINUE
-            #         func_crnt_name = func_name
-            #     else:
-            #         event_sender({"message": "NG行動をしました3!!", "status": "ng"})
-            #         return CONTINUE
             elif (fromTo := event.get('fromTo', None)) is not None:
                 type = event.get('type', '')
                 # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
@@ -475,7 +472,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if fromTo[:2] == [line_number, next_line_number]:
                         if type == 'if':
                             errorCnt_if = 0
-                            line_number_track = fromTo[:2]
+                            line_number_track: list[int] = fromTo[:2]
                             func_num = 0
                             while True:
                                 # まず、if文でどの行まで辿ったかを確かめる
@@ -512,7 +509,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             event = event_reciever()
                                             # スキップする
                                             if event.get('skip', False):
+                                                retVal = None
                                                 back_line_number = line_number
+                                                skipped_func_name = func_crnt_name
                                                 while 1:
                                                     step_conditionally(frame)
                                                     if (next_state := get_next_state()):
@@ -524,9 +523,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     else:
                                                         isEnd = True
                                                         line_number = next_line_number
+                                                    if back_line_number == next_line_number:
+                                                        retVal = thread.GetStopReturnValue().GetValue()
                                                     if back_line_number == line_number:
                                                         break
-                                                event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1], "func": func_name})
+                                                event_sender({"message": "スキップを完了しました", "status": "ok", "items": varsTracker.previous_values[-1], "func": func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                             # スキップしない
                                             else:
                                                 items = {}
@@ -534,7 +535,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                 func = funcWarp.pop(0)
                                                 for argname, argtype in func["args"].items():
                                                     items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
-                                                event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                                event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "func": func_name, "fromLine": line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                                 back_line_number = line_number
                                                 step_conditionally(frame)
                                                 if (next_state := get_next_state()):
@@ -547,7 +548,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     isEnd = True
                                                     line_number = next_line_number
                                                 while 1:
-                                                    if analyze_frame():
+                                                    if analyze_frame(fromTo[0]):
                                                         continue
                                                     if back_line_number == line_number:
                                                         break
@@ -820,6 +821,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             skipEnd = None
                         elif type == 'return':
                             # return内の計算式の確認方法は後で考える
+                            retVal = thread.GetStopReturnValue().GetValue()
                             step_conditionally(frame)
                             if (next_state := get_next_state()):
                                 line_number = next_line_number
@@ -831,7 +833,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 line_number = next_line_number
                             vars_changed = varsTracker.trackStart(frame)
                             get_std_outputs()
-                            event_sender({"message": "元の関数に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1], "backTo": line_number})
+                            event_sender({"message": f"関数 {func_name} に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1], "backToFunc": func_name, "backToLine": backToLine, "retVal": retVal})
                             return PROGRESS
                         else:
                             event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
