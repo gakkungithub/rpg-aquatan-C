@@ -3,14 +3,378 @@ import pydot
 import numpy as np
 import random
 import os
+import json
+import configparser
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 from astar.search import AStar, Tile
 import mapChipID as mcID
-import fileGenerator as fg
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
+
+    # 関数キャラの設定
+    # def setFuncWarp(self, func_warp):
+    #     for funcName, funcWarp in func_warp.items():
+    #         if funcWarp[0] and funcWarp[1]:
+    #             wy, wx, wheight, wwidth = self.room_info[funcWarp[0]]
+    #             zero_elements = np.argwhere(self.eventMap[wy:wy+wheight, wx:wx+wwidth] == 0)
+    #             if zero_elements.size > 0:
+    #                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+    #                 warpPos = (int(wy+y), int(wx+x))
+    #                 self.eventMap[warpPos[0], warpPos[1]] = self.ISEVENT
+    #                 for warpFuncInfo in funcWarp[1]:
+    #                     self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
+
+    # # 話しかけると別の関数に進むキャラの設定
+    # def setCharaMoveItems(self, warpFuncInfo, warpTo, arguments):
+    #     roomNodeID, vars, funcName = warpFuncInfo
+    #     gy, gx, gheight, gwidth = self.room_info[roomNodeID]
+    #     zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+    #     if zero_elements.size > 0:
+    #         y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+    #         pos = (int(gy+y), int(gx+x))
+    #         self.eventMap[pos[0], pos[1]] = self.ISEVENT
+    #         self.chara_moveItems.append((pos, warpTo, vars, funcName, arguments))
+    #     else:
+    #         print("generation failed: try again!! 5")  
+
+# class Room:
+#     def __init__(self, nodeID: str, room_rect: tuple[int, int, int, int]):
+#         self.nodeID = nodeID
+#         self.room_rect = room_rect
+
+class ConditionLineTracker:
+    def __init__(self, condition_line_track: tuple[str, list[int | str | None]]):
+        self.type = condition_line_track[0]
+        self.condition_line_track = condition_line_track[1]
+
+class ConditionLineTrackers:
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
+        self.condition_line_tracker: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
+
+    def get_condition_line_tracker(self, nodeID: str):
+        if nodeID in self.condition_line_tracker:
+            # return tuple(self.condition_line_tracker[nodeID].__dict__.values())
+            return (self.condition_line_tracker[nodeID].type, self.condition_line_tracker[nodeID].condition_line_track)
+        else:
+            return ('', [])
+    
+class MoveEvent:
+    def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
+                    type: str, line_track: list[int | str | None], func_name: str):
+        self.from_pos = from_pos
+        self.to_pos = to_pos
+        self.mapchip = mapchip
+        self.type = type
+        self.line_track = line_track
+        self.func_name = func_name
+
+# (itemPos, itemName, item_exp_info, var_type)
+# (exp_terms, var_references, func_references, calc_order_comments, cursor.location.line)
+class Treasure:
+    def __init__(self, pos: tuple[int, int], name: str, exp_info: tuple[str, list[str], list[str], list[str], int], type: str):
+        self.pos = pos
+        self.name = name
+        self.exp_info = exp_info
+        # self.exp_string = exp_info[0]
+        # self.var_refs = exp_info[1]
+        # self.func_refs = exp_info[2]
+        # self.comments = exp_info[3]
+        # self.declared_line = exp_info[4]
+        self.type = type
+
+class FuncWarp:
+    def __init__(self, to_pos: tuple[int, int], args: dict[str, str], line: int):
+        self.to_pos = to_pos
+        self.args = args
+        self.line = line
+
+    def get_attributes(self):
+        return (self.to_pos, self.args, self.line)
+
+class CharaReturn:
+    def __init__(self, pos: tuple[int, int], func_name: str, line: int):
+        self.pos = pos
+        self.func_name = func_name
+        self.line = line
+
+    def get_attributes(self):
+        return (self.pos, self.func_name, self.line)
+
+class AutoEvent:
+    def __init__(self, pos: tuple[int, int], mapchip: int, type: str, line_track: list[int | str | None], dir: str):
+        self.pos = pos
+        self.mapchip = mapchip
+        self.type = type
+        self.line_track = line_track
+        self.dir = dir
+
+class Door:
+    def __init__(self, pos: tuple[int, int], dir: int):
+        self.pos = pos
+        self.name = "test"
+        self.dir = dir
+
+# マップデータ生成に必要な情報はここに格納
+class MapInfo:
+    ISEVENT = 2
+
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
+        self.eventMap = np.zeros((20,20))
+        self.room_info: dict[str, tuple[int, int, int, int]] = {}
+        self.condition_line_trackers: ConditionLineTrackers = ConditionLineTrackers(condition_move)
+        self.initPos: tuple[int, int] | None = None
+        self.move_events: list[MoveEvent] = []
+        self.treasures: list[Treasure] = []
+        self.func_warps: dict[str, FuncWarp] = {}
+        self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
+        self.chara_returns: list[CharaReturn] = []
+        self.auto_events: list[AutoEvent] = []
+        self.doors: list[Door] = []
+
+    # プレイヤーの初期位置の設定
+    def setPlayerInitPos(self, initNodeID):  
+        if self.initPos:
+            return 
+        
+        py, px, pheight, pwidth = self.room_info[initNodeID]
+        zero_elements = np.argwhere(self.eventMap[py:py+pheight, px:px+pwidth] == 0)
+        if zero_elements.size > 0:
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            self.eventMap[py+y, px+x] = self.ISEVENT
+            self.initPos =  (int(py+y), int(px+x))
+        else:
+            print("generation failed: try again!! 0")
+
+    def setFuncWarpStartPos(self, startNodeID):
+        sy, sx, sheight, swidth = self.room_info[startNodeID]
+        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
+        if zero_elements.size > 0:
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            pos = (int(sy+y), int(sx+x))
+            self.eventMap[pos[0], pos[1]] = self.ISEVENT
+            return pos
+        else:
+            print("generation failed: try again!! 5")
+            return None      
+
+    # 話しかけると戻るキャラの設定
+    def setCharaReturn(self, roomNodeID, line, func_name):
+        gy, gx, gheight, gwidth = self.room_info[roomNodeID]
+        zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+        if zero_elements.size > 0:
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            pos = (int(gy+y), int(gx+x))
+            self.eventMap[pos[0], pos[1]] = self.ISEVENT
+            # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
+            self.chara_returns.append(CharaReturn(pos, func_name, None if line == '""' else int(line)))
+        else:
+            print("generation failed: try again!! 6")
+
+    # gotoラベルによるワープゾーンの設定
+    def setGotoWarpZone(self, gotoRooms, func_name):
+        for gotoRoom in gotoRooms.values():
+            toNodeID = gotoRoom["toNodeID"]
+            fromNodeIDs = gotoRoom["fromNodeID"]
+            for fromNodeID in fromNodeIDs:
+                # pyramid mapchip = 105
+                self.setWarpZone(fromNodeID, toNodeID, func_name, 158)
+
+    # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
+    # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
+        sy, sx, sheight, swidth = self.room_info[startNodeID]
+        gy, gx, gheight, gwidth = self.room_info[goalNodeID]
+        
+        #まず遷移元を設定する
+        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
+        if zero_elements.size > 0:
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            warpFrom = (int(sy+y), int(sx+x))
+            self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
+            #次に遷移先を設定する
+            zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+            if zero_elements.size > 0:
+                y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+                warpTo = (int(gy+y), int(gx+x))
+                self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
+                c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(goalNodeID)
+                # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
+                if warpNodeID is not None:
+                    c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
+                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, crnt_func_name))
+            else:
+                print("generation failed: try again!! 1")
+        else:
+            print("generation failed: try again!! 2")
+
+    # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
+    def setItemBox(self, roomNodeID, item_name, item_exp_info: tuple[str, list[str], list[str], list[str], int], var_type: str):
+        ry, rx, rheight, rwidth = self.room_info[roomNodeID]
+        zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
+        if zero_elements.size > 0:
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            item_pos = (int(ry+y), int(rx+x))
+            self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
+            self.treasures.append(Treasure(item_pos, item_name, item_exp_info, var_type))
+        else:
+            print("generation failed: try again!! 3")
+
+    # 一方通行パネルの設定
+    def setOneWay(self, pos, dy, dx, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
+        self.eventMap[pos[0], pos[1]] = self.ISEVENT
+        autoType, line_track = condition_line_tracker
+        if dx == 0:
+            self.auto_events.append(AutoEvent(pos, 6, autoType, line_track, "d" if dy == 1 else "u"))
+        else:
+            self.auto_events.append(AutoEvent(pos, 7, autoType, line_track, "r" if dx == 1 else "l"))
+
+    # 出口のドア生成
+    def setDoor(self, pos, dir):
+        self.doors.append(Door(pos, dir))
+        self.eventMap[pos[0], pos[1]] = self.ISEVENT
+
+    # マップデータの生成
+    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
+        defaultMapChips = [503, 113, 343, 160, 32]
+        floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
+        # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
+        # self.floorMap = np.where(self.floorMap == 0, 402, self.floorMap) # gray thin brick
+        # self.floorMap = np.where(self.floorMap == 0, 31, self.floorMap) # dungeon_floor
+
+        self.writeMapIni(pname, self.initPos, gvar_str)
+        self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[0])
+        self.writeLineFile(pname, line_info)
+
+        plt.imshow(floorMap, cmap='gray', interpolation='nearest')
+        plt.title(pname)
+        plt.savefig(f'{DATA_DIR}/{pname}/bm_{pname}.png')
+
+    def writeMapJson(self, pname, bitMap, isUniversal, defaultMapChip=503):
+        events = []
+        characters = []
+        vardecl_lines: dict[int, list[str]] = {}
+
+        universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
+
+        # ワープの情報
+        # self.from_pos = from_pos
+        # self.to_pos = to_pos
+        # self.mapchip_num = mapchip_num
+        # self.type = type
+        # self.line_track = line_track
+        # self.func_name = func_name
+        for move_event in self.move_events:
+            me_func_warp = []
+            converted_fromTo = []
+            for condLine in move_event.line_track:
+                if isinstance(condLine, str):
+                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
+                    me_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(condLine)
+            if len(me_func_warp) == 0:
+                me_func_warp = None
+            events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
+                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp})
+            
+        # アイテムの情報
+        for treasure in self.treasures:
+            exp_str, var_refs, func_refs, exp_comments, exp_line_num = treasure.exp_info
+            if exp_line_num in vardecl_lines:
+                vardecl_lines[exp_line_num].append(treasure.name)
+            else:
+                vardecl_lines[exp_line_num] = [treasure.name]
+            t_func_warp = []
+            for func in func_refs:
+                warp_pos, args, line = self.func_warps[func].get_attributes()
+                t_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+            if len(t_func_warp) == 0:
+                t_func_warp = None
+            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exp": exp_str, "refs": var_refs, "comments": exp_comments, "vartype": treasure.type, "linenum": exp_line_num, "funcWarp": t_func_warp})
+
+        # 経路の一方通行情報
+        for auto_event in self.auto_events:
+            ae_func_warp = []
+            converted_fromTo = []
+            for condLine in auto_event.line_track:
+                if isinstance(condLine, str):
+                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
+                    ae_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(condLine)
+            if len(ae_func_warp) == 0:
+                ae_func_warp = None
+            events.append({"type": "AUTO", "x": auto_event.pos[1], "y": auto_event.pos[0], "mapchip": auto_event.mapchip, "autoType": auto_event.type, "fromTo": converted_fromTo, "sequence": auto_event.dir, "funcWarp": ae_func_warp})
+    
+        # 出口用のドアの情報
+        for door in self.doors:
+            events.append({"type": "SDOOR", "x": door.pos[1], "y": door.pos[0], "doorname": door.name, "dir": door.dir})
+
+        # # ワープキャラの情報
+        # ### 関数の呼び出しに応じたキャラクターの情報
+        # for chara_moveItems in chara_moveItemsInfo:
+        #     pos, warpTo, vars, funcName, arguments = chara_moveItems
+        #     # キャラの色をでランダムにする
+        #     color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+            
+        #     characters.append({"type": "CHARAMOVEITEMS", "name": str(color), "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
+        
+        ### 関数の戻りに応じたキャラクターの情報
+        for chara_return in self.chara_returns:
+            pos, funcName, line = chara_return.get_attributes()
+            if funcName == "main":
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": line})
+            else:
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "line": line})
+
+
+        filename = f'{DATA_DIR}/{pname}/{pname}.json'
+
+        with open(filename, 'w') as f:
+            fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
+            json.dump(fileContent, f) 
+
+        vl_filename = f'{DATA_DIR}/{pname}/{pname}_varDeclLines.json'
+        with open(vl_filename, 'w') as f:
+            json.dump(vardecl_lines, f) 
+
+    def writeMapIni(self, pname, initPos: tuple[int, int], gvarString):
+        config = configparser.ConfigParser()
+
+        config['screen'] = {
+            'width': '1024',
+            'height': '768'
+        }
+
+        config['game'] = {
+            'player' : '15070',
+            'player_x' : f'{initPos[1]}',
+            'player_y' : f'{initPos[0]}',
+            'map' : pname,
+            'items' : f"{gvarString}"
+        }
+
+        config['api'] = {
+            'key': '13f94c514269aa86469bc7642a6387b8',
+            'url': 'se.is.kit.ac.jp'
+        }
+
+        filename = f'{DATA_DIR}/{pname}/{pname}.ini'
+        with open(filename, 'w') as f:
+            config.write(f)
+
+    def writeLineFile(self, pname: str, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
+        filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
+
+        line_info_json = {funcname: [list(line_nums), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
+        with open(filename, 'w') as f:
+            json.dump(line_info_json, f)
 
 class TileFixed(Tile):
     def update_origin(self, current):
@@ -73,180 +437,6 @@ class AStarFixed(AStar):
 
         return neighbors
 
-# マップデータ生成に必要な情報はここに格納
-class MapInfo:
-    ISEVENT = 2
-
-    def __init__(self, condition_move):
-        self.eventMap = np.zeros((20,20))
-        self.room_info: dict[str, tuple[int, int, int, int]] = {}
-        self.condition_move: dict[str, tuple[str, list[int | str | None]]] = condition_move
-        self.initPos: tuple[int, int] | None = None
-        self.warp_info: list[tuple[tuple[int, int], tuple[int, int], int, str]] = []
-        self.treasure_info: list[tuple[str, list[str], list[str], int]] = []
-        self.func_warp: dict[str, tuple[tuple[int, int], dict[str, str], int]] = {}
-        self.chara_moveItems: list[tuple[tuple[int, int], str, list[list[str]], str, list[str]]] = []
-        self.chara_return: list[tuple[tuple[int, int], str, int]] = []
-        self.exit_info: list[tuple[int, int], str, list[int | None], str] = []
-        self.door_info: list[tuple[tuple[int, int], str, int]] = []
-
-    # プレイヤーの初期位置の設定
-    def setPlayerInitPos(self, initNodeID):  
-        if self.initPos:
-            return 
-        
-        py, px, pheight, pwidth = self.room_info[initNodeID]
-        zero_elements = np.argwhere(self.eventMap[py:py+pheight, px:px+pwidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            self.eventMap[py+y, px+x] = self.ISEVENT
-            self.initPos =  (int(py+y), int(px+x))
-        else:
-            print("generation failed: try again!! 0")
-
-    def setFuncWarpStartPos(self, startNodeID):
-        sy, sx, sheight, swidth = self.room_info[startNodeID]
-        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            pos = (int(sy+y), int(sx+x))
-            self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            return pos
-        else:
-            print("generation failed: try again!! 5")
-            return None
-    
-    # 関数キャラの設定
-    # def setFuncWarp(self, func_warp):
-    #     for funcName, funcWarp in func_warp.items():
-    #         if funcWarp[0] and funcWarp[1]:
-    #             wy, wx, wheight, wwidth = self.room_info[funcWarp[0]]
-    #             zero_elements = np.argwhere(self.eventMap[wy:wy+wheight, wx:wx+wwidth] == 0)
-    #             if zero_elements.size > 0:
-    #                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-    #                 warpPos = (int(wy+y), int(wx+x))
-    #                 self.eventMap[warpPos[0], warpPos[1]] = self.ISEVENT
-    #                 for warpFuncInfo in funcWarp[1]:
-    #                     self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
-
-    # # 話しかけると別の関数に進むキャラの設定
-    # def setCharaMoveItems(self, warpFuncInfo, warpTo, arguments):
-    #     roomNodeID, vars, funcName = warpFuncInfo
-    #     gy, gx, gheight, gwidth = self.room_info[roomNodeID]
-    #     zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-    #     if zero_elements.size > 0:
-    #         y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-    #         pos = (int(gy+y), int(gx+x))
-    #         self.eventMap[pos[0], pos[1]] = self.ISEVENT
-    #         self.chara_moveItems.append((pos, warpTo, vars, funcName, arguments))
-    #     else:
-    #         print("generation failed: try again!! 5")        
-
-    # 話しかけると戻るキャラの設定
-    def setCharaReturn(self, roomNodeID, line, funcName):
-        gy, gx, gheight, gwidth = self.room_info[roomNodeID]
-        zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            pos = (int(gy+y), int(gx+x))
-            self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
-            if line == '""':
-                line_ret = None
-            else:
-                line_ret = int(line)
-            self.chara_return.append((pos, funcName, line_ret))
-        else:
-            print("generation failed: try again!! 6")
-
-    # gotoラベルによるワープゾーンの設定
-    def setGotoWarpZone(self, gotoRooms, func_name):
-        for gotoRoom in gotoRooms.values():
-            toNodeID = gotoRoom["toNodeID"]
-            fromNodeIDs = gotoRoom["fromNodeID"]
-            for fromNodeID in fromNodeIDs:
-                # pyramid mapchip = 105
-                self.setWarpZone(fromNodeID, toNodeID, func_name, 158)
-
-    # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
-    # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapChipNum: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
-        sy, sx, sheight, swidth = self.room_info[startNodeID]
-        gy, gx, gheight, gwidth = self.room_info[goalNodeID]
-        
-        #まず遷移元を設定する
-        zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            warpFrom = (int(sy+y), int(sx+x))
-            self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
-            #次に遷移先を設定する
-            zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-            if zero_elements.size > 0:
-                y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-                warpTo = (int(gy+y), int(gx+x))
-                self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
-                c_move_type, c_move_fromTo = self.condition_move.get(goalNodeID, ['', []])
-                # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
-                if warpNodeID:
-                    c_move_type, c_move_fromTo = self.condition_move[warpNodeID]
-                self.warp_info.append([warpFrom, warpTo, mapChipNum, c_move_type, c_move_fromTo, crnt_func_name])
-            else:
-                print("generation failed: try again!! 1")
-        else:
-            print("generation failed: try again!! 2")
-
-    # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def setItemBox(self, roomNodeID, itemName, item_exp_info: tuple[str, list[str], list[str], int], var_type: str):
-        ry, rx, rheight, rwidth = self.room_info[roomNodeID]
-        zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            itemPos = (int(ry+y), int(rx+x))
-            self.eventMap[itemPos[0], itemPos[1]] = self.ISEVENT
-            self.treasure_info.append((itemPos, itemName, item_exp_info, var_type))
-        else:
-            print("generation failed: try again!! 3")
-
-    # 一方通行パネルの設定
-    def setOneWay(self, pos, dy, dx, condition_move, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
-        self.eventMap[pos[0], pos[1]] = self.ISEVENT
-        autoType, line_track = condition_move
-
-        #left
-        if dx == -1:
-            self.exit_info.append([pos, 7, autoType, line_track, "l"])
-        #up
-        elif dy == -1:
-            self.exit_info.append([pos, 6, autoType, line_track, "u"])
-        #right
-        elif dx == 1:
-            self.exit_info.append([pos, 7, autoType, line_track, "r"])
-        #down
-        elif dy == 1:
-            self.exit_info.append([pos, 6, autoType, line_track, "d"])
-
-    # 出口のドア生成
-    def setDoor(self, pos, dir):
-        self.door_info.append((pos, "test", dir))
-        self.eventMap[pos[0], pos[1]] = self.ISEVENT
-
-    # マップデータの生成
-    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
-        defaultMapChips = [503, 113, 343, 160, 32]
-        floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
-        # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
-        # self.floorMap = np.where(self.floorMap == 0, 402, self.floorMap) # gray thin brick
-        # self.floorMap = np.where(self.floorMap == 0, 31, self.floorMap) # dungeon_floor
-
-        fg.writeMapIni(pname, self.initPos, gvar_str)
-        fg.writeMapJson(pname, floorMap, self.warp_info, self.treasure_info, self.exit_info, self.func_warp, self.chara_return, self.door_info, isUniversal, defaultMapChips[0])
-        fg.writeLineFile(pname, line_info)
-
-        plt.imshow(floorMap, cmap='gray', interpolation='nearest')
-        plt.title(pname)
-        plt.savefig(f'{DATA_DIR}/{pname}/bm_{pname}.png')
-
 class GotoRoomInfo(TypedDict):
     toNodeID: str
     fromNodeID: str
@@ -258,7 +448,7 @@ class GenBitMap:
 
     # 型指定はまた後で行う
     def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
-                 roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move):
+                 roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
         self.nextNodeInfo: dict[str, tuple[str, str]] = {}
@@ -318,8 +508,6 @@ class GenBitMap:
 
         self.floorMap = bitMap_padded[1:height+1, 1:width+1]
 
-        # self.mapInfo.setFuncWarp(self.func_warp)
-
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
 
     def startTracking(self):
@@ -360,11 +548,13 @@ class GenBitMap:
         # 関数呼び出しのワープ情報を更新
         # キャラクターではなくなるが、この情報は流用可能
         # ただし、ワープ元の部屋を表すノードは使わない(アイテムに対するワープ情報はアイテムの生成時にくっつける)
-        if self.func_name in self.mapInfo.func_warp:
-            args = self.mapInfo.func_warp[self.func_name][1]
-            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), args, refInfo["line"])
+        if self.func_name in self.mapInfo.func_warps:
+            # クラスの属性に値を設定
+            self.mapInfo.func_warps[self.func_name].to_pos = self.mapInfo.setFuncWarpStartPos(nodeID)
+            self.mapInfo.func_warps[self.func_name].line = refInfo["line"]
         else:
-            self.mapInfo.func_warp[self.func_name] = (self.mapInfo.setFuncWarpStartPos(nodeID), {}, refInfo["line"])
+            # クラスを生成
+            self.mapInfo.func_warps[self.func_name] = FuncWarp(self.mapInfo.setFuncWarpStartPos(nodeID), {}, refInfo["line"])
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
@@ -381,11 +571,11 @@ class GenBitMap:
     def trackAST(self, crntRoomID, nodeID, loopBackID = None):
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
-            self.mapInfo.func_warp[self.func_name][1][self.getNodeLabel(nodeID)] = self.varNode_info[nodeID]
+            # クラスの属性に値を設定
+            self.mapInfo.func_warps[self.func_name].args = self.varNode_info[nodeID]
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
-            #do_whileの場合はcondNodeIDのcondition_moveを使う
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID)
                 self.createPath(crntRoomID, nodeID)
@@ -496,7 +686,7 @@ class GenBitMap:
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         elif self.getNodeShape(nodeID) == 'hexagon':
-            if self.mapInfo.condition_move.get(nodeID, None):
+            if nodeID in self.mapInfo.condition_line_trackers:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
                     self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158, warpNodeID=nodeID)
@@ -743,13 +933,13 @@ class GenBitMap:
                     self.floorMap[path[i][0], path[i][1]] = 0
                 i = len(path) - 1
                 if gy-1 == path[i][0]:
-                    self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                    self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
                 elif gy+1 == path[i][0]:
-                    self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                    self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
                 elif gx-1 == path[i][1]:
-                    self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                    self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
                 else: # gx+1 == path[i][1]
-                    self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_move[goalNodeID], expNodeInfo=self.getExpNodeInfo(expNodeID))
+                    self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
 
         self.roomsMap = 1 - check_map
            
