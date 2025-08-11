@@ -100,7 +100,6 @@ floorGrassChipID =  {
     (0, 0, 0, 0, 1, 1, 1, 1): 113
 }
 
-
 def getFloorChipID(arr):
     return floorChipID[tuple(map(int, arr))] + 489 # wall-up
     # return floorGrassChipID[tuple(map(int, arr))] # stone-grass

@@ -9,6 +9,7 @@ import socket
 import json
 from collections import Counter
 
+# break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 CONTINUE = 1
