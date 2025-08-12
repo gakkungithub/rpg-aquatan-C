@@ -1320,16 +1320,18 @@ class Map:
         self.charas.append(chara)
 
     def create_characheckcondition_j(self, data):
+        avoiding = True if PLAYER.ccchara and PLAYER.ccchara["x"] == x and PLAYER.ccchara["y"] == y else False
         name = data["name"]
-        x, y = int(data["x"]), int(data["y"])
-        direction = int(data["dir"])
+        x = PLAYER.ccchara["avoiding_x"] if avoiding else int(data["x"]) 
+        y = PLAYER.ccchara["avoiding_y"] if avoiding else int(data["y"]) 
+        direction = PLAYER.ccchara["avoiding_dir"] if avoiding else int(data["dir"])
         movetype = int(data["movetype"])
         message = data["message"]
         type = data["condType"]
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
-        chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp)
+        chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp, avoiding)
         #print(chara)
         self.charas.append(chara)
 
@@ -1738,7 +1740,7 @@ class Player(Character):
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
                     chara = mymap.get_chara(self.ccchara["avoiding_x"], self.ccchara["avoiding_y"])
                     if isinstance(chara, CharaCheckCondition):
-                        if chara.direction == self.direction:
+                        if chara.initial_direction != self.direction:
                             chara.back_to_init_pos()
                             self.ccchara = None
                             door = mymap.get_event(self.door["x"], self.door["y"])
@@ -1953,6 +1955,7 @@ class Player(Character):
                                         MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
                                     else:
                                         self.ccchara = chara.set_checked()
+                                        print(self.ccchara)
                             else:
                                 return False
                         else:
@@ -2524,9 +2527,9 @@ class MessageWindow(Window):
                         chara = fieldmap.get_chara(x, y)
                         if isinstance(chara, CharaCheckCondition) and chara.funcWarp is not None:
                             if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], None))
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skipTo"]["name"], None))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], None)]
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2808,15 +2811,15 @@ class CharaReturn(Character):
 
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp):
+    def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp, avoiding):
         super().__init__(name, pos, direction, movetype, message)
-        self.avoiding = False
         self.initial_direction = direction
         self.back_direction = None
         self.type = type
         self.fromTo = fromTo
         self.func = func
         self.funcWarp = funcWarp
+        self.avoiding = avoiding
 
     def update(self, mymap: Map):
         """キャラクター状態を更新する。
@@ -2828,15 +2831,15 @@ class CharaCheckCondition(Character):
             if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
                 if self.avoiding is True:
                     if self.direction == DOWN:
-                        self.direction == UP
+                        self.direction = UP
                     elif self.direction == LEFT:
-                        self.direction == RIGHT
+                        self.direction = RIGHT
                     elif self.direction == RIGHT:
-                        self.direction == LEFT
+                        self.direction = LEFT
                     else:
-                        self.direction == DOWN
+                        self.direction = DOWN
                 else:
-                    self.direction == self.initial_direction
+                    self.direction = self.initial_direction
                 self.moving = False
                 self.x = self.rect.left // GS
                 self.y = self.rect.top // GS
@@ -2853,20 +2856,20 @@ class CharaCheckCondition(Character):
             if p < 0.5:
                 self.vx, self.vy = self.speed, 0
                 self.direction = RIGHT
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y}
+                return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y, "avoiding_dir": LEFT}
             else:
                 self.vx, self.vy = -self.speed, 0
                 self.direction = LEFT
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y}
+                return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y, "avoiding_dir": RIGHT}
         else:
             if p < 0.5:
                 self.vx, self.vy = 0, self.speed
                 self.direction = DOWN
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1}
+                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1, "avoiding_dir": UP}
             else:
                 self.vx, self.vy = 0, -self.speed
                 self.direction = UP
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1}
+                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1, "avoiding_dir": DOWN}
 
     def back_to_init_pos(self):
         if self.direction == DOWN:

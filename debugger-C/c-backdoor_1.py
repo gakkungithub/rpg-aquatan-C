@@ -244,6 +244,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         # つまり、line_numberがreturn文の行の時に戻り値を取得できる
         # そのうち、returnの場所を予め取得して参照するようにする
         if line_data[func_crnt_name][0][-1] == next_line_number:
+            print(line_number, next_line_number)
             thread.StepOut()
         else:
             thread.StepInto()

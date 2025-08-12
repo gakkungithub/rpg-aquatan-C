@@ -1,5 +1,5 @@
 import argparse
-from parse import parseIndex, ASTtoFlowChart
+from parse_1 import parseIndex, ASTtoFlowChart
 from generate_bit_map_1 import GenBitMap
 
 parser = argparse.ArgumentParser()

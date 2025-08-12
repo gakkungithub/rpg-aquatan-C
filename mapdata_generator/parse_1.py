@@ -759,6 +759,8 @@ class ASTtoFlowChart:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
             self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [cond_cursor.location.line, self.nextLines[-1]])
+            print('here')
+            self.line_info[self.scanning_func][0].add(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
         

@@ -372,7 +372,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [list(line_nums), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
+        line_info_json = {funcname: [sorted(list(line_nums)), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
@@ -679,7 +679,7 @@ class GenBitMap:
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
             # クラスの属性に値を設定
-            self.mapInfo.func_warps[self.func_name].args = self.varNode_info[nodeID]
+            self.mapInfo.func_warps[self.func_name].args[self.getNodeLabel(nodeID)] = self.varNode_info[nodeID]
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
