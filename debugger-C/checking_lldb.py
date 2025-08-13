@@ -1,0 +1,318 @@
+import faulthandler
+faulthandler.enable()
+import lldb
+import argparse
+import os
+import struct
+import socket
+import threading
+import json
+
+# break pointを打ってスキップすることも考えられる
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = BASE_DIR + '/mapdata'
+CONTINUE = 1
+PROGRESS = 0
+
+class VarsTracker:
+    def __init__(self):
+        self.previous_values: list[dict[str, str]] = []
+        self.frames = ['start']
+    
+    def trackStart(self, frame):
+        current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
+                      for i in range(thread.GetNumFrames())]
+        # 何かしらの関数に遷移したとき
+        if len(current_frames) > len(self.frames):
+            self.previous_values.append({})
+            self.frames = current_frames
+        # 何かしらの関数から戻ってきたとき
+        elif len(current_frames) < len(self.frames):
+            self.previous_values.pop()
+            self.frames = current_frames
+        
+        return self.track(frame.GetVariables(True, True, False, True))
+
+    def track(self, vars, depth=0, max_depth=10, prefix="") -> list[str]:
+        vars_changed = []
+        crnt_vars = []
+
+        if depth > max_depth:
+            return []
+        
+        indent = "    " * depth
+
+        for var in vars:
+            name = var.GetName()
+            full_name = f"{prefix}.{name}" if prefix else name
+            value = var.GetValue()
+
+            prev_value = self.previous_values[-1].get(full_name)
+            changed = (value != prev_value)
+
+            if changed:
+                print(f"{indent}{full_name} = {value}    ← changed")
+                vars_changed.append(full_name)
+            else:
+                print(f"{indent}{full_name} = {value}")
+
+            if depth == 0:
+                crnt_vars.append(name)
+
+            self.previous_values[-1][full_name] = value
+
+            num_children = var.GetNumChildren()
+            
+            if var.GetType().IsPointerType():
+                pointee_type = var.GetType().GetPointeeType()
+                type_name = pointee_type.GetName()
+
+                try:
+                    addr = int(var.GetValue(), 16)
+                    target = var.GetTarget()
+                    process = target.GetProcess()
+                    error = lldb.SBError()
+
+                    if not pointee_type.IsPointerType():
+                        if type_name == "char":
+                            cstr = process.ReadCStringFromMemory(addr, 100, error)
+                            if error.Success():
+                                print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
+                            else:
+                                print(f"{indent}→ {full_name} points to unreadable char*")
+
+                        elif type_name == "int":
+                            data = process.ReadMemory(addr, 4, error)
+                            if error.Success():
+                                val = struct.unpack("i", data)[0]
+                                print(f"{indent}→ {full_name} points to int: {val}")
+                            else:
+                                print(f"{indent}→ {full_name} points to unreadable int*")
+
+                        elif type_name == "float":
+                            data = process.ReadMemory(addr, 4, error)
+                            if error.Success():
+                                val = struct.unpack("f", data)[0]
+                                print(f"{indent}→ {full_name} points to float: {val}")
+                            else:
+                                print(f"{indent}→ {full_name} points to unreadable float*")
+
+                        elif type_name == "double":
+                            data = process.ReadMemory(addr, 8, error)
+                            if error.Success():
+                                val = struct.unpack("d", data)[0]
+                                print(f"{indent}→ {full_name} points to double: {val}")
+                            else:
+                                print(f"{indent}→ {full_name} points to unreadable double*")
+
+                        else:
+                            # 構造体などの場合
+                            deref = var.Dereference()
+                            if deref.IsValid() and deref.GetNumChildren() > 0:
+                                print(f"{indent}→ Deref {full_name}")
+                                children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
+                                vars_changed += self.track(children, depth + 1, max_depth, full_name)
+                    else:
+                        children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                        vars_changed += self.track(children, depth + 1, max_depth, full_name)
+
+                except Exception as e:
+                    print(f"{indent}→ {full_name} deref error: {e}")
+
+            elif num_children > 0:
+                children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                vars_changed += self.track(children, depth + 1, max_depth, full_name)
+
+        return vars_changed
+
+    def print_all_variables(self):
+        all_frames = self.frames[:-1]
+        for i, frame in enumerate(all_frames):
+            print(f"{frame}: {self.previous_values[-(i+1)]}")
+    
+def get_all_stdvalue(process):
+    stdout_output = ""
+    stderr_output = ""
+
+    while True:
+        out = process.GetSTDOUT(1024)
+        err = process.GetSTDERR(1024)
+
+        if not out and not err:
+            break
+
+        stdout_output += out
+        stderr_output += err
+
+    return stdout_output, stderr_output
+
+def step_conditionally(frame):
+    thread = frame.GetThread()
+    process = thread.GetProcess()
+    target = process.GetTarget()
+
+    # 現在の命令アドレス
+    pc_addr = frame.GetPCAddress()
+
+    # 現在の命令を取得（必要な数だけ、ここでは1つ）
+    instructions = target.ReadInstructions(pc_addr, 1)
+
+    inst = instructions[0]
+    
+    mnemonic = inst.GetMnemonic(target)
+
+    print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
+    
+    thread.StepInto()
+
+def get_next_state():
+    state = process.GetState()
+
+    frame = thread.GetFrameAtIndex(0)
+
+    line_entry = frame.GetLineEntry()
+    file_name = line_entry.GetFileSpec().GetFilename()
+    line_number = line_entry.GetLine()
+    func_name = frame.GetFunctionName()
+
+    if func_name is None or file_name is None:
+        # state_checker(state)
+        return None
+    
+    frame_num = thread.GetNumFrames()
+    
+    print(f"{func_name} at {file_name}:{line_number}")
+    return state, frame, file_name, line_number, func_name, frame_num
+
+def get_std_outputs():
+    stdout_output, stderr_output = get_all_stdvalue(process)
+    if stdout_output:
+        print("[STDOUT]")
+        print(stdout_output)
+
+    if stderr_output:
+        print("[STDERR]")
+        print(stderr_output)
+
+def handle_client(conn: socket.socket, addr: tuple[str, int]):
+    def event_reciever():
+        # JSONが複数回に分かれて送られてくる可能性があるためパース
+        data = conn.recv(1024)
+        # ここは後々変えるかも
+        if not data:
+            return False
+        return True
+    
+    def event_sender(finished: bool):
+        send_data = json.dumps({"finished": finished})
+        conn.sendall(send_data.encode('utf-8'))
+
+    print(f"[接続] {addr} が接続しました")
+
+    try:
+        varsTracker = VarsTracker()
+
+        with conn:
+            event_reciever()
+            if (next_state := get_next_state()):
+                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                func_name = func_crnt_name
+                frame_num = 1
+                line_number = -1
+                print(func_name, func_crnt_name)
+                print(line_number, next_line_number)
+                vars_changed = varsTracker.trackStart(frame)
+                get_std_outputs()
+                step_conditionally(frame)
+                event_sender(False)
+            else:
+                event_sender(True)
+                event_reciever()
+                return
+
+            while 1:
+                event_reciever()
+                if (next_state := get_next_state()):
+                    line_number = next_line_number
+                    func_name = func_crnt_name
+                    frame_num = next_frame_num
+                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                    print(func_name, func_crnt_name)
+                    print(line_number, next_line_number)
+                    vars_changed = varsTracker.trackStart(frame)
+                    print(varsTracker.print_all_variables())
+                    get_std_outputs()
+                    step_conditionally(frame)
+                    event_sender(False)
+                else:
+                    event_sender(True)
+                    event_reciever()
+                    return
+    except:
+        return
+
+# region コマンドライン引数の確認
+parser = argparse.ArgumentParser(description='for the c-backdoor')
+# ベース名を取得
+parser.add_argument('--name', type=str, required=True, help='string')
+# 引数を解析
+args = parser.parse_args()
+# endregion
+
+# region lldbの初期設定
+lldb.SBDebugger.Initialize()
+debugger = lldb.SBDebugger.Create()
+debugger.SetAsync(False)
+
+target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
+if not target:
+    print("failed in build of target")
+    exit(1)
+
+# print(f"Command line arguments: {args}")
+
+# breakpointを行で指定するならByLocation
+breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
+
+for module in target.module_iter():
+    for sym in module:
+        if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+            name = sym.GetName()
+            if name:
+                var = target.FindFirstGlobalVariable(name)
+                if var.IsValid():
+                    print(f"{name} = {var.GetValue()}")
+
+launch_info = lldb.SBLaunchInfo([])
+launch_info.SetWorkingDirectory(os.getcwd())
+
+error = lldb.SBError()
+process = target.Launch(launch_info, error)
+
+if not error.Success() or not process or not process.IsValid():
+    print("failed in operation")
+    exit(1)
+
+thread = process.GetThreadAtIndex(0)
+if not thread.IsValid():
+    print("no valid thread found")
+    exit(1)
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    host='localhost'
+    port=9999
+
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    s.bind((host, port))
+    s.listen()
+    print(f"[サーバ起動] {host}:{port} で待機中...")
+
+    conn, addr = s.accept()
+    server_thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
+    server_thread.start()
+
+    server_thread.join()
+    print("[サーバ終了]")
+
+# endregion

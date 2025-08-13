@@ -96,6 +96,11 @@ def main():
 
     SBW_RECT = Rect(0, 0, SBW_WIDTH, SBW_HEIGHT)
 
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.path.abspath("modules") + (
+        ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
+    )
+
     while True:
         if os.uname()[0] != 'Darwin':
             drivers = ['fbcon', 'directfb', 'svgalib']
@@ -133,44 +138,76 @@ def main():
         last_mouse_pos = None
         mouse_down = False
         scroll_start = False
-        while stage_name is None:
-            for event in pygame.event.get():
-                if event.type == QUIT:
-                    print('ゲームを終了しました')
-                    sys.exit()
-                if event.type == KEYDOWN and event.key == K_ESCAPE:
-                    print('ゲームを終了しました')
-                    sys.exit()
+        server = None
+        
+        try:
+            while stage_name is None:
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        print('ゲームを終了しました')
+                        sys.exit()
+                    if event.type == KEYDOWN and event.key == K_ESCAPE:
+                        print('ゲームを終了しました')
+                        sys.exit()
 
-                # region mouse click event
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1 and SBWND.is_visible:
-                        mouse_down = True
-                        code_name = SBWND.is_clicked(event.pos)
-                        last_mouse_pos = event.pos
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1 and SBWND.is_visible:
-                        # ステージのボタンを押した場合
-                        if code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
-                            SBWND.hide()
-                            stage_name = code_name
-                        mouse_down = False
-                        scroll_start = False
-                if mouse_down:
-                    if event.type == pygame.MOUSEMOTION:
-                        scroll_start = True
-                        dx = - (event.pos[0] - last_mouse_pos[0])
-                        if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
-                            SBWND.scrollX += dx
-                        elif SBWND.scrollX + dx < 0:
-                            SBWND.scrollX = 0
-                        else:
-                            SBWND.scrollX = SBWND.maxScrollX
-                        if dx != 0:
-                            SBWND.load_sb()
-                        last_mouse_pos = event.pos
-                SBWND.draw(screen)
-                pygame.display.update()
+                    # region mouse click event
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1 and SBWND.is_visible:
+                            mouse_down = True
+                            code_name = SBWND.is_clicked(event.pos)
+                            last_mouse_pos = event.pos
+                    elif event.type == pygame.MOUSEBUTTONUP:
+                        if event.button == 1 and SBWND.is_visible:
+                            # ステージのボタンを押した場合
+                            if code_name == SBWND.is_clicked(event.pos) == 'check lldb':
+                                if server is not None:
+                                    SBWND.close()
+                                    server = None
+                                SBWND.stage_selecting = not SBWND.stage_selecting
+                            elif code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
+                                if SBWND.stage_selecting:
+                                    SBWND.hide()
+                                    stage_name = code_name
+                                elif server is None:
+                                    programname = code_name
+                                    programpath = f"{DATA_DIR}/{programname}/{programname}"
+                                    # 現在は一つのcファイルにしか対応してないので、下記のようにリストに要素を一つだけ入れる
+                                    # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+                                    cfiles = [f"{programpath}.c"]
+
+                                    # cプログラムを整形する
+                                    subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+
+                                    subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+                                    server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
+                                    SBWND.start_checking_lldb()
+                            mouse_down = False
+                            scroll_start = False
+                    if mouse_down:
+                        if event.type == pygame.MOUSEMOTION:
+                            scroll_start = True
+                            dx = - (event.pos[0] - last_mouse_pos[0])
+                            if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
+                                SBWND.scrollX += dx
+                            elif SBWND.scrollX + dx < 0:
+                                SBWND.scrollX = 0
+                            else:
+                                SBWND.scrollX = SBWND.maxScrollX
+                            if dx != 0:
+                                SBWND.load_sb()
+                            last_mouse_pos = event.pos
+                    
+                    if server is not None and event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN):
+                        if SBWND.step_into():
+                            SBWND.close()
+                            server = None
+                    
+                    SBWND.draw(screen)
+                    pygame.display.update()
+        except Exception as e:
+            if e == SystemExit:
+                return
+            continue
         # endregion
 
         # region マップデータ生成
@@ -192,10 +229,6 @@ def main():
         subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
         # サーバを立てる
-        env = os.environ.copy()
-        env["PYTHONPATH"] = os.path.abspath("modules") + (
-            ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
-        )
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
         # endregion
 
@@ -3441,6 +3474,8 @@ class StageButtonWindow:
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
+    CHECKING_LLDB_BUTTON_FONT_SIZE = 12
+
     FONT_COLOR = (255, 255, 255)
 
     def __init__(self):
@@ -3449,10 +3484,13 @@ class StageButtonWindow:
         self.surface.fill((128, 128, 128))
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = []
+        self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
         self.load_sb()
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.checking_lldb_button_font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.CHECKING_LLDB_BUTTON_FONT_SIZE)
+        self.stage_selecting = True
 
     def show(self):
         """ウィンドウを表示"""
@@ -3476,15 +3514,65 @@ class StageButtonWindow:
     def draw(self, screen):
         if self.is_visible:
             self.blit(screen)
-            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択", self.FONT_COLOR)
+            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択" if self.stage_selecting else "lldb　処理チェック", self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
+        pygame.draw.rect(self.surface, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
+        label_surf, _ = self.checking_lldb_button_font.render("モード変更", (255, 255, 255))
+        label_rect = label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+        self.surface.blit(label_surf, label_rect)
 
     def is_clicked(self,pos):
         for button in self.button_stages:
             if button.rect.collidepoint(pos):
                 return button.code_name
+            if self.checking_lldb_button_rect.collidepoint(pos):
+                return 'check lldb'
         return None
+    
+    def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
+        start = time.time()
+        last_error = None
+        while time.time() - start < wait_timeout:
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(timeout)
+                self.sock.connect((host, port))
+                print("[Client] 接続成功")
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                last_error = e
+                time.sleep(0.1)
+        else:
+            print(f"[Client] 接続失敗: {last_error}")
+            raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
+
+    def step_into(self):
+        self.sock.sendall(json.dumps({'step_into': True}).encode() + b'\n')  # 改行区切りで複数送信可能
+        return self.receive_json()
+
+    def receive_json(self):
+        buffer = ""
+        try:
+            while True:
+                data = self.sock.recv(1024)
+                if not data:
+                    break  # 接続が閉じられた
+                buffer += data.decode()
+                try:
+                    msg = json.loads(buffer)
+                    return msg["finished"]
+                except json.JSONDecodeError:
+                    continue  # JSONがまだ完全でないので続けて待つ
+        except socket.timeout:
+            print("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+        except Exception as e:
+            print(f"受信エラー: {e}")
+        return False
+            
+    def close(self):
+        self.sock.close()
+        self.stage_selecting = True
     
 
                                                                                                                      
@@ -3507,7 +3595,7 @@ class StageButton:
     def __init__(self, code_name, stage_num, pos_x, pos_y, button_w, button_h):
         self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
-        self.code_name = code_name
+        self.code_name: str = code_name
         self.stage_num = stage_num + 1
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 24)
     
