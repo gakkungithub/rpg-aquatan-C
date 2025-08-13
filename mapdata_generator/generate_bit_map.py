@@ -46,12 +46,12 @@ class ConditionLineTracker:
 
 class ConditionLineTrackers:
     def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
-        self.condition_line_tracker: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
+        self.tracks: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
 
     def get_condition_line_tracker(self, nodeID: str):
-        if nodeID in self.condition_line_tracker:
-            # return tuple(self.condition_line_tracker[nodeID].__dict__.values())
-            return (self.condition_line_tracker[nodeID].type, self.condition_line_tracker[nodeID].condition_line_track)
+        if nodeID in self.tracks:
+            # return tuple(self.tracks[nodeID].__dict__.values())
+            return (self.tracks[nodeID].type, self.tracks[nodeID].condition_line_track)
         else:
             return ('', [])
     
@@ -96,11 +96,9 @@ class CharaReturn:
         return (self.pos, self.func_name, self.line)
 
 class AutoEvent:
-    def __init__(self, pos: tuple[int, int], mapchip: int, type: str, line_track: list[int | str | None], dir: str):
+    def __init__(self, pos: tuple[int, int], mapchip: int, dir: str):
         self.pos = pos
         self.mapchip = mapchip
-        self.type = type
-        self.line_track = line_track
         self.dir = dir
 
 class Door:
@@ -108,6 +106,14 @@ class Door:
         self.pos = pos
         self.name = "test"
         self.dir = dir
+
+class CharaCheckCondition:
+    def __init__(self, func, pos, dir, type, line_track):
+        self.func = func
+        self.pos = pos
+        self.dir = dir
+        self.type = type
+        self.line_track = line_track
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -125,6 +131,7 @@ class MapInfo:
         self.chara_returns: list[CharaReturn] = []
         self.auto_events: list[AutoEvent] = []
         self.doors: list[Door] = []
+        self.chara_checkConditions: list[CharaCheckCondition] = []
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -215,17 +222,20 @@ class MapInfo:
             print("generation failed: try again!! 3")
 
     # 一方通行パネルの設定
-    def setOneWay(self, pos, dy, dx, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
+    def setOneWay(self, pos, dy, dx):
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
-        autoType, line_track = condition_line_tracker
         if dx == 0:
-            self.auto_events.append(AutoEvent(pos, 6, autoType, line_track, "d" if dy == 1 else "u"))
+            self.auto_events.append(AutoEvent(pos, 6, "d" if dy == 1 else "u"))
         else:
-            self.auto_events.append(AutoEvent(pos, 7, autoType, line_track, "r" if dx == 1 else "l"))
+            self.auto_events.append(AutoEvent(pos, 7, "r" if dx == 1 else "l"))
 
     # 出口のドア生成
     def setDoor(self, pos, dir):
         self.doors.append(Door(pos, dir))
+        self.eventMap[pos[0], pos[1]] = self.ISEVENT
+
+    def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
+        self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1]))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
@@ -262,8 +272,6 @@ class MapInfo:
                         converted_fromTo.append(line)
                 else:
                     converted_fromTo.append(condLine)
-            if len(me_func_warp) == 0:
-                me_func_warp = None
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
                         "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp})
             
@@ -278,27 +286,13 @@ class MapInfo:
             for func in func_refs:
                 warp_pos, args, line = self.func_warps[func].get_attributes()
                 t_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
-            if len(t_func_warp) == 0:
-                t_func_warp = None
             events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exp": exp_str, "refs": var_refs, "comments": exp_comments, "vartype": treasure.type, "linenum": exp_line_num, "funcWarp": t_func_warp})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
-            ae_func_warp = []
-            converted_fromTo = []
-            for condLine in auto_event.line_track:
-                if isinstance(condLine, str):
-                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
-                    ae_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
-                    if line != 0:
-                        converted_fromTo.append(line)
-                else:
-                    converted_fromTo.append(condLine)
-            if len(ae_func_warp) == 0:
-                ae_func_warp = None
-            events.append({"type": "AUTO", "x": auto_event.pos[1], "y": auto_event.pos[0], "mapchip": auto_event.mapchip, "autoType": auto_event.type, "fromTo": converted_fromTo, "sequence": auto_event.dir, "funcWarp": ae_func_warp})
+            events.append({"type": "AUTO", "x": auto_event.pos[1], "y": auto_event.pos[0], "mapchip": auto_event.mapchip, "sequence": auto_event.dir})
     
-        # 出口用のドアの情報
+        # 入口用のドアの情報 (開けようとする時に行数を確認する)
         for door in self.doors:
             events.append({"type": "SDOOR", "x": door.pos[1], "y": door.pos[0], "doorname": door.name, "dir": door.dir})
 
@@ -319,6 +313,20 @@ class MapInfo:
             else:
                 characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "line": line})
 
+        for chara_checkCondition in self.chara_checkConditions:
+            color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+            ccc_func_warp = []
+            converted_fromTo = []
+            for condLine in chara_checkCondition.line_track:
+                if isinstance(condLine, str):
+                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
+                    ccc_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(condLine)
+            characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
+                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp})
 
         filename = f'{DATA_DIR}/{pname}/{pname}.json'
 
@@ -358,7 +366,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [list(line_nums), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
+        line_info_json = {funcname: [sorted(list(line_nums)), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
@@ -665,7 +673,7 @@ class GenBitMap:
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
             # クラスの属性に値を設定
-            self.mapInfo.func_warps[self.func_name].args = self.varNode_info[nodeID]
+            self.mapInfo.func_warps[self.func_name].args[self.getNodeLabel(nodeID)] = self.varNode_info[nodeID]
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
@@ -676,7 +684,7 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, 158, self.func_name, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
@@ -779,7 +787,8 @@ class GenBitMap:
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         elif self.getNodeShape(nodeID) == 'hexagon':
-            if nodeID in self.mapInfo.condition_line_trackers:
+            # warpNodeIDが必要なのでここで解析する
+            if nodeID in self.mapInfo.condition_line_trackers.tracks:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
                     self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158, warpNodeID=nodeID)
@@ -794,12 +803,19 @@ class GenBitMap:
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
                             self.createPath(nextNodeID, toNodeID, expNodeID=nextNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
-                # break
+                # breakのノードの場合
                 else:
                     self.createRoom(nextNodeID)
                     self.mapInfo.setWarpZone(crntRoomID, nextNodeID, self.func_name, 158, warpNodeID=nodeID)
+        # do while構文の最初の1回
+        elif self.getNodeShape(nodeID) == 'invtrapezium':
+            trueNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
+            self.createRoom(trueNodeID)
+            self.mapInfo.setWarpZone(crntRoomID, trueNodeID, self.func_name, 158, warpNodeID=nodeID) # 条件文の計算式を確かめる
+            nodeID = trueNodeID
+            crntRoomID = trueNodeID
         else:
-            # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる or do_while構文に入った時にstart(True)ノードにくっつける
+            # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる
             # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
             if crntRoomID != nodeID:
                 if nodeID in self.roomSize_info[self.func_name]:
@@ -975,9 +991,6 @@ class GenBitMap:
             
             return (start_edge_point, goal_edge_point, dir)
 
-        sy, sx, sheight, swidth = self.mapInfo.room_info[startNodeID]
-        gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
-
         room_reversed = self.roomsMap
         check_map = 1 - room_reversed
 
@@ -1016,22 +1029,24 @@ class GenBitMap:
             check_map[(sny, snx)] = 1
             check_map[(gny, gnx)] = 1
 
-            if path is None:
+            if path is None or len(path) == 1:
                 self.mapInfo.setWarpZone(startNodeID, goalNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             else:
-                self.floorMap[path[0][0], path[0][1]] = 0
-                self.mapInfo.setDoor(path[0], dir)
-                for i in range(1, len(path)):
+                self.mapInfo.setDoor(path[0], dir)     
+
+                for i in range(len(path)):
                     self.floorMap[path[i][0], path[i][1]] = 0
+
                 i = len(path) - 1
-                if gy-1 == path[i][0]:
-                    self.mapInfo.setOneWay(path[i], 1, 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
-                elif gy+1 == path[i][0]:
-                    self.mapInfo.setOneWay(path[i], -1, 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
-                elif gx-1 == path[i][1]:
-                    self.mapInfo.setOneWay(path[i], 0, 1, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
-                else: # gx+1 == path[i][1]
-                    self.mapInfo.setOneWay(path[i], 0, -1, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
+                dir_door = (path[i-1][0] - path[i][0], path[i-1][1] - path[i][1])
+                if dir_door == (1,0): # 下向き d
+                    self.mapInfo.setCharaCheckCondition(self.func_name, path[i], 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
+                elif dir_door == (-1,0): # 上向き u
+                    self.mapInfo.setCharaCheckCondition(self.func_name, path[i], 3, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
+                elif dir_door == (0,1): # 右向き r
+                    self.mapInfo.setCharaCheckCondition(self.func_name, path[i], 2, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
+                else: # 左向き l
+                    self.mapInfo.setCharaCheckCondition(self.func_name, path[i], 1, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), expNodeInfo=self.getExpNodeInfo(expNodeID))
 
         self.roomsMap = 1 - check_map
            

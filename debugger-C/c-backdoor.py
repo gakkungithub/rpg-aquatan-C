@@ -9,6 +9,7 @@ import socket
 import json
 from collections import Counter
 
+# break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 CONTINUE = 1
@@ -21,7 +22,7 @@ class VarsTracker:
         self.vars_removed = []
         self.frames = ['start']
     
-    def trackStart(self, frame, func_name):
+    def trackStart(self, frame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
                       for i in range(thread.GetNumFrames())]
         # 何かしらの関数に遷移したとき
@@ -238,7 +239,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
         
-        thread.StepInto()
+        # とりあえず現在はvoid型の関数も扱わないし、戻り値の計算式に関数が含まれるものはないので、
+        # func_crnt_nameの最終行とnext_line_numberが合致するかを確認して、合致していればstepOutする。
+        # つまり、line_numberがreturn文の行の時に戻り値を取得できる
+        # そのうち、returnの場所を予め取得して参照するようにする
+        if line_data[func_crnt_name][0][-1] == next_line_number:
+            thread.StepOut()
+        else:
+            thread.StepInto()
 
     def get_next_state():
         state = process.GetState()
@@ -254,8 +262,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # state_checker(state)
             return None
         
+        frame_num = thread.GetNumFrames()
+        
         print(f"{func_name} at {file_name}:{line_number}")
-        return state, frame, file_name, line_number, func_name
+        return state, frame, file_name, line_number, func_name, frame_num
 
     def get_std_outputs():
         stdout_output, stderr_output = get_all_stdvalue(process)
@@ -268,7 +278,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             print(stderr_output)
 
     def vars_checker(first_event=None):
-        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, isEnd
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, frame_num, next_frame_num, isEnd
         if isEnd:
             return
         
@@ -298,7 +308,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event = event_reciever()
                         continue
                     
-                    if (funcWarps := event.get('funcWarp', None)) is not None:
+                    funcWarps = event['funcWarp']
+                    if len(funcWarps) != 0:
                         for funcWarp in funcWarps:
                             if funcWarp["name"] == func_crnt_name and funcWarp["line"] == next_line_number:
                                 event_sender({"message": "遷移先の関数の処理をスキップしますか?", "value": varsTracker.getValueBeforeFuncWarp(item), "undefined": True, "status": "ok", "skip": True})
@@ -310,8 +321,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -336,17 +348,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             break
 
                         varsTracker.setVarsDeclared(item)
-                        continue
+                    else:
+                        vars_event.append(item)
+                        if Counter(vars_event) == Counter(varsDeclLines):
+                            print("you selected correct vars")
+                            event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, getLine)
+                            varsTracker.setVarsDeclared(item)
+                            break
 
-                    vars_event.append(item)
-                    if Counter(vars_event) == Counter(varsDeclLines):
-                        print("you selected correct vars")
-                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, getLine)
+                        event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, False)
                         varsTracker.setVarsDeclared(item)
-                        break
-
-                    event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": varsTracker.getValue(item), "undefined": False, "status": "ok"}, False)
-                    varsTracker.setVarsDeclared(item)
                 else:
                     errorCnt += 1
                     event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
@@ -444,114 +455,204 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         event = event_reciever()
                         continue
 
-    def analyze_frame():
-        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, isEnd
+    def analyze_frame(backToLine: int = None):
+        def check_condition(condition_type: str, fromTo: list[int], funcWarp):
+            nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, frame_num, next_frame_num, isEnd
+            print('here2')
+            errorCnt = 0
+            line_number_track: list[int] = fromTo[:2]
+            func_num = 0
+            while True:
+                # まず、if文でどの行まで辿ったかを確かめる
+                if fromTo[:len(line_number_track)] == line_number_track:
+                    crntFromTo = fromTo[len(line_number_track):]
+                    print('here')
+                    if len(funcWarp) < func_num:
+                        continue
+                    elif len(funcWarp) != 0:
+                        funcWarp = funcWarp[func_num:]
+                    print('here1')
+                # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                else:
+                    errorCnt += 1
+                    event_sender({"message": f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                    while True:
+                        if (event := event_reciever()) is None:
+                            break
+                        if (type := event.get('type', '')) != condition_type:
+                            errorCnt += 1
+                            event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        elif (fromTo := event.get('fromTo', None)) is None:
+                            errorCnt += 1
+                            event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        elif (funcWarp := event.get('funcWarp', None)) is None:
+                            errorCnt += 1
+                            event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        else:
+                            break
+                    continue
+                # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
+                while crntFromTo:
+                    # 何かしらの関数に遷移したとき
+                    if next_frame_num > frame_num:
+                        if line_number_track[-1] == next_line_number:
+                            event_sender({"message": f"関数 {func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True})
+                            event = event_reciever()
+                            # スキップする
+                            if event.get('skip', False):
+                                retVal = None
+                                back_line_number = line_number
+                                skipped_func_name = func_crnt_name
+                                while 1:
+                                    step_conditionally(frame)
+                                    if (next_state := get_next_state()):
+                                        line_number = next_line_number
+                                        func_name = func_crnt_name
+                                        frame_num = next_frame_num
+                                        state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                        vars_changed = varsTracker.trackStart(frame)
+                                    else:
+                                        isEnd = True
+                                        line_number = next_line_number
+                                    if back_line_number == next_line_number:
+                                        retVal = thread.GetStopReturnValue().GetValue()
+                                    if back_line_number == line_number:
+                                        break
+                                event_sender({"message": "スキップを完了しました", "status": "ok", "items": varsTracker.previous_values[-1], "func": func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                            # スキップしない
+                            else:
+                                items = {}
+                                func = funcWarp.pop(0)
+                                for argname, argtype in func["args"].items():
+                                    items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
+                                event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "func": func_name, "fromLine": line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                back_line_number = line_number
+                                step_conditionally(frame)
+                                if (next_state := get_next_state()):
+                                    line_number = next_line_number
+                                    func_name = func_crnt_name
+                                    frame_num = next_frame_num
+                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                    vars_changed = varsTracker.trackStart(frame)
+                                else:
+                                    isEnd = True
+                                    line_number = next_line_number
+                                while 1:
+                                    if analyze_frame(fromTo[0]):
+                                        continue
+                                    if back_line_number == line_number:
+                                        break
+                            line_number_track.append(next_line_number)
+                            func_num += 1
+                        else:
+                            event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
+                        event = event_reciever()
+                        break
+                    else:
+                        step_conditionally(frame)
+
+                        if (next_state := get_next_state()):
+                            line_number = next_line_number
+                            func_name = func_crnt_name
+                            frame_num = next_frame_num
+                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                        else:
+                            isEnd = True
+                            line_number = next_line_number
+
+                        if crntFromTo[0] != next_line_number:
+                            errorCnt += 1
+                            event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                            while True:
+                                if (event := event_reciever()) is None:
+                                    continue
+                                if (type := event.get('type', '')) != condition_type:
+                                    errorCnt += 1
+                                    event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                elif (fromTo := event.get('fromTo', None)) is None:
+                                    errorCnt += 1
+                                    event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                else:
+                                    break
+                            line_number_track.append(next_line_number)
+                            break
+                        line_number_track.append(crntFromTo.pop(0))
+
+                # crntFromToが 空 => 行番が完全一致になる
+                if not crntFromTo:
+                    print('here5')
+                    event_sender({"message": "", "status": "ok"})
+                    vars_changed = varsTracker.trackStart(frame)
+                    print('here4')
+                    vars_checker()
+                    print('here3')
+                    break
+
+        nonlocal state, next_state, frame, file_name, line_number, next_line_number, func_name, func_crnt_name, vars_changed, skipStart, skipEnd, line_data, frame_num, next_frame_num, isEnd
         if line_data.get(func_name, None) and line_number in line_data[func_name][0] and not isEnd:
             if (event := event_reciever()) is None:
-                return 
+                return PROGRESS
             if (ngname := event.get('ng', None)) is not None:
                 if ngname == "notEnter":
                     event_sender({"message": "ここから先は進入できません1!!", "status": "ng"})
                 else:
                     event_sender({"message": "NG行動をしました2!!", "status": "ng"})
                 return CONTINUE
-            # elif func_crnt_name != func_name:
-            #     if (funcChange := event.get('funcChange', None)) is not None:
-            #     # func_event = [event['roomname']]
-            #     # if func_event != func_name:
-            #     #     print(f'your func name was incorrect!!\ncorrect func name: {func_name}')
-            #     #     return CONTINUE
-            #         func_crnt_name = func_name
-            #     else:
-            #         event_sender({"message": "NG行動をしました3!!", "status": "ng"})
-            #         return CONTINUE
             elif (fromTo := event.get('fromTo', None)) is not None:
                 type = event.get('type', '')
                 # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
                 # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
                 if len(fromTo) >= 2:
                     if fromTo[:2] == [line_number, next_line_number]:
-                        if type == 'if':
-                            errorCnt_if = 0
-                            line_number_track = fromTo[:2]
-                            while True:
-                                # まず、if文でどの行まで辿ったかを確かめる
-                                if fromTo[:len(line_number_track)] == line_number_track:
-                                    crntFromTo = fromTo[len(line_number_track):]
-                                # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
-                                else:
-                                    errorCnt_if += 1
-                                    event_sender({"message": f"ここから先は進入できません2!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                    while True:
-                                        if (event := event_reciever()) is None:
-                                            break
-                                        if (type := event.get('type', '')) != 'if':
-                                            errorCnt_if += 1
-                                            event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        elif (fromTo := event.get('fromTo', None)) is None:
-                                            errorCnt_if += 1
-                                            event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        else:
-                                            break
-                                    continue
-                                # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
-                                while crntFromTo:
-                                    step_conditionally(frame)
-
-                                    if (next_state := get_next_state()):
-                                        line_number = next_line_number
-                                        func_name = func_crnt_name
-                                        state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                    else:
-                                        isEnd = True
-                                        line_number = next_line_number
-
-                                    if crntFromTo[0] != next_line_number:
-                                        errorCnt_if += 1
-                                        event_sender({"message": f"ここから先は進入できません3!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                        while True:
-                                            if (event := event_reciever()) is None:
-                                                continue
-                                            if (type := event.get('type', '')) != 'if':
-                                                errorCnt_if += 1
-                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                            elif (fromTo := event.get('fromTo', None)) is None:
-                                                errorCnt_if += 1
-                                                event_sender({"message": f"NG行動をしました!! {"ヒント: if 条件を見ましょう!!" if errorCnt_if >= 3 else ""}", "status": "ng"})
-                                            else:
-                                                break
-                                        line_number_track.append(next_line_number)
-                                        break
-                                    line_number_track.append(crntFromTo.pop(0))
-
-                                # crntFromToが 空 => 行番が完全一致 になるかどうか
-                                if not crntFromTo:
-                                    event_sender({"message": "", "status": "ok"})
-                                    vars_changed = varsTracker.trackStart(frame, func_crnt_name)
-                                    vars_checker()
-                                    break
+                        if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse']:
+                            # 同じメソッドでいけるかを確認する
+                            funcWarp = event['funcWarp']
+                            check_condition(type, fromTo, funcWarp)
+                            if type in ['whileFalse, forFalse', 'doWhileFalse']:
+                                line_loop.pop(-1)
+                                skipStart = None
+                                skipEnd = None
                         elif type == 'ifEnd':
                             event_sender({"message": "", "status": "ok"})
-                        elif type in ['whileTrue', 'whileFalse']:
-                            event_sender({"message": "", "status": "ok"})
-                            if type == 'whileFalse':
-                                line_loop.pop(-1)
-                                skipStart = None
-                                skipEnd = None
-                        elif type in ['forTrue', 'forFalse']:
-                            event_sender({"message": "", "status": "ok"})
-                            if type == 'forFalse':
-                                line_loop.pop(-1)
-                                skipStart = None
-                                skipEnd = None
-                        elif type in 'doWhileFalse':
-                            # ここで繰り返しをスキップするかどうか確認する
-                            event_sender({"message": "", "status": "ok"})
-                            line_loop.pop(-1)
-                            skipEnd = None
                         elif type == 'switchCase':
-                            event_sender({"message": "", "status": "ok"})
+                            if (funcWarps := event.get('funcWarp', None)) is not None:
+                                for funcWarp in funcWarps:
+                                    if funcWarp["name"] == func_crnt_name and funcWarp["line"] == next_line_number:
+                                        event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skip": True})
+                                        event = event_reciever()
+                                        if event.get('skip', False):
+                                            back_line_number = line_number
+                                            while 1:
+                                                step_conditionally(frame)
+                                                if (next_state := get_next_state()):
+                                                    line_number = next_line_number
+                                                    func_name = func_crnt_name
+                                                    frame_num = next_frame_num
+                                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                    vars_changed = varsTracker.trackStart(frame)
+                                                else:
+                                                    isEnd = True
+                                                    line_number = next_line_number
+                                                if back_line_number == line_number:
+                                                    break
+                                            event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
+                                        else:
+                                            items = {}
+                                            for argname, argtype in funcWarp["args"].items():
+                                                items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
+                                            event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
+                                            back_line_number = line_number
+                                            while 1:
+                                                if analyze_frame():
+                                                    continue
+                                                if back_line_number == line_number:
+                                                    break
+                            else:
+                                event_sender({"message": "", "status": "ok"})
+                                vars_changed = varsTracker.trackStart(frame)
+                                vars_checker()
                         elif type == 'continue':
+                            # type == while or forの場合
                             if line_number >= next_line_number:
                                 skipStart = next_line_number
                                 skipEnd = line_data[func_name][1][str(next_line_number)]
@@ -564,8 +665,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -573,52 +675,114 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     return CONTINUE
                                 else:
                                     event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                            # type == do_whileの場合
                             else:
-                                event_sender({"message": "", "status": "ok"})
+                                # まずは条件文に行って次がTrueかFalseかを見る
+                                step_conditionally(frame)
+                                if (next_state := get_next_state()):
+                                    line_number = next_line_number
+                                    func_name = func_crnt_name
+                                    frame_num = next_frame_num
+                                    state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                    vars_changed = varsTracker.trackStart(frame)
+                                else:
+                                    isEnd = True
+                                    line_number = next_line_number
+                                # 次がdoWhileTrueと考えられるならスキップを提案する
+                                if line_data[func_name][1][str(line_number)] <= next_line_number <= line_number:
+                                    skipStart = line_number
+                                    skipEnd = line_data[func_name][1][str(line_number)]
+                                    # ここでスキップするかどうかを確認する
+                                    event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                    event = event_reciever()
+                                    if event.get('skip', False):
+                                        while skipStart <= next_line_number <= skipEnd:
+                                            step_conditionally(frame)
+                                            if (next_state := get_next_state()):
+                                                line_number = next_line_number
+                                                func_name = func_crnt_name
+                                                frame_num = next_frame_num
+                                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                vars_changed = varsTracker.trackStart(frame)
+                                            else:
+                                                isEnd = True
+                                                line_number = next_line_number
+                                        event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
+                                    else:
+                                        event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                                else:
+                                    event_sender({"message": "", "status": "ok"})
+                                return CONTINUE
                         elif type == 'break':
                             event_sender({"message": "", "status": "ok"})
                             line_loop.pop(-1)
                             skipEnd = None
                         elif type == 'return':
+                            # return内の計算式の確認方法は後で考える
+                            retVal = thread.GetStopReturnValue().GetValue()
                             step_conditionally(frame)
                             if (next_state := get_next_state()):
                                 line_number = next_line_number
                                 func_name = func_crnt_name
-                                state, frame, file_name, next_line_number, func_crnt_name = next_state
+                                frame_num = next_frame_num
+                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
                             else:
                                 isEnd = True
                                 line_number = next_line_number
-                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                            vars_changed = varsTracker.trackStart(frame)
                             get_std_outputs()
-                            event_sender({"message": "元の関数に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1]})
+                            event_sender({"message": f"関数 {func_name} に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1], "backToFunc": func_name, "backToLine": backToLine, "retVal": retVal})
                             return PROGRESS
                         else:
                             event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
                             return CONTINUE
+# region do while
+# if len(line_loop) == 0 or line_loop[-1] != next_line_number:
+#     line_loop.append(next_line_number)
+# if (funcWarps := event.get('funcWarp', None)) is not None:
+#     for funcWarp in funcWarps:
+#         if funcWarp["name"] == func_crnt_name and funcWarp["line"] == next_line_number:
+#             event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skipCond": True})
+#             event = event_reciever()
+#             if event.get('skip', False):
+#                 back_line_number = line_number
+#                 while 1:
+#                     step_conditionally(frame)
+#                     if (next_state := get_next_state()):
+#                         line_number = next_line_number
+#                         func_name = func_crnt_name
+#                         frame_num = next_frame_num
+#                         state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+#                         vars_changed = varsTracker.trackStart(frame)
+#                     else:
+#                         isEnd = True
+#                         line_number = next_line_number
+#                     if back_line_number == line_number:
+#                         break
+#                 event_sender({"message": "スキップが完了しました", "status": "ok", "items": varsTracker.previous_values[-1]})
+#             else:
+#                 items = {}
+#                 for argname, argtype in funcWarp["args"].items():
+#                     items[argname] = {"value": varsTracker.getValue(argname), "type": argtype}
+#                 event_sender({"message": f"スキップをキャンセルしました。関数 {func_crnt_name} に遷移します", "status": "ok", "fromLine": line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
+#                 back_line_number = line_number
+#                 while 1:
+#                     if analyze_frame():
+#                         continue
+#                     if back_line_number == line_number:
+#                         break
+# else:
+#     event_sender({"message": "", "status": "ok"})
+#     vars_changed = varsTracker.trackStart(frame)
+#     vars_checker()
+# endregion
                     elif fromTo[:2] == [None, next_line_number]:
-                        if type == 'doWhileTrue':
-                            if len(line_loop) and line_loop[-1] == next_line_number:
-                                # ここでスキップするかどうを確認する
-                                event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
-                                event = event_reciever()
-                                if event.get('skip', False):
-                                    while skipStart <= next_line_number <= skipEnd:
-                                        step_conditionally(frame)
-                                        if (next_state := get_next_state()):
-                                            line_number = next_line_number
-                                            func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
-                                        else:
-                                            isEnd = True
-                                            line_number = next_line_number
-                                    event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values[-1]})
-                                    return CONTINUE
-                                else:
-                                    event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
-                            else:
-                                event_sender({"message": "", "status": "ok"})
-                                line_loop.append(next_line_number)
+                        if type == 'doWhileInit':
+                            # 最初なので確定でline_loopに追加する
+                            line_loop.append(next_line_number)
+                            event_sender({"message": "", "status": "ok"})
+                            vars_changed = varsTracker.trackStart(frame)
+                            vars_checker()
                         elif type == 'switchEnd':
                             event_sender({"message": "", "status": "ok"})
                     else:
@@ -640,8 +804,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if (next_state := get_next_state()):
                                             line_number = next_line_number
                                             func_name = func_crnt_name
-                                            state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                            frame_num = next_frame_num
+                                            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                            vars_changed = varsTracker.trackStart(frame)
                                         else:
                                             isEnd = True
                                             line_number = next_line_number
@@ -654,9 +819,29 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event_sender({"message": "", "status": "ok"})
                             line_loop.append(line_number)
                     elif type == 'doWhileIn':
-                        event_sender({"message": "", "status": "ok"})
-                        skipStart = line_data[func_name][1][str(line_number)]
-                        skipEnd = line_number
+                        if len(line_loop) and line_loop[-1] == next_line_number:
+                            # ここでスキップするかどうを確認する
+                            skipStart = line_data[func_name][1][str(line_number)]
+                            skipEnd = line_number
+                            event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                            event = event_reciever()
+                            if event.get('skip', False):
+                                while skipStart <= next_line_number <= skipEnd:
+                                    step_conditionally(frame)
+                                    if (next_state := get_next_state()):
+                                        line_number = next_line_number
+                                        func_name = func_crnt_name
+                                        frame_num = next_frame_num
+                                        state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                        vars_changed = varsTracker.trackStart(frame)
+                                    else:
+                                        isEnd = True
+                                        line_number = next_line_number
+                                event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": varsTracker.previous_values[-1]})
+                            else:
+                                event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                        else:
+                            event_sender({"message": "", "status": "ok"})
                     elif type == 'forIn':
                         if str(line_number) not in varsDeclLines_list:
                             if len(line_loop) and line_loop[-1] == line_number:
@@ -672,8 +857,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             if (next_state := get_next_state()):
                                                 line_number = next_line_number
                                                 func_name = func_crnt_name
-                                                state, frame, file_name, next_line_number, func_crnt_name = next_state
-                                                vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+                                                frame_num = next_frame_num
+                                                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                                vars_changed = varsTracker.trackStart(frame)
                                             else:
                                                 isEnd = True
                                                 line_number = next_line_number
@@ -703,12 +889,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         if (next_state := get_next_state()):
             line_number = next_line_number
             func_name = func_crnt_name
-            state, frame, file_name, next_line_number, func_crnt_name = next_state
+            frame_num = next_frame_num
+            state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
         else:
             isEnd = True
             line_number = next_line_number
 
-        vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+        vars_changed = varsTracker.trackStart(frame)
 
         get_std_outputs()
 
@@ -728,10 +915,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             isEnd = False
 
             if (next_state := get_next_state()):
-                state, frame, file_name, next_line_number, func_crnt_name = next_state
+                state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_line.json", 'r') as f:
                     line_data = json.load(f)
                     func_name = func_crnt_name
+                    frame_num = 1
                     event_sender({"line": line_data[func_name][2]}, False)
                     line_number = line_data[func_name][2] - 1
                 with open(f"{DATA_DIR}/{file_name[:-2]}/{file_name[:-2]}_varDeclLines.json", 'r') as f:
@@ -741,7 +929,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 isEnd = True
                 line_number = line_data["main"][2]
 
-            vars_changed = varsTracker.trackStart(frame, func_crnt_name)
+            vars_changed = varsTracker.trackStart(frame)
             vars_checker()
 
             line_loop = []
