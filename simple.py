@@ -357,8 +357,10 @@ def main():
         STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
         STATUSWND.show()
 
-        ITEMWND = ItemWindow(Rect(10, 10 + SCR_HEIGHT // 5 , SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10),PLAYER)
-        ITEMWND.show()
+        ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10)
+        BIG_ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH - MIN_MAP_SIZE - 30, SCR_HEIGHT // 5 * 3 - 10)
+        ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
+        ITEMWND.hide()
 
         CMNDWND = CommandWindow(TXTBOX_RECT)
         CMNDWND.show()
@@ -526,6 +528,10 @@ def main():
                 ## open map
                 if event.type == KEYDOWN and event.key == K_i:
                     PLAYER.set_game_mode("item")
+
+                if event.type == KEYDOWN and event.key == K_b:
+                    ITEMWND.is_visible = not ITEMWND.is_visible
+
                 if event.type == KEYDOWN and event.key == K_m:
                     if MMAPWND.is_visible:
                         MMAPWND.hide()
@@ -757,6 +763,7 @@ def main():
                                         PAUSEWND.hide()
                                         PLAYER.goaled = True 
                                         print('ステージ選択に戻る')       
+
 
                 if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
                     MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
@@ -2740,6 +2747,79 @@ class ItemWindow(Window):
 
         Window.blit(self, screen)
 
+
+                                                                                                                                                   
+# 88888888ba  88             88                                    I8,        8        ,8I 88                      88                                 
+# 88      "8b ""             88   ,d                               `8b       d8b       d8' ""                      88                                 
+# 88      ,8P                88   88                                "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaaa8P' 88  ,adPPYb,d8 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""""8b, 88 a8"    `Y88 88   88   a8P_____88 88P'   "88"    "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88      `8b 88 8b       88 88   88   8PP""""""" 88      88      88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88      a8P 88 "8a,   ,d88 88   88,  "8b,   ,aa 88      88      88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88888888P"  88  `"YbbdP"Y8 88   "Y888 `"Ybbd8"' 88      88      88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                 aa,    ,88                                                                                                                          
+#                  "Y8bbdP"                                                                                                                           
+
+class BigItemWindow(Window):
+    """ステータスウィンドウ"""
+    FONT_HEIGHT = 16
+    WHITE = Color(255, 255, 255, 255)
+    RED = Color(255, 31, 31, 255)
+    GREEN = Color(31, 255, 31, 255)
+    BLUE = Color(31, 31, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
+
+    mapchip = 456  # アイテムのUI(テスト用)
+
+    def __init__(self, rect, player):
+        Window.__init__(self, rect)
+        self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
+        self.myfont = pygame.freetype.Font(
+            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+        self.color = self.WHITE
+        self.player = player
+        self.image = Map.images[self.mapchip]
+        self.itemChips = ItemChips()
+
+    def draw_string(self, x, y, string, color):
+        """文字列出力"""
+        surf, rect = self.myfont.render(string, color)
+        self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+
+    def draw(self, screen):
+        """メッセージを描画する
+        メッセージウィンドウが表示されていないときは何もしない"""
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        for i,item in enumerate(PLAYER.commonItembag.items[-1]):
+            self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
+        gvarnum = len(PLAYER.commonItembag.items[-1])
+        for j, item in enumerate(PLAYER.itembag.items[-1]):
+            y = 10 + (gvarnum + j) * 25
+
+            # 型に応じたアイコンを blit（描画）
+            icon, constLock = self.itemChips.getChip(item.vartype)
+            icon_x = 10
+            icon_y = y
+            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+
+            if icon:
+                self.surface.blit(icon, (icon_x, icon_y))
+
+            if constLock:
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+                pass
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, y, f"{item.name:<8}", self.WHITE)
+
+            value_color = self.RED if item.undefined else self.WHITE
+            value_offset = self.myfont.get_rect(item.name).width + 30
+            self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
+
+        Window.blit(self, screen)
+
 #                                                                                                                                             
 #  ad88888ba                                               I8,        8        ,8I 88                      88                                 
 # d8"     "8b ,d                 ,d                        `8b       d8b       d8' ""                      88                                 
@@ -3042,7 +3122,7 @@ class MoveEventInfoWindow(Window):
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         if self.funcs is not None:
             for i, func in enumerate(self.funcs):
-                text = f"{func["name"]} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
+                text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
                 bg_rect = pygame.Rect(
                     x_offset,
                     y_offset,
@@ -3470,7 +3550,7 @@ class ItemBag:
 
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
-    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d"]
+    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "15_pointer"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32

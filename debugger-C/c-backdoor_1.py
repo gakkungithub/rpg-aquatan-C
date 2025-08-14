@@ -53,15 +53,14 @@ class VarsTracker:
             value = var.GetValue()
 
             prev_value = self.previous_values[-1].get(full_name)
-            changed = (value != prev_value)
 
-            if changed:
+            if value != prev_value:
                 print(f"{indent}{full_name} = {value}    ← changed")
                 vars_changed.append(full_name)
             else:
                 print(f"{indent}{full_name} = {value}")
 
-            if depth == 0:
+            if depth == 0: # スコープから外れて消える変数を検知するため、次の変数を確認するために現在の変数を取得する
                 crnt_vars.append(name)
 
             self.previous_values[-1][full_name] = value
@@ -124,7 +123,7 @@ class VarsTracker:
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
-            elif num_children > 0:
+            elif num_children > 0: # 配列?
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
                 vars_changed += self.track(children, depth + 1, max_depth, full_name)
 
@@ -133,6 +132,8 @@ class VarsTracker:
                 self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
 
         return vars_changed
+    
+    # def setValue(self, )
     
     def getValue(self, varname):
         return self.previous_values[-1][varname]
@@ -282,7 +283,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         if isEnd:
             return
         
-        # ここもvars_declared.keysで宣言済みの変数の名前を取得できる
         varsDeclLines = list(set(varsDeclLines_list.pop(str(line_number), [])) - set(varsTracker.vars_declared[-1]))
         getLine = (first_event is None)
 
@@ -366,10 +366,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     continue
 
         # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
-        # ここは変更後もほぼそのまま(vars_declared[-1].keysで宣言されていない変数を取得する)
-        # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
-        # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
-        # その後、varsChangedをキーとしてvars_changedの変更値を取得する
         common = list(set(vars_changed) & set(varsTracker.vars_declared[-1]))
         varsChanged = list(set(common) - set(varsDeclLines))
 

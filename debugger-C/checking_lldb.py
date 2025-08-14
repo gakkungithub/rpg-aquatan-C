@@ -14,9 +14,25 @@ DATA_DIR = BASE_DIR + '/mapdata'
 CONTINUE = 1
 PROGRESS = 0
 
+class VarPreviousValue:
+    def __init__(self, value=None, address=None):
+        self.value = value
+        self.address = address
+        self.children: dict[str, VarPreviousValue] = {}  # 配列の添字や構造体のメンバ
+
+    def update_value(self, value, address):
+        """LLDBのSBValueから最新値を更新"""
+        self.value = value
+        self.address = address
+        # 必要なら children も更新
+
+    def __repr__(self):
+        return f"<{self.name}={self.value}>"
+
 class VarsTracker:
     def __init__(self):
-        self.previous_values: list[dict[str, str]] = []
+        self.previous_values: list[dict[str, VarPreviousValue]] = []
+        self.vars_changed: dict[str, list[tuple[str, ...]]] = {}
         self.frames = ['start']
     
     def trackStart(self, frame):
@@ -31,14 +47,11 @@ class VarsTracker:
             self.previous_values.pop()
             self.frames = current_frames
         
-        return self.track(frame.GetVariables(True, True, False, True))
+        self.vars_changed = {}
+        return self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
 
-    def track(self, vars, depth=0, max_depth=10, prefix="") -> list[str]:
-        vars_changed = []
-        crnt_vars = []
-
-        if depth > max_depth:
-            return []
+    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="") -> list[str]:
+        # crnt_vars = []
         
         indent = "    " * depth
 
@@ -46,20 +59,30 @@ class VarsTracker:
             name = var.GetName()
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
+            address = var.GetLoadAddress()
 
-            prev_value = self.previous_values[-1].get(full_name)
-            changed = (value != prev_value)
+            var_previous_value = var_previous_values[name].value if name in var_previous_values else None
 
-            if changed:
+            if value != var_previous_value:
                 print(f"{indent}{full_name} = {value}    ← changed")
-                vars_changed.append(full_name)
+                if len(vars_path) == 0:
+                    self.vars_changed[name] = [()]
+                else:
+                    if vars_path[0] in self.vars_changed:
+                        print(vars_path[0])
+                        self.vars_changed[vars_path[0]].append(tuple(*vars_path[1:], var))
+                    else:
+                        self.vars_changed[vars_path[0]] = [tuple(*vars_path[1:], var)]
             else:
                 print(f"{indent}{full_name} = {value}")
 
-            if depth == 0:
-                crnt_vars.append(name)
+            # if depth == 0:
+            #     crnt_vars.append(name)
 
-            self.previous_values[-1][full_name] = value
+            if name in var_previous_values:
+                var_previous_values[name].update_value(value, address)
+            else:
+                var_previous_values[name] = VarPreviousValue(value, address)
 
             num_children = var.GetNumChildren()
             
@@ -68,16 +91,16 @@ class VarsTracker:
                 type_name = pointee_type.GetName()
 
                 try:
-                    addr = int(var.GetValue(), 16)
-                    target = var.GetTarget()
-                    process = target.GetProcess()
-                    error = lldb.SBError()
-
                     if not pointee_type.IsPointerType():
+                        addr = int(var.GetValue(), 16)
+                        target = var.GetTarget()
+                        process = target.GetProcess()
+                        error = lldb.SBError()
                         if type_name == "char":
                             cstr = process.ReadCStringFromMemory(addr, 100, error)
                             if error.Success():
                                 print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
+                                var_previous_values[name].children['[0]'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable char*")
 
@@ -86,6 +109,7 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("i", data)[0]
                                 print(f"{indent}→ {full_name} points to int: {val}")
+                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")
 
@@ -94,6 +118,7 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("f", data)[0]
                                 print(f"{indent}→ {full_name} points to float: {val}")
+                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable float*")
 
@@ -102,6 +127,7 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("d", data)[0]
                                 print(f"{indent}→ {full_name} points to double: {val}")
+                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable double*")
 
@@ -111,25 +137,34 @@ class VarsTracker:
                             if deref.IsValid() and deref.GetNumChildren() > 0:
                                 print(f"{indent}→ Deref {full_name}")
                                 children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                vars_changed += self.track(children, depth + 1, max_depth, full_name)
+                                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
                     else:
                         children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        vars_changed += self.track(children, depth + 1, max_depth, full_name)
+                        self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
 
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                vars_changed += self.track(children, depth + 1, max_depth, full_name)
+                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
+    
+    # def get_previous_value(self, vars_route: list[str | int]):
 
-        return vars_changed
+    #     pass
+
+    def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
+        indent = "    " * depth
+        for name, previous_value in previous_values.items():
+            print(f"{indent}name: {name}: [value: {previous_value.value}, address: {previous_value.address}]")
+            self.print_variables(previous_value.children, depth+1)
 
     def print_all_variables(self):
         all_frames = self.frames[:-1]
         for i, frame in enumerate(all_frames):
-            print(f"{frame}: {self.previous_values[-(i+1)]}")
-    
+            print(f"func_name: {frame}")
+            self.print_variables(self.previous_values[-(i+1)])
+  
 def get_all_stdvalue(process):
     stdout_output = ""
     stderr_output = ""
@@ -219,9 +254,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 func_name = func_crnt_name
                 frame_num = 1
                 line_number = -1
-                print(func_name, func_crnt_name)
-                print(line_number, next_line_number)
-                vars_changed = varsTracker.trackStart(frame)
+                # print(func_name, func_crnt_name)
+                # print(line_number, next_line_number)
+                varsTracker.trackStart(frame)
                 get_std_outputs()
                 step_conditionally(frame)
                 event_sender(False)
@@ -237,10 +272,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     func_name = func_crnt_name
                     frame_num = next_frame_num
                     state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
-                    print(func_name, func_crnt_name)
-                    print(line_number, next_line_number)
-                    vars_changed = varsTracker.trackStart(frame)
-                    print(varsTracker.print_all_variables())
+                    # print(func_name, func_crnt_name)
+                    # print(line_number, next_line_number)
+                    varsTracker.trackStart(frame)
+                    varsTracker.print_all_variables()
                     get_std_outputs()
                     step_conditionally(frame)
                     event_sender(False)
