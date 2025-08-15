@@ -190,11 +190,15 @@ class VarsTracker:
                 return (True, temp_previous_values_dict[varname].value)
             temp_previous_values_dict = temp_previous_values_dict[varname].children
 
-    def getValue(self, varname):
-        return self.previous_values[-1][varname]
-    
-    def getValueBeforeFuncWarp(self, varname):
-        return self.previous_values[-2][varname]
+    # "item": {"value": aaa, "children": {}}
+    def getValueByVar(self, varname: str, back=0):
+        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
+        
+    # {"value": bbb, "children": {0: {...}}...}
+    def getValueByVarDict(self, previous_value: VarPreviousValue):
+        value_var_declared_dict = {"value": previous_value.value, "children": {}}
+        for var_part, var_previous_value in previous_value.children.items():
+            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
     
     def setVarsDeclared(self, var):
         return self.vars_declared[-1].append(var)
@@ -379,7 +383,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if len(funcWarps) != 0:
                             for funcWarp in funcWarps:
                                 if funcWarp["name"] == self.func_crnt_name and funcWarp["line"] == self.next_line_number:
-                                    self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "value": self.vars_tracker.getValueBeforeFuncWarp(item), "undefined": True, "status": "ok", "skip": True})
+                                    self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "item": self.vars_tracker.getValueByVar(item, -1), "undefined": True, "status": "ok", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         back_line_number = self.line_number
@@ -387,11 +391,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             self.step_conditionally()
                                             if back_line_number == self.line_number:
                                                 break
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.previous_values[-1]})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
                                     else:
                                         items = {}
                                         for argname, argtype in funcWarp["args"].items():
-                                            items[argname] = {"value": self.vars_tracker.getValue(argname), "type": argtype}
+                                            items[argname] = {"item": self.vars_tracker.getValueByVar(argname), "type": argtype}
                                         self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
                                         back_line_number = self.line_number
                                         while 1:
@@ -410,11 +414,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(varsDeclLines):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": self.vars_tracker.getValue(item), "undefined": False, "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": False, "status": "ok"}, getLine)
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
 
-                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": self.vars_tracker.getValue(item), "undefined": False, "status": "ok"}, False)
+                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": False, "status": "ok"}, False)
                             self.vars_tracker.setVarsDeclared(item)
                     else:
                         errorCnt += 1
@@ -451,12 +455,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     #             self.event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
                     #         event = self.event_reciever()
                     #         continue
-                    #     if itemValue != self.vars_tracker.getValue(item):
+                    #     # ここはitemValueではなくどこの変数を変えようとするかが合致していればOKにする
+                    #     if itemValue != self.vars_tracker.getValueByVar(item):
                     #         errorCnt += 1
                     #         print(f'your variable numbers were incorrect!!\ncorrect variables: {values_changed}')
                     #         # 複数回入力を間違えたらヒントをあげる
                     #         if errorCnt >= 3:
-                    #             item_values_str = ', '.join(f"{name} は {self.vars_tracker.getValue(name)}" for name in list(set(values_changed) - set(vars_event)))
+                    #             item_values_str = ', '.join(f"{name} は {self.vars_tracker.getValueByVar(name)}" for name in list(set(values_changed) - set(vars_event)))
                     #             self.event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
                     #         else:
                     #             self.event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
@@ -479,7 +484,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         for value_changed in values_changed:
                             for value_changed_tuple in self.vars_tracker.vars_changed[values_changed]:
                                 value_path = list(value_changed, *value_changed_tuple)
-                                value = self.vars_tracker.getValuePartly(value_path)
+                                isCorrect, value = self.vars_tracker.getValuePartly(value_path)
+                                print(isCorrect)
                                 value_changed_dict.append({"path": value_path, "value": value})
                         self.event_sender({"message": "新しいアイテムの値を設定しました!!", "values": value_changed_dict}, getLine)
                         break
@@ -520,10 +526,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": self.vars_tracker.getValue(item), "undefined": True, "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": True, "status": "ok"}, getLine)
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
-                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "value": self.vars_tracker.getValue(item), "undefined": True, "status": "ok"}, False)
+                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": True, "status": "ok"}, False)
                             self.vars_tracker.setVarsDeclared(item)
                         else:
                             errorCnt += 1
@@ -581,13 +587,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             retVal = thread.GetStopReturnValue().GetValue()
                                         if back_line_number == self.line_number:
                                             break
-                                    self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.previous_values[-1], "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                    self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                 # スキップしない
                                 else:
                                     items = {}
                                     func = funcWarp.pop(0)
                                     for argname, argtype in func["args"].items():
-                                        items[argname] = {"value": self.vars_tracker.getValue(argname), "type": argtype}
+                                        items[argname] = {"item": self.vars_tracker.getValueByVar(argname), "type": argtype}
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     self.step_conditionally()
@@ -671,11 +677,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     self.step_conditionally()
                                                     if back_line_number == self.line_number:
                                                         break
-                                                self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.previous_values[-1]})
+                                                self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
                                             else:
                                                 items = {}
                                                 for argname, argtype in funcWarp["args"].items():
-                                                    items[argname] = {"value": self.vars_tracker.getValue(argname), "type": argtype}
+                                                    items[argname] = {"item": self.vars_tracker.getValueByVar(argname), "type": argtype}
                                                 self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
                                                 back_line_number = self.line_number
                                                 while 1:
@@ -698,7 +704,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.previous_values[-1]})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
                                         return CONTINUE
                                     else:
                                         self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -716,7 +722,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if event.get('skip', False):
                                             while skipStart <= self.next_line_number <= skipEnd:
                                                 self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.previous_values[-1]})
+                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
                                         else:
                                             self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                     else:
@@ -731,7 +737,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 retVal = thread.GetStopReturnValue().GetValue()
                                 self.step_conditionally()
                                 self.get_std_outputs()
-                                self.event_sender({"message": f"関数 {self.func_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.previous_values[-1], "backToFunc": self.func_name, "backToLine": backToLine, "retVal": retVal})
+                                self.event_sender({"message": f"関数 {self.func_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_name, "backToLine": backToLine, "retVal": retVal})
                                 return PROGRESS
                             else:
                                 self.event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
@@ -761,7 +767,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.previous_values[-1]})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll()})
                                     else:
                                         self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                 else:
@@ -779,7 +785,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if event.get('skip', False):
                                     while skipStart <= self.next_line_number <= skipEnd:
                                         self.step_conditionally()
-                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.previous_values[-1]})
+                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll()})
                                 else:
                                     self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                             else:
@@ -796,7 +802,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         if event.get('skip', False):
                                             while skipStart <= self.next_line_number <= skipEnd:
                                                 self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.previous_values[-1]})
+                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll()})
                                         else:
                                             self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                     else:
