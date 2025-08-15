@@ -69,10 +69,9 @@ class VarsTracker:
                     self.vars_changed[name] = [()]
                 else:
                     if vars_path[0] in self.vars_changed:
-                        print(vars_path[0])
-                        self.vars_changed[vars_path[0]].append(tuple(*vars_path[1:], var))
+                        self.vars_changed[vars_path[0]].append((*vars_path[1:], name))
                     else:
-                        self.vars_changed[vars_path[0]] = [tuple(*vars_path[1:], var)]
+                        self.vars_changed[vars_path[0]] = [(*vars_path[1:], name)]
             else:
                 print(f"{indent}{full_name} = {value}")
 
@@ -257,6 +256,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 # print(func_name, func_crnt_name)
                 # print(line_number, next_line_number)
                 varsTracker.trackStart(frame)
+                print(varsTracker.vars_changed)
                 get_std_outputs()
                 step_conditionally(frame)
                 event_sender(False)
@@ -275,6 +275,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # print(func_name, func_crnt_name)
                     # print(line_number, next_line_number)
                     varsTracker.trackStart(frame)
+                    print(varsTracker.vars_changed)
                     varsTracker.print_all_variables()
                     get_std_outputs()
                     step_conditionally(frame)

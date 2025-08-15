@@ -163,7 +163,9 @@ def main():
                                 if server is not None:
                                     SBWND.close()
                                     server = None
-                                SBWND.stage_selecting = not SBWND.stage_selecting
+                                else:
+                                    SBWND.stage_selecting = not SBWND.stage_selecting
+                                
                             elif code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
                                     SBWND.hide()
@@ -3597,10 +3599,10 @@ class StageButtonWindow:
             self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択" if self.stage_selecting else "lldb　処理チェック", self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
-        pygame.draw.rect(self.surface, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
-        label_surf, _ = self.checking_lldb_button_font.render("モード変更", (255, 255, 255))
-        label_rect = label_surf.get_rect(center=self.checking_lldb_button_rect.center)
-        self.surface.blit(label_surf, label_rect)
+            pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
+            label_surf, _ = self.checking_lldb_button_font.render("モード変更", (255, 255, 255))
+            label_rect = label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+            screen.blit(label_surf, label_rect)
 
     def is_clicked(self,pos):
         for button in self.button_stages:
