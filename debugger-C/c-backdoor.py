@@ -731,10 +731,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 func_name = func_crnt_name
                                 frame_num = next_frame_num
                                 state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                                vars_changed = varsTracker.trackStart(frame)
                             else:
                                 isEnd = True
                                 line_number = next_line_number
-                            vars_changed = varsTracker.trackStart(frame)
                             get_std_outputs()
                             event_sender({"message": f"関数 {func_name} に戻ります!!", "status": "ok", "items": varsTracker.previous_values[-1], "backToFunc": func_name, "backToLine": backToLine, "retVal": retVal})
                             return PROGRESS
@@ -896,11 +896,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             func_name = func_crnt_name
             frame_num = next_frame_num
             state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+            vars_changed = varsTracker.trackStart(frame)
         else:
             isEnd = True
             line_number = next_line_number
 
-        vars_changed = varsTracker.trackStart(frame)
+        # vars_changed = varsTracker.trackStart(frame)
 
         get_std_outputs()
 
