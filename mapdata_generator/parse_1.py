@@ -330,13 +330,14 @@ class ASTtoFlowChart:
 
             # 初期化する場合 (一番上の添字ノードはこのメソッドで作りくっつける)
             if cr_init is not None:
-                arrContNodeIDs = self.parse_arr_contents(cr_init.get_children(), cr_index_list[1:])
+                arrContNodeIDs = self.parse_arr_contents(cr_init.get_children(), cr_index_list[1:], cursor.location.line)
                 # 添字のカーソルがあれば、最初の添字カーソルの計算式ノードを作る
                 if len(cr_index_list):
                     indexNodeID = self.get_exp(cr_index_list[0], 'box3d')
                 # 添字のカーソルがなければ、arrContNodeIDsの数で添字を決めてノードを作る
                 else:
                     indexNodeID = self.createNode(len(arrContNodeIDs), 'box3d')
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(arrContNodeIDs)), [], [], f'配列の添字には {str(len(arrContNodeIDs))} が設定されます', cursor.location.line)
                 self.createEdge(varNodeID, indexNodeID)
                 for arrContNodeID in arrContNodeIDs:
                     self.createEdge(indexNodeID, arrContNodeID)
@@ -375,13 +376,13 @@ class ASTtoFlowChart:
         return varNodeID
 
     #配列(多次元も含む)の要素を取得する
-    def parse_arr_contents(self, cr_iter, cr_index_list):
+    def parse_arr_contents(self, cr_iter, cr_index_list, line):
         arrContNodeIDs_list = []
         #要素を取得する
         for cr in cr_iter:
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                arrContNodeIDs_list.append(self.parse_arr_contents(cr.get_children()))
+                arrContNodeIDs_list.append(self.parse_arr_contents(cr.get_children(), cr_index_list[1:], line))
             # 子要素の中の要素が1つだけ
             else:
                 arrContNodeIDs_list.append([self.get_exp(cr)])
@@ -397,6 +398,7 @@ class ASTtoFlowChart:
                     arrNumNodeID = self.get_exp(cr_index_list[0])
                 else:
                     arrNumNodeID = self.createNode(str(maxNum), 'box3d')
+                    self.expNode_info[f'"{arrNumNodeID}"'] = (str(maxNum), [], [], f'配列の添字には {str(maxNum)} が設定されます', line)
                 # 子要素の中にある要素数を取得する
                 contNum = len(arrContNodeIDs)
                 # 子要素を一つずつ作っていく

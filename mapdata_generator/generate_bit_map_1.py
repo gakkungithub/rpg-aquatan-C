@@ -763,7 +763,9 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 #配列
                 if self.getNodeShape(toNodeID) == 'box3d':
-                    
+                    eni = self.getExpNodeInfo(toNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
+                    # とりあえず添字だけを確認する
                     self.trackAST(crntRoomID, toNodeID)
                 #構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
