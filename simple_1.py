@@ -1827,7 +1827,7 @@ class Player(Character):
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        event.open(itemResult['value'], itemResult['undefined'])
+                        event.open(itemResult['item'], itemResult['undefined'])
                         item_comments = "%".join(event.comments)
                         if item_comments:
                             item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
@@ -2724,13 +2724,12 @@ class ItemWindow(Window):
         for i,item in enumerate(PLAYER.commonItembag.items[-1]):
             self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
         gvarnum = len(PLAYER.commonItembag.items[-1])
+        offset_y = 10 + gvarnum * 25
         for j, item in enumerate(PLAYER.itembag.items[-1]):
-            y = 10 + (gvarnum + j) * 25
-
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
-            icon_y = y
+            icon_y = offset_y
             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
 
             if icon:
@@ -2741,14 +2740,49 @@ class ItemWindow(Window):
                 pass
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, y, f"{item.name:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.WHITE)
 
-            value_color = self.RED if item.undefined else self.WHITE
-            value_offset = self.myfont.get_rect(item.name).width + 30
-            self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
+            # 配列などの値がないvalueは表示しない
+            if item.itemvalue.value is not None:
+                value_color = self.RED if item.undefined else self.WHITE
+                name_offset = self.myfont.get_rect(item.name).width + 30
+                self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
+            
+            offset_y += 25
+            if item.itemvalue.children:
+                self.draw_values(item.itemvalue.children, offset_y, 25)
 
         Window.blit(self, screen)
 
+    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x):
+        text_x = offset_x
+        for valuename, itemvalue in itemvalue_children.items():
+            # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
+            # icon, constLock = self.itemChips.getChip(item.vartype)
+            # icon_x = 10
+            # icon_y = offset_y
+            # text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+
+            # if icon:
+            #     self.surface.blit(icon, (icon_x, icon_y))
+
+            # if constLock:
+            #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.WHITE)
+            name_offset = self.myfont.get_rect(valuename).width + 30
+            if itemvalue.value is not None:
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.WHITE)
+
+            offset_y += 25
+            if itemvalue.children:
+                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25)
+
+            # value_color = self.RED if item.undefined else self.WHITE
+            # value_offset = self.myfont.get_rect(item.name).width + 30
+            # self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
+        return offset_y
 
                                                                                                                                                    
 # 88888888ba  88             88                                    I8,        8        ,8I 88                      88                                 
@@ -2762,65 +2796,65 @@ class ItemWindow(Window):
 #                 aa,    ,88                                                                                                                          
 #                  "Y8bbdP"                                                                                                                           
 
-class BigItemWindow(Window):
-    """ステータスウィンドウ"""
-    FONT_HEIGHT = 16
-    WHITE = Color(255, 255, 255, 255)
-    RED = Color(255, 31, 31, 255)
-    GREEN = Color(31, 255, 31, 255)
-    BLUE = Color(31, 31, 255, 255)
-    CYAN = Color(100, 248, 248, 255)
+# class BigItemWindow(Window):
+#     """ステータスウィンドウ"""
+#     FONT_HEIGHT = 16
+#     WHITE = Color(255, 255, 255, 255)
+#     RED = Color(255, 31, 31, 255)
+#     GREEN = Color(31, 255, 31, 255)
+#     BLUE = Color(31, 31, 255, 255)
+#     CYAN = Color(100, 248, 248, 255)
 
-    mapchip = 456  # アイテムのUI(テスト用)
+#     mapchip = 456  # アイテムのUI(テスト用)
 
-    def __init__(self, rect, player):
-        Window.__init__(self, rect)
-        self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
-        self.myfont = pygame.freetype.Font(
-            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
-        self.color = self.WHITE
-        self.player = player
-        self.image = Map.images[self.mapchip]
-        self.itemChips = ItemChips()
+#     def __init__(self, rect, player):
+#         Window.__init__(self, rect)
+#         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
+#         self.myfont = pygame.freetype.Font(
+#             FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+#         self.color = self.WHITE
+#         self.player = player
+#         self.image = Map.images[self.mapchip]
+#         self.itemChips = ItemChips()
 
-    def draw_string(self, x, y, string, color):
-        """文字列出力"""
-        surf, rect = self.myfont.render(string, color)
-        self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+#     def draw_string(self, x, y, string, color):
+#         """文字列出力"""
+#         surf, rect = self.myfont.render(string, color)
+#         self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
 
-    def draw(self, screen):
-        """メッセージを描画する
-        メッセージウィンドウが表示されていないときは何もしない"""
-        if not self.is_visible:
-            return
-        Window.draw(self)
-        for i,item in enumerate(PLAYER.commonItembag.items[-1]):
-            self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
-        gvarnum = len(PLAYER.commonItembag.items[-1])
-        for j, item in enumerate(PLAYER.itembag.items[-1]):
-            y = 10 + (gvarnum + j) * 25
+#     def draw(self, screen):
+#         """メッセージを描画する
+#         メッセージウィンドウが表示されていないときは何もしない"""
+#         if not self.is_visible:
+#             return
+#         Window.draw(self)
+#         for i,item in enumerate(PLAYER.commonItembag.items[-1]):
+#             self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
+#         gvarnum = len(PLAYER.commonItembag.items[-1])
+#         for j, item in enumerate(PLAYER.itembag.items[-1]):
+#             y = 10 + (gvarnum + j) * 25
 
-            # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype)
-            icon_x = 10
-            icon_y = y
-            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+#             # 型に応じたアイコンを blit（描画）
+#             icon, constLock = self.itemChips.getChip(item.vartype)
+#             icon_x = 10
+#             icon_y = y
+#             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
 
-            if icon:
-                self.surface.blit(icon, (icon_x, icon_y))
+#             if icon:
+#                 self.surface.blit(icon, (icon_x, icon_y))
 
-            if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
-                pass
+#             if constLock:
+#                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+#                 pass
 
-            # アイコンの右に名前と値を描画
-            self.draw_string(text_x, y, f"{item.name:<8}", self.WHITE)
+#             # アイコンの右に名前と値を描画
+#             self.draw_string(text_x, y, f"{item.name:<8}", self.WHITE)
 
-            value_color = self.RED if item.undefined else self.WHITE
-            value_offset = self.myfont.get_rect(item.name).width + 30
-            self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
+#             value_color = self.RED if item.undefined else self.WHITE
+#             value_offset = self.myfont.get_rect(item.name).width + 30
+#             self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
 
-        Window.blit(self, screen)
+#         Window.blit(self, screen)
 
 #                                                                                                                                             
 #  ad88888ba                                               I8,        8        ,8I 88                      88                                 
@@ -3202,11 +3236,11 @@ class Treasure():
         self.linenum = linenum # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
-    def open(self, value, undefined):
+    def open(self, data: dict, undefined):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, value, self.vartype, undefined)
+        item = Item(self.item, data, self.vartype, undefined)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3475,35 +3509,16 @@ class Object:
 # 88   "Y888 `"Ybbd8"' 88      88      88  
 #                                          
 #                                          
-# 
+#
 
 class Item:
-    """アイテム"""
-
-    def __init__(self, name, value, vartype, undefined):
-        self.name = str(name)
-        self.value = value
-        self.vartype = vartype
-        self.undefined = undefined
-
-    def get_value(self):
-        """値を返す"""
-        return self.value
-
-    def set_value(self,val):
-        """値をセット"""
-        if val is not None:
-            self.value = val
-            self.undefined = False
-
-class ItemEdit:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
 
     def __init__(self, name, data, vartype, undefined):
         self.name = str(name)
-        self.value = ItemValue.from_dict(data)
-        self.vartype = vartype
-        self.undefined = undefined
+        self.itemvalue: ItemValue = ItemValue.from_dict(data)
+        self.vartype: str = vartype
+        self.undefined: bool = undefined
 
     def get_value(self):
         """値を返す"""
@@ -3544,7 +3559,7 @@ class ItemValue:
 class ItemBag:
     """アイテム袋(現在のマップによって中身を変える)"""
     def __init__(self):
-        self.items = [[]]
+        self.items: list[list[Item]] = [[]]
 
     def add(self,item):
         """袋にアイテムを追加"""
