@@ -80,8 +80,6 @@ class VarsTracker:
             else:
                 print(f"{indent}{full_name} = {value}")
 
-            print('here1')
-
             if depth == 0:
                 crnt_vars.append(name)
 
@@ -89,8 +87,6 @@ class VarsTracker:
                 var_previous_values[name].update_value(value, address)
             else:
                 var_previous_values[name] = VarPreviousValue(value, address)
-
-            print('here2')
 
             num_children = var.GetNumChildren()
             
@@ -154,9 +150,7 @@ class VarsTracker:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
             elif num_children > 0:
-                print('here3')
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                print('here4')
                 self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
     
         if depth == 0:
@@ -197,14 +191,14 @@ class VarsTracker:
             temp_previous_values_dict = temp_previous_values_dict[varname].children
 
     # "item": {"value": aaa, "children": {}}
-    def getValueByVar(self, varname: str, back=0):
-        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
+    def getValueByVar(self, varname: str, undefined=False, back=0):
+        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname], undefined)
         
     # {"value": bbb, "children": {0: {...}}...}
-    def getValueByVarDict(self, previous_value: VarPreviousValue):
-        value_var_declared_dict = {"value": previous_value.value, "children": {}}
+    def getValueByVarDict(self, previous_value: VarPreviousValue, undefined):
+        value_var_declared_dict = {"value": previous_value.value, "undefined": undefined, "children": {}}
         for var_part, var_previous_value in previous_value.children.items():
-            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
+            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value, undefined)
         return value_var_declared_dict
     
     def setVarsDeclared(self, var):
@@ -278,7 +272,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.vars_tracker.trackStart(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self, var_check = False):
+        def step_conditionally(self, var_check = True):
             # プロセスの状態を更新
             if self.isEnd:
                 while True:
@@ -421,7 +415,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(varsDeclLines):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": False, "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, getLine)
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
 
@@ -437,7 +431,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
             common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
             # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
+            print(common)
             values_changed = list(set(common) - set(varsDeclLines))
+            print(values_changed)
             # その後、varsChangedをキーとしてvars_changedの変更値を取得する
 
             if len(values_changed) != 0:
@@ -490,10 +486,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         value_changed_dict = []
                         for value_changed in values_changed:
                             for value_changed_tuple in self.vars_tracker.vars_changed[values_changed]:
-                                value_path = list(value_changed, *value_changed_tuple)
+                                value_path = list(*value_changed_tuple)
                                 isCorrect, value = self.vars_tracker.getValuePartly(value_path)
                                 print(isCorrect)
-                                value_changed_dict.append({"path": value_path, "value": value})
+                                value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
                         self.event_sender({"message": "新しいアイテムの値を設定しました!!", "values": value_changed_dict}, getLine)
                         break
                     else:
@@ -533,10 +529,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": True, "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item, undefined=True), "status": "ok"}, getLine)
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
-                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "undefined": True, "status": "ok"}, False)
+                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item, undefined=True), "status": "ok"}, False)
                             self.vars_tracker.setVarsDeclared(item)
                         else:
                             errorCnt += 1

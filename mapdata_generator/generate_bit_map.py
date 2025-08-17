@@ -732,8 +732,6 @@ class GenBitMap:
                     nodeIDs.append(toNodeID)
             # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
             if nodeIDs:
-                #whileの領域に入る
-                self.createPath(crntRoomID, nodeID)
                 # true
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
                 # false

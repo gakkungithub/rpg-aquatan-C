@@ -658,6 +658,18 @@ def main():
                             MSGWND.set("ERROR...")
                         cmd = "\0"
                         atxt = "\0"
+                    elif cmd == "itemsetall":
+                        sender.send_event({"itemsetall": True})
+                        itemsetAllResult = sender.receive_json()
+                        if itemsetAllResult is not None:
+                            if itemsetAllResult['status'] == "ok":
+                                for itemvalues in itemsetAllResult["values"]:
+                                    item = PLAYER.commonItembag.find(itemvalues["item"])
+                                    if item is None:
+                                        item = PLAYER.itembag.find(itemvalues["item"])
+                                    if item:
+                                        item.set_value(itemvalues)
+                            MSGWND.set(itemsetAllResult['message'])
                     elif cmd == "goto":
                         ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
                         parts = atxt.split(",", 1)
@@ -1827,7 +1839,7 @@ class Player(Character):
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        event.open(itemResult['item'], itemResult['undefined'])
+                        event.open(itemResult['item'])
                         item_comments = "%".join(event.comments)
                         if item_comments:
                             item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
@@ -2744,17 +2756,17 @@ class ItemWindow(Window):
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
-                value_color = self.RED if item.undefined else self.WHITE
+                value_color = self.RED if item.itemvalue.undefined else self.WHITE
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
             offset_y += 25
             if item.itemvalue.children:
-                self.draw_values(item.itemvalue.children, offset_y, 25)
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25)
 
         Window.blit(self, screen)
 
-    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x):
+    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int):
         text_x = offset_x
         for valuename, itemvalue in itemvalue_children.items():
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
@@ -2770,10 +2782,10 @@ class ItemWindow(Window):
             #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.RED if itemvalue.undefined else self.WHITE)
             name_offset = self.myfont.get_rect(valuename).width + 30
             if itemvalue.value is not None:
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.WHITE)
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.RED if itemvalue.undefined else self.WHITE)
 
             offset_y += 25
             if itemvalue.children:
@@ -3236,11 +3248,11 @@ class Treasure():
         self.linenum = linenum # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
-    def open(self, data: dict, undefined):
+    def open(self, data: dict):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, data, self.vartype, undefined)
+        item = Item(self.item, data, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3514,34 +3526,39 @@ class Object:
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
 
-    def __init__(self, name, data, vartype, undefined):
+    def __init__(self, name, data, vartype):
         self.name = str(name)
         self.itemvalue: ItemValue = ItemValue.from_dict(data)
         self.vartype: str = vartype
-        self.undefined: bool = undefined
 
     def get_value(self):
         """値を返す"""
         return self.value
 
-    def set_value(self,val):
+    # ここは修正が必要
+    def set_value(self, vals: dict):
         """値をセット"""
-        if val is not None:
-            self.value = val
-            self.undefined = False
+        path: list[str] = vals["path"]
+        temp_itemvalue = self.itemvalue
+        while len(path) != 0:
+            temp_itemvalue = temp_itemvalue.children[path.pop(0)]
+        temp_itemvalue.value = vals["value"]
+        self.undefined = False
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:
-    def __init__(self, value: str | None, children: dict[str | int, "ItemValue"]):
+    def __init__(self, value: str | None, undefined: bool, children: dict[str | int, "ItemValue"]):
         self.value = value
+        self.undefined = undefined
         self.children = children
 
     @classmethod
     def from_dict(cls, data: dict) -> "ItemValue":
         value: str | None = data["value"]
+        undefined: bool = data["undefined"]
         children_dict: dict[str | int, dict] = data["children"]
         children = {index: cls.from_dict(v) for index, v in children_dict.items()}
-        return cls(value, children)
+        return cls(value, undefined, children)
 
 #                                                                             
 # 88                                      88888888ba                          

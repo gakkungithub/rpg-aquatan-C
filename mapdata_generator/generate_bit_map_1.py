@@ -718,8 +718,6 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'pentagon':
             #条件文以前の処理を同部屋に含めてはいけない
             self.createRoom(nodeID)
-            #while, forの領域に入る
-            self.createPath(crntRoomID, nodeID)
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
             nodeIDs = []
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
