@@ -60,9 +60,11 @@ class VarsTracker:
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
             address = var.GetLoadAddress()
+            print(name, var.GetSummary())
 
             var_previous_value = var_previous_values[name].value if name in var_previous_values else None
 
+            print(var, address)
             if value != var_previous_value:
                 print(f"{indent}{full_name} = {value}    ← changed")
                 if len(vars_path) == 0:

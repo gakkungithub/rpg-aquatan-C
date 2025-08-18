@@ -180,7 +180,14 @@ def main():
                                     # cプログラムを整形する
                                     subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
-                                    subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+                                    subprocess.run([
+                                        "clang",
+                                        "-g",  # デバッグ情報
+                                        "-ftrivial-auto-var-init=pattern",  # 未初期化変数をパターンで埋める
+                                        "-O0",
+                                        "-o", programpath,
+                                        *cfiles  # ファイルを展開して渡す
+                                    ])
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
                                     SBWND.start_checking_lldb()
                             mouse_down = False
@@ -228,7 +235,14 @@ def main():
         #     cfcode.append("-u")
         subprocess.run(cfcode, cwd="mapdata_generator")
 
-        subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+        subprocess.run([
+            "clang",
+            "-g",  # デバッグ情報
+            "-ftrivial-auto-var-init=pattern",  # 未初期化変数をパターンで埋める
+            "-O0",
+            "-o", programpath,
+            *cfiles  # ファイルを展開して渡す
+        ])
 
         # サーバを立てる
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
@@ -3535,7 +3549,6 @@ class Item:
         """値を返す"""
         return self.value
 
-    # ここは修正が必要
     def set_value(self, vals: dict):
         """値をセット"""
         path: list[str] = vals["path"]
@@ -3543,7 +3556,7 @@ class Item:
         while len(path) != 0:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
-        self.undefined = False
+        temp_itemvalue.undefined = False
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:

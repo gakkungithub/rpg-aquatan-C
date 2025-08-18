@@ -431,9 +431,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
             common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
             # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
-            print(common)
             values_changed = list(set(common) - set(varsDeclLines))
-            print(values_changed)
             # その後、varsChangedをキーとしてvars_changedの変更値を取得する
 
             if len(values_changed) != 0:
@@ -485,12 +483,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if (event.get('itemsetall', False)):
                         value_changed_dict = []
                         for value_changed in values_changed:
-                            for value_changed_tuple in self.vars_tracker.vars_changed[values_changed]:
-                                value_path = list(*value_changed_tuple)
-                                isCorrect, value = self.vars_tracker.getValuePartly(value_path)
+                            for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
+                                value_path = [*value_changed_tuple]
+                                isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
                                 print(isCorrect)
                                 value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
-                        self.event_sender({"message": "新しいアイテムの値を設定しました!!", "values": value_changed_dict}, getLine)
+                        self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict}, getLine)
                         break
                     else:
                         errorCnt += 1
