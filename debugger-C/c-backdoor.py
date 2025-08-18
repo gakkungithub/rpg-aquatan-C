@@ -191,14 +191,14 @@ class VarsTracker:
             temp_previous_values_dict = temp_previous_values_dict[varname].children
 
     # "item": {"value": aaa, "children": {}}
-    def getValueByVar(self, varname: str, undefined=False, back=0):
-        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname], undefined)
+    def getValueByVar(self, varname: str, back=0):
+        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
         
     # {"value": bbb, "children": {0: {...}}...}
-    def getValueByVarDict(self, previous_value: VarPreviousValue, undefined):
-        value_var_declared_dict = {"value": previous_value.value, "undefined": undefined, "children": {}}
+    def getValueByVarDict(self, previous_value: VarPreviousValue):
+        value_var_declared_dict = {"value": previous_value.value, "children": {}}
         for var_part, var_previous_value in previous_value.children.items():
-            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value, undefined)
+            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
         return value_var_declared_dict
     
     def setVarsDeclared(self, var):
@@ -254,6 +254,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.isEnd = False
             self.process = process
             self.thread = thread
+            self.line_loop = []
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
@@ -384,7 +385,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if len(funcWarps) != 0:
                             for funcWarp in funcWarps:
                                 if funcWarp["name"] == self.func_crnt_name and funcWarp["line"] == self.next_line_number:
-                                    self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "item": self.vars_tracker.getValueByVar(item, -1), "undefined": True, "status": "ok", "skip": True})
+                                    self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "item": self.vars_tracker.getValueByVar(item, -1), "undefined": False, "status": "ok", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         back_line_number = self.line_number
@@ -527,10 +528,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item, undefined=True), "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, getLine)
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
-                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item, undefined=True), "status": "ok"}, False)
+                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
                             self.vars_tracker.setVarsDeclared(item)
                         else:
                             errorCnt += 1
@@ -637,7 +638,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.vars_checker()
                         break
 
-            line_loop = []
             skipStart = None
             skipEnd = None
 
@@ -661,7 +661,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse, forFalse', 'doWhileFalse']:
-                                    line_loop.pop(-1)
+                                    self.line_loop.pop(-1)
                                     skipStart = None
                                     skipEnd = None
                             elif type == 'ifEnd':
@@ -731,7 +731,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     return CONTINUE
                             elif type == 'break':
                                 self.event_sender({"message": "", "status": "ok"})
-                                line_loop.pop(-1)
+                                self.line_loop.pop(-1)
                                 skipEnd = None
                             elif type == 'return':
                                 # return内の計算式の確認方法は後で考える
@@ -746,7 +746,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         elif fromTo[:2] == [None, self.next_line_number]:
                             if type == 'doWhileInit':
                                 # 最初なので確定でline_loopに追加する
-                                line_loop.append(self.next_line_number)
+                                self.line_loop.append(self.next_line_number)
                                 self.event_sender({"message": "", "status": "ok"})
                                 self.vars_tracker.trackStart(self.frame)
                                 self.vars_checker()
@@ -758,7 +758,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             return CONTINUE            
                     elif len(fromTo) == 1 and fromTo == [self.line_number]:
                         if type == 'whileIn':
-                            if len(line_loop) and line_loop[-1] == self.line_number:
+                            if len(self.line_loop) and self.line_loop[-1] == self.line_number:
                                 skipStart = self.line_number
                                 skipEnd = self.line_data[self.func_name][1][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
@@ -775,9 +775,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     self.event_sender({"message": "", "status": "ok"})
                             else:
                                 self.event_sender({"message": "", "status": "ok"})
-                                line_loop.append(self.line_number)
+                                self.line_loop.append(self.line_number)
                         elif type == 'doWhileIn':
-                            if len(line_loop) and line_loop[-1] == self.next_line_number:
+                            if len(self.line_loop) and self.line_loop[-1] == self.next_line_number:
                                 # ここでスキップするかどうを確認する
                                 skipStart = self.line_data[self.func_name][1][str(self.line_number)]
                                 skipEnd = self.line_number
@@ -793,7 +793,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 self.event_sender({"message": "", "status": "ok"})
                         elif type == 'forIn':
                             if str(self.line_number) not in self.varsDeclLines_list:
-                                if len(line_loop) and line_loop[-1] == self.line_number:
+                                if len(self.line_loop) and self.line_loop[-1] == self.line_number:
                                     skipStart = self.line_number
                                     skipEnd = self.line_data[self.func_name][1][str(self.line_number)]
                                     if skipStart <= self.next_line_number <= skipEnd:
@@ -810,7 +810,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         self.event_sender({"message": "", "status": "ok"})
                                 else:
                                     self.event_sender({"message": "", "status": "ok"})
-                                    line_loop.append(self.line_number)
+                                    self.line_loop.append(self.line_number)
                             else:
                                 self.event_sender({"message": "ある変数の初期化がされていません!!", "status": "ng"})
                         else:
@@ -883,6 +883,7 @@ debugger = lldb.SBDebugger.Create()
 debugger.SetAsync(False)
 
 target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
+print(target.GetAddressByteSize() * 8)
 if not target:
     print("failed in build of target")
     exit(1)

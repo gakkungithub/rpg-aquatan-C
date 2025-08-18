@@ -180,14 +180,7 @@ def main():
                                     # cプログラムを整形する
                                     subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
-                                    subprocess.run([
-                                        "clang",
-                                        "-g",  # デバッグ情報
-                                        "-ftrivial-auto-var-init=pattern",  # 未初期化変数をパターンで埋める
-                                        "-O0",
-                                        "-o", programpath,
-                                        *cfiles  # ファイルを展開して渡す
-                                    ])
+                                    subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
                                     SBWND.start_checking_lldb()
                             mouse_down = False
@@ -235,14 +228,7 @@ def main():
         #     cfcode.append("-u")
         subprocess.run(cfcode, cwd="mapdata_generator")
 
-        subprocess.run([
-            "clang",
-            "-g",  # デバッグ情報
-            "-ftrivial-auto-var-init=pattern",  # 未初期化変数をパターンで埋める
-            "-O0",
-            "-o", programpath,
-            *cfiles  # ファイルを展開して渡す
-        ])
+        subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
         # サーバを立てる
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
@@ -1859,6 +1845,8 @@ class Player(Character):
                             item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
                         else:
                             item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
+                        if itemResult.get("undefined", False):
+                            item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
                         mymap.remove_event(event)
                         if itemResult.get('skip', False):
                             item_get_message += f"%{itemResult['message']}"
@@ -2062,8 +2050,11 @@ class Player(Character):
                 move = self.moveHistory.pop()
                 self.itembag.items.pop()
                 for name, value in returnResult["items"].items():
-                    if (item := self.itembag.find(name)) is not None:
-                        item.set_value(value)
+                    item = PLAYER.commonItembag.find(name)
+                    if item is None:
+                        item = PLAYER.itembag.find(name)
+                    if item is not None:
+                        item.update_value(value)
                 if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
                     # ここは辞書を使うかどうかを考える
                     checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
@@ -2495,24 +2486,23 @@ class MessageWindow(Window):
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
-                        if skipResult.get('type', None) == 'doWhile':
-                            move = PLAYER.move5History.pop()
-                            # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
-                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                            PLAYER.commonItembag.items[-1] = move['cItems']
-                            PLAYER.itembag.items[-1] = move['items']
-                            fieldmap.add_chara(PLAYER)  # マップに再登録
+                        # if skipResult.get('type', None) == 'doWhile':
+                        #     move = PLAYER.move5History.pop()
+                        #     # 暗転
+                        #     DIMWND.setdf(200)
+                        #     DIMWND.show()
+                        #     fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                        #     PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                        #     PLAYER.commonItembag.items[-1] = move['cItems']
+                        #     PLAYER.itembag.items[-1] = move['items']
+                        #     fieldmap.add_chara(PLAYER)  # マップに再登録
                         self.set(skipResult['message'])
-                        for itemName in skipResult.get('items', {}):
-                            item = PLAYER.commonItembag.find(itemName)
+                        for name, value in skipResult["items"].items():
+                            item = PLAYER.commonItembag.find(name)
                             if item is None:
-                                item = PLAYER.itembag.find(itemName)
+                                item = PLAYER.itembag.find(name)
                             if item is not None:
-                                if item.get_value() != skipResult['items'][itemName]:
-                                    item.set_value(skipResult['items'][itemName])
+                                item.update_value(value)
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
@@ -2523,8 +2513,11 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         for name, value in skipResult["items"].items():
-                            if (item := PLAYER.itembag.find(name)) is not None:
-                                item.set_value(value)
+                            item = PLAYER.commonItembag.find(name)
+                            if item is None:
+                                item = PLAYER.itembag.find(name)
+                            if item is not None:
+                                item.update_value(value)
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
@@ -2558,8 +2551,11 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         for name, value in skipResult["items"].items():
-                            if (item := PLAYER.itembag.find(name)) is not None:
-                                item.set_value(value)
+                            item = PLAYER.commonItembag.find(name)
+                            if item is None:
+                                item = PLAYER.itembag.find(name)
+                            if item is not None:
+                                item.update_value(value)
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
@@ -2770,7 +2766,8 @@ class ItemWindow(Window):
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
-                value_color = self.RED if item.itemvalue.undefined else self.WHITE
+                # value_color = self.RED if item.itemvalue.undefined else self.WHITE
+                value_color = self.WHITE
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
@@ -2796,10 +2793,12 @@ class ItemWindow(Window):
             #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.RED if itemvalue.undefined else self.WHITE)
+            # self.draw_string(text_x, offset_y, f"{valuename:<8}", self.RED if itemvalue.undefined else self.WHITE)
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.WHITE)
             name_offset = self.myfont.get_rect(valuename).width + 30
             if itemvalue.value is not None:
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.RED if itemvalue.undefined else self.WHITE)
+                # self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.RED if itemvalue.undefined else self.WHITE)
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.WHITE)
 
             offset_y += 25
             if itemvalue.children:
@@ -3547,7 +3546,7 @@ class Item:
 
     def get_value(self):
         """値を返す"""
-        return self.value
+        return self.itemvalue
 
     def set_value(self, vals: dict):
         """値をセット"""
@@ -3556,22 +3555,22 @@ class Item:
         while len(path) != 0:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
-        temp_itemvalue.undefined = False
+
+    def update_value(self, data: dict):
+        self.itemvalue = ItemValue.from_dict(data)
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:
-    def __init__(self, value: str | None, undefined: bool, children: dict[str | int, "ItemValue"]):
+    def __init__(self, value: str | None, children: dict[str | int, "ItemValue"]):
         self.value = value
-        self.undefined = undefined
         self.children = children
 
     @classmethod
     def from_dict(cls, data: dict) -> "ItemValue":
         value: str | None = data["value"]
-        undefined: bool = data["undefined"]
         children_dict: dict[str | int, dict] = data["children"]
         children = {index: cls.from_dict(v) for index, v in children_dict.items()}
-        return cls(value, undefined, children)
+        return cls(value, children)
 
 #                                                                             
 # 88                                      88888888ba                          
