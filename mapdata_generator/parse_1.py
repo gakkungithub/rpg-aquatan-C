@@ -170,12 +170,13 @@ class ASTtoFlowChart:
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
         cursor_stmt = list(cursor.get_children())
-        clen = len(cursor_stmt) - 1
-        for i, cr in enumerate(cursor_stmt):
-            # if self.condition_move.get(f'"{nodeID}"', None) and self.condition_move[f'"{nodeID}"'][1][-1] is None:
-            #     self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line  
+        clen = len(cursor_stmt)
+        
+        for i, cr in enumerate(cursor_stmt): 
             if i < clen:
-                self.nextLines.append(cursor_stmt[i+1].location.line)
+                print(i, clen)
+                self.nextLines.append(cursor.extent.end.line if i == clen - 1 else cursor_stmt[i+1].location.line)
+                print(self.nextLines)
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
             if i < clen:

@@ -78,7 +78,8 @@ class VarsTracker:
                     else:
                         self.vars_changed[vars_path[0]] = [(*vars_path[1:], name)]
             else:
-                print(f"{indent}{full_name} = {value}")
+                # print(f"{indent}{full_name} = {value}")
+                pass
 
             if depth == 0:
                 crnt_vars.append(name)
@@ -156,6 +157,8 @@ class VarsTracker:
         if depth == 0:
             if len(self.vars_declared) != 0:
                 self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
+                if len(self.vars_removed) != 0:
+                    self.vars_declared[-1] = crnt_vars
 
     def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
         indent = "    " * depth
@@ -355,7 +358,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if self.isEnd:
                 return
             
-            varsDeclLines = list(set(self.varsDeclLines_list.pop(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
+            # varsDeclLines = list(set(self.varsDeclLines_list.pop(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
+            varsDeclLines = list(set(self.varsDeclLines_list.get(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
             getLine = (first_event is None)
 
             if len(varsDeclLines) != 0:
@@ -434,6 +438,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
             values_changed = list(set(common) - set(varsDeclLines))
             # その後、varsChangedをキーとしてvars_changedの変更値を取得する
+            print(values_changed)
 
             if len(values_changed) != 0:
                 vars_event = []
@@ -503,7 +508,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if len(target_lines) != 0 and self.line_number not in self.line_data[self.func_name][0]:
                 # 変数が合致していればstepinを実行して次に進む
                 for line in target_lines:
-                    skipped_varDecls = self.varsDeclLines_list.pop(line)
+                    # skipped_varDecls = self.varsDeclLines_list.pop(line)
+                    skipped_varDecls = self.varsDeclLines_list[line]
                     vars_event = []
                     errorCnt = 0
                     if first_event:
@@ -792,27 +798,26 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             else:
                                 self.event_sender({"message": "", "status": "ok"})
                         elif type == 'forIn':
-                            if str(self.line_number) not in self.varsDeclLines_list:
-                                if len(self.line_loop) and self.line_loop[-1] == self.line_number:
-                                    skipStart = self.line_number
-                                    skipEnd = self.line_data[self.func_name][1][str(self.line_number)]
-                                    if skipStart <= self.next_line_number <= skipEnd:
-                                        # ここでスキップするかどうかを確認する
-                                        self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
-                                        event = self.event_reciever()
-                                        if event.get('skip', False):
-                                            while skipStart <= self.next_line_number <= skipEnd:
-                                                self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll()})
-                                        else:
-                                            self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                            print(self.line_loop)
+                            if len(self.line_loop) and self.line_loop[-1] == self.line_number:
+                                skipStart = self.line_number
+                                skipEnd = self.line_data[self.func_name][1][str(self.line_number)]
+                                if skipStart <= self.next_line_number <= skipEnd:
+                                    # ここでスキップするかどうかを確認する
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                    event = self.event_reciever()
+                                    if event.get('skip', False):
+                                        while skipStart <= self.next_line_number <= skipEnd:
+                                            self.step_conditionally()
+                                        print(self.vars_tracker.vars_removed)
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll()})
                                     else:
-                                        self.event_sender({"message": "", "status": "ok"})
+                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                 else:
                                     self.event_sender({"message": "", "status": "ok"})
-                                    self.line_loop.append(self.line_number)
                             else:
-                                self.event_sender({"message": "ある変数の初期化がされていません!!", "status": "ng"})
+                                self.event_sender({"message": "", "status": "ok"})
+                                self.line_loop.append(self.line_number)
                         else:
                             self.event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})
                         return CONTINUE
