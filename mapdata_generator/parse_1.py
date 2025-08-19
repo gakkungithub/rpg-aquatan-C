@@ -23,6 +23,8 @@ def parseIndex(c_files):
                 f'-isysroot', sdk_path,      # SDKルート
                 '-std=c11',                  # C11準拠で解析
                 '-ferror-limit=0',           # すべてのエラーを表示
+                '-fno-builtin',
+                '-D_FORTIFY_SOURCE=0',
                 # '-Wall'                      # 警告を出す（必要なら）
                 # '-Wno-unused-variable'       # unused警告は消去
             ],
@@ -171,12 +173,9 @@ class ASTtoFlowChart:
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
         cursor_stmt = list(cursor.get_children())
         clen = len(cursor_stmt)
-        
         for i, cr in enumerate(cursor_stmt): 
             if i < clen:
-                print(i, clen)
                 self.nextLines.append(cursor.extent.end.line if i == clen - 1 else cursor_stmt[i+1].location.line)
-                print(self.nextLines)
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
             if i < clen:
@@ -588,6 +587,7 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
+            print(exps[0].kind)
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([front, operator_spell, back])
@@ -636,7 +636,9 @@ class ASTtoFlowChart:
         func_cursor = self.unwrap_unexposed(children[0])
         self.check_cursor_error(func_cursor)
 
-        ref_spell = next(func_cursor.get_tokens()).spelling
+        # ref_spell = next(func_cursor.get_tokens()).spelling
+        ref_spell = func_cursor.spelling
+        print(ref_spell)
         self.func_info[self.scanning_func]["refs"].add(ref_spell)
 
         arg_exp_terms = []

@@ -226,7 +226,11 @@ def main():
         cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
         # if args.universal:
         #     cfcode.append("-u")
-        subprocess.run(cfcode, cwd="mapdata_generator")
+        try:
+            subprocess.run(cfcode, cwd="mapdata_generator", check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"subprocess failed with exit code {e.returncode}")
+            sys.exit(1)   # 呼び出し元プログラムを終了
 
         subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
@@ -3635,7 +3639,8 @@ class ItemBag:
 
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
-    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", "11_string_operations", "15_pointer"]
+    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
+                  "11_string_operations", "12_struct", "15_pointer"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
