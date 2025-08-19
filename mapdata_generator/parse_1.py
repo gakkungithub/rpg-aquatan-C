@@ -337,8 +337,8 @@ class ASTtoFlowChart:
                     indexNodeID = self.get_exp(cr_index_list[0], 'box3d')
                 # 添字のカーソルがなければ、arrContNodeIDsの数で添字を決めてノードを作る
                 else:
-                    indexNodeID = self.createNode(len(arrContNodeIDs), 'box3d')
-                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(arrContNodeIDs)), [], [], f'配列の添字には {str(len(arrContNodeIDs))} が設定されます', cursor.location.line)
+                    indexNodeID = self.createNode(str(len(arrContNodeIDs)), 'box3d')
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(arrContNodeIDs)), [], [], [f'配列の添字には {str(len(arrContNodeIDs))} が設定されます'], cursor.location.line)
                 self.createEdge(varNodeID, indexNodeID)
                 for arrContNodeID in arrContNodeIDs:
                     self.createEdge(indexNodeID, arrContNodeID)

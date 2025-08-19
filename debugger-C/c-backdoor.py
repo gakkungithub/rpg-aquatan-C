@@ -499,6 +499,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # 変数が初期化されない時、スキップされるので、それも読み取る
             target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
 
+            print(target_lines)
             if len(target_lines) != 0 and self.line_number not in self.line_data[self.func_name][0]:
                 # 変数が合致していればstepinを実行して次に進む
                 for line in target_lines:
@@ -506,12 +507,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     skipped_varDecls = self.varsDeclLines_list[line]
                     vars_event = []
                     errorCnt = 0
-                    if first_event:
-                        event = first_event
-                        first_event = None
-                    else:
-                        if (event := self.event_reciever()) is None:
-                            return
+                    if (event := self.event_reciever()) is None:
+                        return
                     while True:
                         if (item := event.get('item', None)) is not None:
                             if not item in skipped_varDecls:
