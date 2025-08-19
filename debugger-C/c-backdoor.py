@@ -158,7 +158,8 @@ class VarsTracker:
             if len(self.vars_declared) != 0:
                 self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
                 if len(self.vars_removed) != 0:
-                    self.vars_declared[-1] = crnt_vars
+                    self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
+                    print(self.vars_declared)
 
     def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
         indent = "    " * depth
@@ -354,24 +355,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 print("[STDERR]")
                 print(stderr_output)
 
-        def vars_checker(self, first_event=None):
+        def vars_checker(self, isForFalse=False):
             if self.isEnd:
                 return
             
             # varsDeclLines = list(set(self.varsDeclLines_list.pop(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
-            varsDeclLines = list(set(self.varsDeclLines_list.get(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
-            getLine = (first_event is None)
+            # これだとスコープ外の変数を拾ってしまうことがある
+            # for文の条件文内の宣言だとfalseの時にself.varsDeclLines_list.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
+            varsDeclLines = [] if isForFalse else list(set(self.varsDeclLines_list.get(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1])) 
 
-            if len(varsDeclLines) != 0:
+            if len(varsDeclLines) != 0 :
                 # 変数が合致していればstepinを実行して次に進む
                 vars_event: list[str] = []
-                errorCnt = 0 
-                if first_event:
-                    event = first_event
-                    first_event = None
-                else:
-                    if (event := self.event_reciever()) is None:
-                        return
+                errorCnt = 0
+                if (event := self.event_reciever()) is None:
+                    return
                 while True:
                     if (item := event.get('item', None)) is not None:
                         if not item in varsDeclLines:
@@ -420,7 +418,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(varsDeclLines):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
 
@@ -443,12 +441,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if len(values_changed) != 0:
                 vars_event = []
                 errorCnt = 0
-                if first_event:
-                    event = first_event
-                    first_event = None
-                else:
-                    if (event := self.event_reciever()) is None:
-                        return
+                if (event := self.event_reciever()) is None:
+                    return
                 while True:
                     # if (itemset := event.get('itemset', None)) is not None:
                     #     item, itemValue = itemset
@@ -494,7 +488,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
                                 print(isCorrect)
                                 value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
-                        self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict}, getLine)
+                        self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
                         break
                     else:
                         errorCnt += 1
@@ -534,7 +528,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 print("you selected correct vars")
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, getLine)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
                                 self.vars_tracker.setVarsDeclared(item)
                                 break
                             self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
@@ -641,7 +635,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if not crntFromTo:
                         self.event_sender({"message": "", "status": "ok"})
                         self.vars_tracker.trackStart(self.frame)
-                        self.vars_checker()
+                        self.vars_checker(condition_type == 'forFalse')
+                        print('here')
                         break
 
             skipStart = None
@@ -666,10 +661,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 # 同じメソッドでいけるかを確認する
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
-                                if type in ['whileFalse, forFalse', 'doWhileFalse']:
+                                if type in ['whileFalse', 'forFalse', 'doWhileFalse']:
                                     self.line_loop.pop(-1)
                                     skipStart = None
                                     skipEnd = None
+                                    print(self.line_number, self.next_line_number)
                             elif type == 'ifEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'switchCase':

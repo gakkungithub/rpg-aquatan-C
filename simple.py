@@ -2518,6 +2518,13 @@ class MessageWindow(Window):
                                 item = PLAYER.itembag.find(name)
                             if item is not None:
                                 item.update_value(value)
+                        # ここで取り除かれた変数のアイテムを復活させる
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                        PLAYER.set_pos(PLAYER.x, PLAYER.y, DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
