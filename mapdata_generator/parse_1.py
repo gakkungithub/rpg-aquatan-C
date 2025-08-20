@@ -330,7 +330,7 @@ class ASTtoFlowChart:
 
             # 初期化する場合 (一番上の添字ノードはこのメソッドで作りくっつける)
             if cr_init is not None:
-                arrContNodeIDs = self.parse_arr_contents(cr_init.get_children(), cr_index_list[1:], cursor.location.line)
+                arrContNodeIDs = self.parse_arr_contents(list(cr_init.get_children()), cr_index_list[1:], cursor.location.line)
                 # 添字のカーソルがあれば、最初の添字カーソルの計算式ノードを作る
                 if len(cr_index_list):
                     indexNodeID = self.get_exp(cr_index_list[0], 'box3d')
@@ -349,25 +349,33 @@ class ASTtoFlowChart:
                     self.createEdge(nodeID, indexNodeID)
                     nodeID = indexNodeID
 
-        #一つの変数/構造体系
+        # 一つの変数/構造体系
         else:
             nodeID = None
             for cr in cursor.get_children():
                 self.check_cursor_error(cr)
-                #構造体系
+                # 構造体系の初期化 (まだ、指定初期化子は考えない)
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                    for member_cursor in cr.get_children():
-                        self.check_cursor_error(member_cursor)
-                        self.createEdge(nodeID, self.get_exp(member_cursor))
-                #構造体の宣言でノードを作る
+                    members = list(f.spelling for f in cursor.type.get_fields())
+                    member_crs = list(cr.get_children())
+                    memberNum = len(member_crs)
+                    for i, member in enumerate(members):
+                        if i < memberNum:
+                            self.check_cursor_error(member_crs[i])
+                            self.createEdge(nodeID, self.get_exp(member_crs[i], label=member))
+                        else:
+                            memberNodeID = self.createNode(member, 'square')
+                            self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], [], cursor.location.line)
+                            self.createEdge(nodeID, memberNodeID)
+                # 構造体の宣言でノードを作る
                 elif cr.kind == ci.CursorKind.TYPE_REF:
                     nodeID = self.createNode("", 'tab')
                     self.createEdge(varNodeID, nodeID)
-                #スカラー変数
+                # スカラー変数
                 else:
                     nodeID = self.get_exp(cr)
                     self.createEdge(varNodeID, nodeID)
-            #スカラー変数の初期化値が無い場合
+            # スカラー変数の初期化値が無い場合
             if nodeID is None:
                 nodeID = self.createNode("", 'square')
                 self.expNode_info[f'"{nodeID}"'] = ("?", [], [], [], cursor.location.line)
@@ -377,15 +385,21 @@ class ASTtoFlowChart:
 
     #配列(多次元も含む)の要素を取得する
     def parse_arr_contents(self, cr_iter, cr_index_list, line):
+        not_init_list_expr = True
         arrContNodeIDs_list = []
         #要素を取得する
-        for cr in cr_iter:
+        for i, cr in enumerate(cr_iter):
+            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                not_init_list_expr = False
+                break
+
+        for i, cr in enumerate(cr_iter):
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                arrContNodeIDs_list.append(self.parse_arr_contents(cr.get_children(), cr_index_list[1:], line))
+                arrContNodeIDs_list.append(self.parse_arr_contents(list(cr.get_children()), cr_index_list[1:], line))
             # 子要素の中の要素が1つだけ
             else:
-                arrContNodeIDs_list.append([self.get_exp(cr)])
+                arrContNodeIDs_list.append([self.get_exp(cr, label=str(i) if not_init_list_expr else "1")])
         
         # 配列の子要素が全て1なら、その1つの要素を抽出する
         if (maxNum := len(max(arrContNodeIDs_list, key=len))) == 1:
@@ -395,10 +409,10 @@ class ASTtoFlowChart:
             for arrContNodeIDs in arrContNodeIDs_list:
                 # 要素数が最大のものを配列の添字にする
                 if len(cr_index_list):
-                    arrNumNodeID = self.get_exp(cr_index_list[0])
+                    arrNumNodeID = self.get_exp(cr_index_list[0], 'box3d')
                 else:
                     arrNumNodeID = self.createNode(str(maxNum), 'box3d')
-                    self.expNode_info[f'"{arrNumNodeID}"'] = (str(maxNum), [], [], f'配列の添字には {str(maxNum)} が設定されます', line)
+                    self.expNode_info[f'"{arrNumNodeID}"'] = (str(maxNum), [], [], [f'配列の添字には {str(maxNum)} が設定されます'], line)
                 # 子要素の中にある要素数を取得する
                 contNum = len(arrContNodeIDs)
                 # 子要素を一つずつ作っていく
@@ -408,7 +422,9 @@ class ASTtoFlowChart:
                         self.createEdge(arrNumNodeID, arrContNodeIDs[n])
                     # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
-                        self.createEdge(arrNumNodeID, self.createNode('no value', 'square'))
+                        arrContNodeID = self.createNode(str(n), 'square')
+                        self.expNode_info[f'"{arrContNodeID}"'] = (str(maxNum), [], [], ['ランダムな値が設定されます'], line)
+                        self.createEdge(arrNumNodeID, arrContNodeID)
                 arrNumNodeIDs.append(arrNumNodeID)
             return arrNumNodeIDs
         
@@ -587,7 +603,6 @@ class ASTtoFlowChart:
                 if first_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            print(exps[0].kind)
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([front, operator_spell, back])
@@ -638,7 +653,6 @@ class ASTtoFlowChart:
 
         # ref_spell = next(func_cursor.get_tokens()).spelling
         ref_spell = func_cursor.spelling
-        print(ref_spell)
         self.func_info[self.scanning_func]["refs"].add(ref_spell)
 
         arg_exp_terms = []

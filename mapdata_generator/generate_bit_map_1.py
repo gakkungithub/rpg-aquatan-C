@@ -767,6 +767,8 @@ class GenBitMap:
                     self.trackAST(crntRoomID, toNodeID)
                 #構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
+                    # eni = self.getExpNodeInfo(toNodeID)
+                    # self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
                     self.trackAST(crntRoomID, toNodeID)
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
@@ -851,6 +853,7 @@ class GenBitMap:
     def getNextNodeInfo(self, fromNodeID):
         return self.nextNodeInfo.pop(fromNodeID, [])
     
+    # 計算式, 変数の参照リスト、関数の参照リスト、計算式のコメントリスト、計算式の行数を取得
     def getExpNodeInfo(self, nodeID):
         return self.expNode_info.get(nodeID, None)
 
