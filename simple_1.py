@@ -337,14 +337,14 @@ def main():
         BTNWND.show()
         mouse_down = False
         
-        # 初期アイテムの設定(グローバル変数)
-        for itemName in items.keys():
-            # このitemValueをアイテムの初期値として設定するつもりです!!
-            # ここも後のグローバル変数の解析を考える時に修正する
-            item = Item(itemName)
-            # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
-            item.set_value(get_exp_value(items[itemName]))
-            PLAYER.commonItembag.add(item)
+        # # 初期アイテムの設定(グローバル変数)
+        # for itemName in items.keys():
+        #     # このitemValueをアイテムの初期値として設定するつもりです!!
+        #     # ここも後のグローバル変数の解析を考える時に修正する
+        #     item = Item(itemName)
+        #     # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
+        #     item.set_value(get_exp_value(items[itemName]))
+        #     PLAYER.commonItembag.add(item)
 
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
@@ -1844,7 +1844,7 @@ class Player(Character):
                         if itemResult.get('skip', False):
                             MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
-                            event.open(itemResult['item'])
+                            event.open(itemResult['item'], event.exps)
                             if (indexes := event.exps.get("indexes", None)):
                                 item_comments = "%".join(indexes)
                             else:
@@ -2537,7 +2537,7 @@ class MessageWindow(Window):
                         
                         newItems = []
                         for name, itemInfo in skipResult["skipTo"]["items"].items():
-                            item = Item(name, itemInfo["value"], itemInfo["type"], False)
+                            item = Item(name, itemInfo["value"], None, itemInfo["type"])
                             newItems.append(item)
                         PLAYER.itembag.items.append(newItems)
                         # 暗転
@@ -2623,7 +2623,8 @@ class MessageWindow(Window):
                         
                         newItems = []
                         for name, itemInfo in skipResult["skipTo"]["items"].items():
-                            item = Item(name, itemInfo["value"], itemInfo["type"], False)
+                            # ここの計算式の設定は後々考える
+                            item = Item(name, itemInfo["value"], None, itemInfo["type"])
                             newItems.append(item)
                         PLAYER.itembag.items.append(newItems)
                         # 暗転
@@ -2717,6 +2718,7 @@ class ItemWindow(Window):
     """ステータスウィンドウ"""
     FONT_HEIGHT = 16
     WHITE = Color(255, 255, 255, 255)
+    BLACK = Color(0, 0, 0, 255)
     RED = Color(255, 31, 31, 255)
     GREEN = Color(31, 255, 31, 255)
     BLUE = Color(31, 31, 255, 255)
@@ -2733,6 +2735,7 @@ class ItemWindow(Window):
         self.player = player
         self.image = Map.images[self.mapchip]
         self.itemChips = ItemChips()
+        self.items_changed: set[int] = set()
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2750,6 +2753,18 @@ class ItemWindow(Window):
         gvarnum = len(PLAYER.commonItembag.items[-1])
         offset_y = 10 + gvarnum * 25
         for j, item in enumerate(PLAYER.itembag.items[-1]):
+            is_item_changed = False
+            if item.itemvalue.exps is not None:
+                self.items_changed.add(offset_y)
+                item_rect = pygame.Rect(
+                    0,
+                    offset_y,
+                    self.rect.width,
+                    25
+                )
+                pygame.draw.rect(self.surface, self.WHITE, item_rect)
+                is_item_changed = True
+
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
@@ -2761,15 +2776,14 @@ class ItemWindow(Window):
 
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
-                pass
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
                 # value_color = self.RED if item.itemvalue.undefined else self.WHITE
-                value_color = self.WHITE
+                value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
@@ -2782,6 +2796,17 @@ class ItemWindow(Window):
     def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int):
         text_x = offset_x
         for valuename, itemvalue in itemvalue_children.items():
+            is_item_changed = False
+            if itemvalue.exps is not None:
+                self.items_changed.add(offset_y)
+                item_rect = pygame.Rect(
+                    0,
+                    offset_y,
+                    self.rect.width,
+                    25
+                )
+                pygame.draw.rect(self.surface, self.WHITE, item_rect)
+                is_item_changed = True
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
@@ -2795,20 +2820,21 @@ class ItemWindow(Window):
             #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            # self.draw_string(text_x, offset_y, f"{valuename:<8}", self.RED if itemvalue.undefined else self.WHITE)
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.BLACK if is_item_changed else self.WHITE)
             name_offset = self.myfont.get_rect(valuename).width + 30
             if itemvalue.value is not None:
-                # self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.RED if itemvalue.undefined else self.WHITE)
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.WHITE)
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.BLACK if is_item_changed else self.WHITE)
+                
+            # if itemvalue.exps is not None:
+            #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
+            #     change_icon = load_image('./', 'change.png')
+            #     self.surface.blit(change_icon, (text_x + name_offset + value_offset, offset_y))
 
             offset_y += 25
+
             if itemvalue.children:
                 offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25)
 
-            # value_color = self.RED if item.undefined else self.WHITE
-            # value_offset = self.myfont.get_rect(item.name).width + 30
-            # self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
         return offset_y
 
                                                                                                                                                    
@@ -3261,11 +3287,11 @@ class Treasure():
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
-    def open(self, data: dict):
+    def open(self, data: dict, exps: list[str]):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, data, self.vartype)
+        item = Item(self.item, data, exps, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3539,9 +3565,10 @@ class Object:
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
 
-    def __init__(self, name, data, vartype):
+    def __init__(self, name: str, data, exps: dict, vartype: str):
         self.name = str(name)
-        self.itemvalue: ItemValue = ItemValue.from_dict(data)
+        self.index_exps = exps.get('indexes', None)
+        self.itemvalue: ItemValue = ItemValue.from_dict(data, exps["values"])
         self.vartype: str = vartype
 
     def get_value(self):
@@ -3561,16 +3588,18 @@ class Item:
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:
-    def __init__(self, value: str | None, children: dict[str | int, "ItemValue"]):
+    def __init__(self, value: str | None, exps: list[str] | None, children: dict[str | int, "ItemValue"]):
         self.value = value
+        self.exps = exps
         self.children = children
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ItemValue":
+    def from_dict(cls, data: dict, exps: dict | list[str] | None = None) -> "ItemValue":
         value: str | None = data["value"]
+        itemvalue_exps: list[str] = exps if isinstance(exps, list) else None
         children_dict: dict[str | int, dict] = data["children"]
-        children = {index: cls.from_dict(v) for index, v in children_dict.items()}
-        return cls(value, children)
+        children = {index: cls.from_dict(v, exps.get(f"\"{index}\"", None) if exps else None) for index, v in children_dict.items()}
+        return cls(value, itemvalue_exps, children)
 
 #                                                                             
 # 88                                      88888888ba                          

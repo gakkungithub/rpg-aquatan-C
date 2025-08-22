@@ -778,20 +778,19 @@ class GenBitMap:
                                 indexNodeID, _ = indexNodeID_list[0]
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
-                    arrContExp_dict = {}
-                    self.setArrayTreasure(arrContNodeID_list, arrContExp_dict)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"array": {"values": arrContExp_dict, "indexes": index_comments}}, var_type)
+                    arrContExp_dict = self.setArrayTreasure(arrContNodeID_list)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}
                     for memberNodeID, _ in self.getNextNodeInfo(toNodeID):
                         exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
                         memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"struct": memberExp_dict}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type)
                 # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"scalar": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type)
                 #次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -803,7 +802,7 @@ class GenBitMap:
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"value": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type)
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -855,7 +854,8 @@ class GenBitMap:
         
 
     # 配列の変数宣言用のアイテムの解析
-    def setArrayTreasure(self, arrContNodeID_list: list[str], arrContExp_dict: dict):
+    def setArrayTreasure(self, arrContNodeID_list: list[str]):
+        arrContExp_dict: dict = {}
         for arrContNodeID in arrContNodeID_list:
             # 末端のノードならその計算式を取得する
             if self.getNodeShape(arrContNodeID) == 'square':
@@ -864,7 +864,8 @@ class GenBitMap:
             # 途中のノード(box3d)ならその子要素を辿る
             else:
                 childNodeID_list = [nodeID for nodeID, _ in self.getNextNodeInfo(arrContNodeID)]
-                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = self.setArrayTreasure(childNodeID_list, {})
+                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = self.setArrayTreasure(childNodeID_list)
+        return arrContExp_dict
 
     # 'label', 'shape'属性がある
     def getNodeShape(self, nodeID):
