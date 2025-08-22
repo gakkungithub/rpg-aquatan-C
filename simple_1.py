@@ -2738,6 +2738,7 @@ class ItemWindow(Window):
         self.image = Map.images[self.mapchip]
         self.itemChips = ItemChips()
         self.items_changed: set[int] = set()
+        self.check_exps_line: tuple[int, bool] = (-1, False)
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2757,6 +2758,13 @@ class ItemWindow(Window):
         for j, item in enumerate(PLAYER.itembag.items[-1]):
             is_item_changed = False
             if item.itemvalue.exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 25:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(item.itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
                     0,
@@ -2764,8 +2772,7 @@ class ItemWindow(Window):
                     self.rect.width,
                     25
                 )
-                pygame.draw.rect(self.surface, self.WHITE, item_rect)
-                is_item_changed = True
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
@@ -2800,6 +2807,13 @@ class ItemWindow(Window):
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = False
             if itemvalue.exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 25:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
                     0,
@@ -2807,8 +2821,7 @@ class ItemWindow(Window):
                     self.rect.width,
                     25
                 )
-                pygame.draw.rect(self.surface, self.WHITE, item_rect)
-                is_item_changed = True
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
@@ -2842,7 +2855,8 @@ class ItemWindow(Window):
     def isCursorInWindow(self, pos : tuple[int, int]):
         y_line = (pos[1] - self.y - 10) // 25
         if self.x <= pos[0] <= self.rect[2] and y_line in self.items_changed:
-            print('here')
+            if not MSGWND.is_visible:
+                self.check_exps_line = (y_line, False)
             return True
         else:
             return False
