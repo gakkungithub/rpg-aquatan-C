@@ -477,6 +477,8 @@ def main():
                                 CODEWND.scrollX = 0
                             elif CODEWND.isCursorInWindow(event.pos):
                                 last_mouse_pos = event.pos
+                            elif ITEMWND.isCursorInWindow(event.pos):
+                                pass
                         cmd = BTNWND.is_clicked(event.pos)
                     
                 elif event.type == pygame.MOUSEBUTTONUP:
@@ -2755,7 +2757,7 @@ class ItemWindow(Window):
         for j, item in enumerate(PLAYER.itembag.items[-1]):
             is_item_changed = False
             if item.itemvalue.exps is not None:
-                self.items_changed.add(offset_y)
+                self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
                     0,
                     offset_y,
@@ -2798,7 +2800,7 @@ class ItemWindow(Window):
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = False
             if itemvalue.exps is not None:
-                self.items_changed.add(offset_y)
+                self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
                     0,
                     offset_y,
@@ -2836,6 +2838,14 @@ class ItemWindow(Window):
                 offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25)
 
         return offset_y
+    
+    def isCursorInWindow(self, pos : tuple[int, int]):
+        y_line = (pos[1] - self.y - 10) // 25
+        if self.x <= pos[0] <= self.rect[2] and y_line in self.items_changed:
+            print('here')
+            return True
+        else:
+            return False
 
                                                                                                                                                    
 # 88888888ba  88             88                                    I8,        8        ,8I 88                      88                                 
