@@ -718,8 +718,6 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'pentagon':
             #条件文以前の処理を同部屋に含めてはいけない
             self.createRoom(nodeID)
-            #while, forの領域に入る
-            self.createPath(crntRoomID, nodeID)
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
             nodeIDs = []
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
@@ -732,6 +730,8 @@ class GenBitMap:
                     nodeIDs.append(toNodeID)
             # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
             if nodeIDs:
+                #whileの領域に入る
+                self.createPath(crntRoomID, nodeID)
                 # true
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
                 # false
@@ -761,9 +761,15 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 #配列
                 if self.getNodeShape(toNodeID) == 'box3d':
+                    eni = self.getExpNodeInfo(toNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
+
+                    # とりあえず添字だけを確認する
                     self.trackAST(crntRoomID, toNodeID)
                 #構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
+                    # eni = self.getExpNodeInfo(toNodeID)
+                    # self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
                     self.trackAST(crntRoomID, toNodeID)
                 #ノーマル変数
                 elif self.getNodeShape(toNodeID) == 'square':
@@ -826,7 +832,11 @@ class GenBitMap:
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
-    #'label', 'shape'属性がある
+    # 配列の変数宣言用のアイテムの解析
+    def getArrayTreasure(self):
+        pass
+
+    # 'label', 'shape'属性がある
     def getNodeShape(self, nodeID):
         #IDが重複する場合にも対応しているのでリストを得る。ゆえに、リストの最初の要素を取得する。
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
@@ -848,6 +858,7 @@ class GenBitMap:
     def getNextNodeInfo(self, fromNodeID):
         return self.nextNodeInfo.pop(fromNodeID, [])
     
+    # 計算式, 変数の参照リスト、関数の参照リスト、計算式のコメントリスト、計算式の行数を取得
     def getExpNodeInfo(self, nodeID):
         return self.expNode_info.get(nodeID, None)
 

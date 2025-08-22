@@ -178,7 +178,7 @@ def main():
                                     cfiles = [f"{programpath}.c"]
 
                                     # cプログラムを整形する
-                                    # subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+                                    subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
                                     subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
@@ -235,7 +235,7 @@ def main():
         subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
         # サーバを立てる
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath], cwd="debugger-C", env=env)
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
         # endregion
 
         # region マップの初期設定
@@ -1327,13 +1327,11 @@ class Map:
         """宝箱を作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         item = data["item"]
-        exp = data["exp"]
-        refs = data["refs"]
-        comments = data["comments"]
+        exps = data["exps"]
         vartype = data["vartype"]
-        linenum = data["linenum"]
+        fromTo = data["fromTo"]
         funcWarp = data["funcWarp"]
-        treasure = Treasure((x, y), item, exp, refs, comments, vartype, linenum, funcWarp)
+        treasure = Treasure((x, y), item, exps, vartype, fromTo, funcWarp)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1839,23 +1837,25 @@ class Player(Character):
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
             if isinstance(event, Treasure):
                 ### 宝箱を開けることの情報を送信する
-                self.sender.send_event({"item": event.item, "funcWarp": event.funcWarp})
+                self.sender.send_event({"item": event.item, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        event.open(itemResult['item'])
-                        item_comments = "%".join(event.comments)
-                        if item_comments:
-                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
-                        else:
-                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
-                        if itemResult.get("undefined", False):
-                            item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
-                        mymap.remove_event(event)
                         if itemResult.get('skip', False):
-                            item_get_message += f"%{itemResult['message']}"
-                            MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
+                            MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
+                            event.open(itemResult['item'])
+                            if (indexes := event.exps.get("indexes", None)):
+                                item_comments = "%".join(indexes)
+                            else:
+                                item_comments = None
+                            if item_comments:
+                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
+                            else:
+                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
+                            if itemResult.get("undefined", False):
+                                item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
+                            mymap.remove_event(event)
                             MSGWND.set(item_get_message)
                         PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
                     else:
@@ -2490,16 +2490,6 @@ class MessageWindow(Window):
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
-                        # if skipResult.get('type', None) == 'doWhile':
-                        #     move = PLAYER.move5History.pop()
-                        #     # 暗転
-                        #     DIMWND.setdf(200)
-                        #     DIMWND.show()
-                        #     fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                        #     PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                        #     PLAYER.commonItembag.items[-1] = move['cItems']
-                        #     PLAYER.itembag.items[-1] = move['items']
-                        #     fieldmap.add_chara(PLAYER)  # マップに再登録
                         self.set(skipResult['message'])
                         for name, value in skipResult["items"].items():
                             item = PLAYER.commonItembag.find(name)
@@ -2521,6 +2511,7 @@ class MessageWindow(Window):
                             if item is None:
                                 item = PLAYER.itembag.find(name)
                             if item is not None:
+                                print('here3')
                                 item.update_value(value)
                         # ここで取り除かれた変数のアイテムを復活させる
                         # 暗転
@@ -3258,18 +3249,16 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exp, refs, comments, vartype, linenum, funcWarp):
+    def __init__(self, pos, item, exps, vartype, fromTo, funcWarp):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
         self.item = item  # アイテム名
-        self.exp = exp # アイテムの値の代入式
-        self.refs = refs # アイテムを取得するのに必要なアイテム (変数)
-        self.comments = comments # アイテムの値の設定(計算)がどのように行われたかを説明するコメント
+        self.exps = exps # アイテムの値の設定(計算)がどのように行われたかを説明するコメントや計算式を格納
         self.vartype = vartype # アイテムの型
-        self.linenum = linenum # 宝箱を開けるタイミング
+        self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
     def open(self, data: dict):

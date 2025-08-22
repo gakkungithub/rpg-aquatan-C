@@ -66,15 +66,11 @@ class MoveEvent:
         self.func_name = func_name
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, exp_info: tuple[str, list[str], list[str], list[str], int], type: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str):
         self.pos = pos
         self.name = name
-        self.exp_info = exp_info
-        # self.exp_string = exp_info[0]
-        # self.var_refs = exp_info[1]
-        # self.func_refs = exp_info[2]
-        # self.comments = exp_info[3]
-        # self.declared_line = exp_info[4]
+        self.line_track = line_track
+        self.exps = exps
         self.type = type
 
 class FuncWarp:
@@ -210,14 +206,15 @@ class MapInfo:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def setItemBox(self, roomNodeID, item_name, item_exp_info: tuple[str, list[str], list[str], list[str], int], var_type: str):
+    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
+        _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             item_pos = (int(ry+y), int(rx+x))
             self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
-            self.treasures.append(Treasure(item_pos, item_name, item_exp_info, var_type))
+            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type))
         else:
             print("generation failed: try again!! 3")
 
@@ -277,16 +274,23 @@ class MapInfo:
             
         # アイテムの情報
         for treasure in self.treasures:
-            exp_str, var_refs, func_refs, exp_comments, exp_line_num = treasure.exp_info
-            if exp_line_num in vardecl_lines:
-                vardecl_lines[exp_line_num].append(treasure.name)
-            else:
-                vardecl_lines[exp_line_num] = [treasure.name]
+            # fromToは全てのアイテムで共通
             t_func_warp = []
-            for func in func_refs:
-                warp_pos, args, line = self.func_warps[func].get_attributes()
-                t_func_warp.append({"name": func, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
-            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exp": exp_str, "refs": var_refs, "comments": exp_comments, "vartype": treasure.type, "linenum": exp_line_num, "funcWarp": t_func_warp})
+            converted_fromTo = []
+            for itemLine in treasure.line_track:
+                if isinstance(itemLine, str):
+                    warp_pos, args, line = self.func_warps[itemLine].get_attributes()
+                    t_func_warp.append({"name": itemLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(itemLine)
+            if converted_fromTo[0] in vardecl_lines:
+                vardecl_lines[converted_fromTo[0]].append(treasure.name)
+            else:
+                vardecl_lines[converted_fromTo[0]] = [treasure.name]
+
+            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -445,7 +449,7 @@ class GenBitMap:
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
-        self.nextNodeInfo: dict[str, tuple[str, str]] = {}
+        self.nextNodeInfo: dict[str, list[tuple[str, str]]] = {}
         self.func_info = func_info
         self.gvar_info = gvar_info
         self.varNode_info = varNode_info
@@ -759,22 +763,36 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'signature':
             var_type = self.varNode_info[nodeID]
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-                #配列
+                # 配列
                 if self.getNodeShape(toNodeID) == 'box3d':
-                    eni = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
-                    # とりあえず添字だけを確認する
-                    self.trackAST(crntRoomID, toNodeID)
-                #構造体系
+                    arrContNodeID_list: list[str] = []
+                    index_comments = []
+                    for childNodeID, childEdgeLabel in self.getNextNodeInfo(toNodeID):
+                        if childEdgeLabel == 'arrCont':
+                            arrContNodeID_list.append(childNodeID)
+                        else:
+                            indexNodeID = childNodeID
+                            exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
+                            index_comments += exp_comments
+                            while (indexNodeID_list := self.getNextNodeInfo(indexNodeID)) != []:
+                                indexNodeID, _ = indexNodeID_list[0]
+                                exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
+                                index_comments += exp_comments
+                    arrContExp_dict = {}
+                    self.setArrayTreasure(arrContNodeID_list, arrContExp_dict)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"array": {"values": arrContExp_dict, "indexes": index_comments}}, var_type)
+                # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
-                    # eni = self.getExpNodeInfo(toNodeID)
-                    # self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
-                    self.trackAST(crntRoomID, toNodeID)
-                #ノーマル変数
+                    memberExp_dict = {}
+                    for memberNodeID, _ in self.getNextNodeInfo(toNodeID):
+                        exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
+                        memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"struct": memberExp_dict}, var_type)
+                # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
-                    eni = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), eni, var_type)
-                #初期化値なし(or次のノード)
+                    exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"scalar": exp_comments}, var_type)
+                #次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         # for文の初期値で変数の初期化がある場合はアイテムを作る
@@ -784,8 +802,8 @@ class GenBitMap:
                 if self.getNodeShape(toNodeID) == 'signature':
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
-                    eni = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), eni, var_type)
+                    exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"value": exp_comments}, var_type)
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -831,7 +849,24 @@ class GenBitMap:
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
-    #'label', 'shape'属性がある
+    def from_eni_to_dict(self, eniNodeID: str) -> dict:
+        exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(eniNodeID)
+        return {"exp": exp_str, "vars": var_refs, "funcs": func_refs, "comments": exp_comments, "line": exp_line_num}
+        
+
+    # 配列の変数宣言用のアイテムの解析
+    def setArrayTreasure(self, arrContNodeID_list: list[str], arrContExp_dict: dict):
+        for arrContNodeID in arrContNodeID_list:
+            # 末端のノードならその計算式を取得する
+            if self.getNodeShape(arrContNodeID) == 'square':
+                exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(arrContNodeID)
+                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = exp_comments
+            # 途中のノード(box3d)ならその子要素を辿る
+            else:
+                childNodeID_list = [nodeID for nodeID, _ in self.getNextNodeInfo(arrContNodeID)]
+                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = self.setArrayTreasure(childNodeID_list, {})
+
+    # 'label', 'shape'属性がある
     def getNodeShape(self, nodeID):
         #IDが重複する場合にも対応しているのでリストを得る。ゆえに、リストの最初の要素を取得する。
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']

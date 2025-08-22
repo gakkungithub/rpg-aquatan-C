@@ -23,6 +23,8 @@ def parseIndex(c_files):
                 f'-isysroot', sdk_path,      # SDKルート
                 '-std=c11',                  # C11準拠で解析
                 '-ferror-limit=0',           # すべてのエラーを表示
+                '-fno-builtin',
+                '-D_FORTIFY_SOURCE=0',
                 # '-Wall'                      # 警告を出す（必要なら）
                 # '-Wno-unused-variable'       # unused警告は消去
             ],
@@ -170,12 +172,10 @@ class ASTtoFlowChart:
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
         cursor_stmt = list(cursor.get_children())
-        clen = len(cursor_stmt) - 1
-        for i, cr in enumerate(cursor_stmt):
-            # if self.condition_move.get(f'"{nodeID}"', None) and self.condition_move[f'"{nodeID}"'][1][-1] is None:
-            #     self.condition_move[f'"{nodeID}"'][1][-1] = cr.location.line  
+        clen = len(cursor_stmt)
+        for i, cr in enumerate(cursor_stmt): 
             if i < clen:
-                self.nextLines.append(cursor_stmt[i+1].location.line)
+                self.nextLines.append(cursor.extent.end.line if i == clen - 1 else cursor_stmt[i+1].location.line)
             nodeID = self.parse_stmt(cr, nodeID, edgeName)
             edgeName = ""
             if i < clen:
@@ -316,37 +316,66 @@ class ASTtoFlowChart:
         #配列
         if isArray:
             #配列の最初の要素数は必ず取得する
-            arrNumNodeID = self.createNode(str(cursor.type.get_array_size()), 'box3d')
+            arrContNodeIDs = []
+
+            # 念の為、添字と配列の中身のカーソルを分けて取得する
+            cr_index_list = []
+            cr_init = None
 
             for cr in cursor.get_children():
-                self.check_cursor_error(cr)
-                #配列の要素数はあえて解析を飛ばし、要素数は配列の初期値の数で取得する
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                    arrContNodeIDs = self.parse_arr_contents(cr.get_children())
-                    for arrContNodeID in arrContNodeIDs:
-                        self.createEdge(arrNumNodeID, arrContNodeID)
+                    cr_init = cr
+                else:
+                    cr_index_list.append(cr)
 
-            self.createEdge(varNodeID, arrNumNodeID)
+            # 初期化する場合 (一番上の添字ノードはこのメソッドで作りくっつける)
+            if cr_init is not None:
+                arrContNodeIDs = self.parse_arr_contents(list(cr_init.get_children()), cr_index_list[1:], cursor.location.line)
+                # 添字のカーソルがあれば、最初の添字カーソルの計算式ノードを作る
+                if len(cr_index_list):
+                    indexNodeID = self.get_exp(cr_index_list[0], 'box3d')
+                # 添字のカーソルがなければ、arrContNodeIDsの数で添字を決めてノードを作る
+                else:
+                    indexNodeID = self.createNode(str(len(arrContNodeIDs)), 'box3d')
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(arrContNodeIDs)), [], [], [f'配列の添字には {str(len(arrContNodeIDs))} が設定されます'], cursor.location.line)
+                self.createEdge(varNodeID, indexNodeID)
+                for arrContNodeID in arrContNodeIDs:
+                    self.createEdge(indexNodeID, arrContNodeID)
+            # 初期化しない場合は、添字のノードを全て順にくっつける
+            else:
+                nodeID = varNodeID
+                for cr_index in cr_index_list:
+                    indexNodeID = self.get_exp(cr_index, 'box3d')
+                    self.createEdge(nodeID, indexNodeID)
+                    nodeID = indexNodeID
 
-        #一つの変数/構造体系
+        # 一つの変数/構造体系
         else:
             nodeID = None
             for cr in cursor.get_children():
                 self.check_cursor_error(cr)
-                #構造体系
+                # 構造体系の初期化 (まだ、指定初期化子は考えない)
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                    for member_cursor in cr.get_children():
-                        self.check_cursor_error(member_cursor)
-                        self.createEdge(nodeID, self.get_exp(member_cursor))
-                #構造体の宣言でノードを作る
+                    members = list(f.spelling for f in cursor.type.get_fields())
+                    member_crs = list(cr.get_children())
+                    memberNum = len(member_crs)
+                    for i, member in enumerate(members):
+                        if i < memberNum:
+                            self.check_cursor_error(member_crs[i])
+                            self.createEdge(nodeID, self.get_exp(member_crs[i], label=member))
+                        else:
+                            memberNodeID = self.createNode(member, 'square')
+                            self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], [], cursor.location.line)
+                            self.createEdge(nodeID, memberNodeID)
+                # 構造体の宣言でノードを作る
                 elif cr.kind == ci.CursorKind.TYPE_REF:
                     nodeID = self.createNode("", 'tab')
                     self.createEdge(varNodeID, nodeID)
-                #スカラー変数
+                # スカラー変数
                 else:
                     nodeID = self.get_exp(cr)
                     self.createEdge(varNodeID, nodeID)
-            #スカラー変数の初期化値が無い場合
+            # スカラー変数の初期化値が無い場合
             if nodeID is None:
                 nodeID = self.createNode("", 'square')
                 self.expNode_info[f'"{nodeID}"'] = ("?", [], [], [], cursor.location.line)
@@ -355,28 +384,48 @@ class ASTtoFlowChart:
         return varNodeID
 
     #配列(多次元も含む)の要素を取得する
-    def parse_arr_contents(self, cr_iter):
-        arrContNodeIDs_list = []
+    def parse_arr_contents(self, cr_iter, cr_index_list, line):
+        not_init_list_expr = True
+        arrContNodeID_list = []
         #要素を取得する
-        for cr in cr_iter:
+        for i, cr in enumerate(cr_iter):
+            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                not_init_list_expr = False
+                break
+
+        for i, cr in enumerate(cr_iter):
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                arrContNodeIDs_list.append(self.parse_arr_contents(cr.get_children()))
+                arrContNodeID_list.append(self.parse_arr_contents(list(cr.get_children()), cr_index_list[1:], line))
+            # 子要素の中の要素が1つだけ
             else:
-                arrContNodeIDs_list.append([self.get_exp(cr)])
+                arrContNodeID_list.append([self.get_exp(cr, label=f"[{i}]" if not_init_list_expr else "[0]")])
         
-        if (maxNum := len(max(arrContNodeIDs_list, key=len))) == 1:
-            return [arrContNodeID[0] for arrContNodeID in arrContNodeIDs_list]
+        # 配列の子要素が全て1なら、その1つの要素を抽出する
+        if (maxNum := len(max(arrContNodeID_list, key=len))) == 1:
+            return [arrContNodeID[0] for arrContNodeID in arrContNodeID_list]
         else:
             arrNumNodeIDs = []
-            for arrContNodeIDs in arrContNodeIDs_list:
-                arrNumNodeID = self.createNode(str(maxNum), 'box3d')
+            for i, arrContNodeIDs in enumerate(arrContNodeID_list):
+                # 要素数が最大のものを配列の添字にする 
+                # 添字のカーソルがまだあるならそれを添字の計算式として解析する
+                if len(cr_index_list):
+                    arrNumNodeID = self.get_exp(cr_index_list[0], shape='box3d', label=f"[{i}]")
+                else:
+                    arrNumNodeID = self.createNode(f"[{i}]", 'box3d')
+                    self.expNode_info[f'"{arrNumNodeID}"'] = (str(maxNum), [], [], [f'配列の添字には {str(maxNum)} が設定されます'], line)
+                # 子要素の中にある要素数を取得する
                 contNum = len(arrContNodeIDs)
+                # 子要素を一つずつ作っていく
                 for n in range(maxNum):
+                    # 初期化されている子要素はそのノードをくっつける
                     if contNum > n:
                         self.createEdge(arrNumNodeID, arrContNodeIDs[n])
+                    # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
-                        self.createEdge(arrNumNodeID, self.createNode('0', 'square'))
+                        arrContNodeID = self.createNode(f"[{n}]", 'square')
+                        self.expNode_info[f'"{arrContNodeID}"'] = (str(maxNum), [], [], ['ランダムな値が設定されます'], line)
+                        self.createEdge(arrNumNodeID, arrContNodeID)
                 arrNumNodeIDs.append(arrNumNodeID)
             return arrNumNodeIDs
         
@@ -603,7 +652,8 @@ class ASTtoFlowChart:
         func_cursor = self.unwrap_unexposed(children[0])
         self.check_cursor_error(func_cursor)
 
-        ref_spell = next(func_cursor.get_tokens()).spelling
+        # ref_spell = next(func_cursor.get_tokens()).spelling
+        ref_spell = func_cursor.spelling
         self.func_info[self.scanning_func]["refs"].add(ref_spell)
 
         arg_exp_terms = []
