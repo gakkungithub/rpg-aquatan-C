@@ -31,12 +31,14 @@ class VarPreviousValue:
         return f"<{self.name}={self.value}>"
 
 class VarsTracker:
-    def __init__(self):
+    def __init__(self, gvars):
         self.previous_values: list[dict[str, VarPreviousValue]] = []
+        self.global_previous_values: dict[str, VarPreviousValue] = {}
         self.vars_changed: dict[str, list[tuple[str, ...]]] = {}
         self.vars_declared: list[list[str]] = []
         self.vars_removed: list[str] = []
         self.frames = ['start']
+        self.track(gvars, self.global_previous_values, [])
     
     def trackStart(self, frame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
@@ -52,8 +54,19 @@ class VarsTracker:
             self.vars_declared.pop()
             self.frames = current_frames
         
+        gvars = []
+        for module in target.module_iter():
+            for sym in module:
+                if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+                    name = sym.GetName()
+                    if name:
+                        var = target.FindFirstGlobalVariable(name)
+                        if var.IsValid():
+                            gvars.append(var)
+
         self.vars_changed = {}
-        return self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
+        self.track(gvars, self.global_previous_values, [])
+        self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
 
     def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="") -> list[str]:
         crnt_vars: list[str] = []
@@ -176,6 +189,9 @@ class VarsTracker:
     def getValueAll(self):
         filtered_previous_values = {var: self.previous_values[-1][var] for var in self.vars_declared[-1] if var in self.previous_values[-1]}
         return self.getValuesDict(filtered_previous_values)
+    
+    def getGlobalValueAll(self):
+        return self.getValuesDict(self.global_previous_values) 
 
     def getValuesDict(self, previous_values: dict[str, VarPreviousValue]):
         values_dict = {}
@@ -254,7 +270,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
     class DebugManager():
         def __init__(self, process, thread):
-            self.vars_tracker: VarsTracker = VarsTracker()
+            gvars = []
+            for module in target.module_iter():
+                for sym in module:
+                    if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+                        name = sym.GetName()
+                        if name:
+                            var = target.FindFirstGlobalVariable(name)
+                            if var.IsValid():
+                                gvars.append(var)
+            self.vars_tracker: VarsTracker = VarsTracker(gvars)
             self.isEnd = False
             self.process = process
             self.thread = thread
@@ -265,7 +290,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.line_data = json.load(f)
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
-                    self.event_sender({"line": self.line_data[self.func_name][2]}, False)
+                    self.event_sender({"line": self.line_data[self.func_name][2], "items": self.vars_tracker.getGlobalValueAll()}, False)
                     self.line_number = self.line_data[self.func_name][2] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
                     self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
@@ -807,7 +832,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             else:
                                 self.event_sender({"message": "", "status": "ok"})
                         elif type == 'forIn':
-                            print(self.line_loop)
                             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
                                 skipStart = self.line_number
                                 skipEnd = self.line_data[self.func_name][1][str(self.line_number)]

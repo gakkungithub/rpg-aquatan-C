@@ -627,7 +627,8 @@ class GenBitMap:
         gvarString = ""
         for gvarNodeID in self.gvar_info:
             varName = self.getNodeLabel(gvarNodeID)
-            for gvarContentNodeID in self.getNextNodeInfo(gvarNodeID):
+            var_type = self.varNode_info[gvarNodeID]
+            for gvarContentNodeID, edgeName in self.getNextNodeInfo(gvarNodeID):
                 #配列
                 if self.getNodeShape(gvarContentNodeID) == 'box3d':
                     pass
@@ -638,9 +639,9 @@ class GenBitMap:
                 elif self.getNodeShape(gvarContentNodeID) == 'square':
                     eni = self.getExpNodeInfo(gvarContentNodeID)
                     if gvarString:
-                        gvarString = ', '.join([gvarString, f"'{varName}' : {eni}"])
+                        gvarString = ', '.join([gvarString, f"'{varName}' : {{'values': {eni[3]}, 'type': '{var_type}'}}"])
                     else:
-                        gvarString = f"'{varName}' : {eni}"
+                        gvarString = f"'{varName}' : {{'values': {eni[3]}, 'type': '{var_type}'}}"
                 #これはあり得ないがデバッグ用
                 else:
                     print("wrong node shape")

@@ -10,6 +10,7 @@ import re
 # socket通信を行う
 import socket
 import json
+import ast
 import time
 import datetime
 from threading import Thread
@@ -322,8 +323,7 @@ def main():
         mapname = str(config.get("game", "map"))
 
         # グローバル変数 = 初期アイテム
-        # このevalはast.literal_evalを使った方が良いかもしれません
-        items = eval(config.get("game", "items"))
+        items = ast.literal_eval(config.get("game", "items"))
 
         ## コードウィンドウを作る
         CODEWND = CodeWindow(MCODE_RECT, mapname)
@@ -331,12 +331,15 @@ def main():
         sender = EventSender(CODEWND)
         
         PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
-        _ = sender.receive_json()
+        initialResult = sender.receive_json()
 
         BTNWND = ArrowButtonWindow()
         BTNWND.show()
         mouse_down = False
         
+        for gvar_name, values in initialResult["items"].items():
+            PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
+
         # # 初期アイテムの設定(グローバル変数)
         # for itemName in items.keys():
         #     # このitemValueをアイテムの初期値として設定するつもりです!!
@@ -2751,11 +2754,51 @@ class ItemWindow(Window):
         if not self.is_visible:
             return
         Window.draw(self)
-        for i,item in enumerate(PLAYER.commonItembag.items[-1]):
-            self.draw_string(10, 10 + i*25, f"{item.name:<8} ({item.value})", self.GREEN)
-        gvarnum = len(PLAYER.commonItembag.items[-1])
-        offset_y = 10 + gvarnum * 25
-        for j, item in enumerate(PLAYER.itembag.items[-1]):
+        offset_y = 10
+        for item in PLAYER.commonItembag.items[-1]:
+            is_item_changed = False
+            if item.itemvalue.exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 25:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(item.itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.items_changed.add(offset_y // 25)
+                item_rect = pygame.Rect(
+                    0,
+                    offset_y,
+                    self.rect.width,
+                    25
+                )
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
+
+            # 型に応じたアイコンを blit（描画）
+            icon, constLock = self.itemChips.getChip(item.vartype)
+            icon_x = 10
+            icon_y = offset_y
+            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+
+            if icon:
+                self.surface.blit(icon, (icon_x, icon_y))
+
+            if constLock:
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.GREEN)
+
+            # 配列などの値がないvalueは表示しない
+            if item.itemvalue.value is not None:
+                name_offset = self.myfont.get_rect(item.name).width + 30
+                self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", self.GREEN)
+            
+            offset_y += 25
+            if item.itemvalue.children:
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25, 'global')
+
+        for item in PLAYER.itembag.items[-1]:
             is_item_changed = False
             if item.itemvalue.exps is not None:
                 is_item_changed = True
@@ -2791,18 +2834,17 @@ class ItemWindow(Window):
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
-                # value_color = self.RED if item.itemvalue.undefined else self.WHITE
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
             offset_y += 25
             if item.itemvalue.children:
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25)
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25, 'local')
 
         Window.blit(self, screen)
 
-    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int):
+    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int, type: str):
         text_x = offset_x
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = False
@@ -2835,10 +2877,14 @@ class ItemWindow(Window):
             #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.BLACK if is_item_changed else self.WHITE)
+            if type == 'global':
+                color = self.GREEN
+            else:
+                color = self.BLACK if is_item_changed else self.WHITE
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", color)
             name_offset = self.myfont.get_rect(valuename).width + 30
             if itemvalue.value is not None:
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.BLACK if is_item_changed else self.WHITE)
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", color)
                 
             # if itemvalue.exps is not None:
             #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
@@ -2848,7 +2894,7 @@ class ItemWindow(Window):
             offset_y += 25
 
             if itemvalue.children:
-                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25)
+                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25, type)
 
         return offset_y
     
@@ -3682,7 +3728,7 @@ class ItemBag:
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
     code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
-                  "11_string_operations", "12_struct", "15_pointer"]
+                  "11_string_operations", "12_struct", "13_modifiers", "15_pointer"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32

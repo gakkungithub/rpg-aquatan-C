@@ -30,10 +30,12 @@ class VarPreviousValue:
         return f"<{self.name}={self.value}>"
 
 class VarsTracker:
-    def __init__(self):
+    def __init__(self, gvars):
         self.previous_values: list[dict[str, VarPreviousValue]] = []
+        self.global_previous_values: dict[str, VarPreviousValue] = {}
         self.vars_changed: dict[str, list[tuple[str, ...]]] = {}
         self.frames = ['start']
+        self.track(gvars, self.global_previous_values, [])
     
     def trackStart(self, frame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
@@ -46,9 +48,20 @@ class VarsTracker:
         elif len(current_frames) < len(self.frames):
             self.previous_values.pop()
             self.frames = current_frames
+
+        gvars = []
+        for module in target.module_iter():
+            for sym in module:
+                if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+                    name = sym.GetName()
+                    if name:
+                        var = target.FindFirstGlobalVariable(name)
+                        if var.IsValid():
+                            gvars.append(var)
         
         self.vars_changed = {}
-        return self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
+        self.track(gvars, self.global_previous_values, [])
+        self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
 
     def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="") -> list[str]:
         # crnt_vars = []
@@ -60,11 +73,11 @@ class VarsTracker:
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
             address = var.GetLoadAddress()
-            print(name, var.GetSummary())
+            # print(name, var.GetSummary())
 
             var_previous_value = var_previous_values[name].value if name in var_previous_values else None
 
-            print(var, address)
+            # print(var, address)
             if value != var_previous_value:
                 print(f"{indent}{full_name} = {value}    ← changed")
                 if len(vars_path) == 0:
@@ -161,6 +174,8 @@ class VarsTracker:
             self.print_variables(previous_value.children, depth+1)
 
     def print_all_variables(self):
+        print("func_name: global")
+        self.print_variables(self.global_previous_values)
         all_frames = self.frames[:-1]
         for i, frame in enumerate(all_frames):
             print(f"func_name: {frame}")
@@ -246,7 +261,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     print(f"[接続] {addr} が接続しました")
 
     try:
-        varsTracker = VarsTracker()
+        gvars = []
+        for module in target.module_iter():
+            for sym in module:
+                if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+                    name = sym.GetName()
+                    if name:
+                        var = target.FindFirstGlobalVariable(name)
+                        if var.IsValid():
+                            gvars.append(var)
+
+        varsTracker = VarsTracker(gvars)
 
         with conn:
             event_reciever()
@@ -311,15 +336,6 @@ if not target:
 
 # breakpointを行で指定するならByLocation
 breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
-
-for module in target.module_iter():
-    for sym in module:
-        if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
-            name = sym.GetName()
-            if name:
-                var = target.FindFirstGlobalVariable(name)
-                if var.IsValid():
-                    print(f"{name} = {var.GetValue()}")
 
 launch_info = lldb.SBLaunchInfo([])
 launch_info.SetWorkingDirectory(os.getcwd())
