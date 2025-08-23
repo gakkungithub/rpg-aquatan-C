@@ -178,7 +178,7 @@ def main():
                                     cfiles = [f"{programpath}.c"]
 
                                     # cプログラムを整形する
-                                    # subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+                                    subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
                                     subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
@@ -337,14 +337,14 @@ def main():
         BTNWND.show()
         mouse_down = False
         
-        # 初期アイテムの設定(グローバル変数)
-        for itemName in items.keys():
-            # このitemValueをアイテムの初期値として設定するつもりです!!
-            # ここも後のグローバル変数の解析を考える時に修正する
-            item = Item(itemName)
-            # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
-            item.set_value(get_exp_value(items[itemName]))
-            PLAYER.commonItembag.add(item)
+        # # 初期アイテムの設定(グローバル変数)
+        # for itemName in items.keys():
+        #     # このitemValueをアイテムの初期値として設定するつもりです!!
+        #     # ここも後のグローバル変数の解析を考える時に修正する
+        #     item = Item(itemName)
+        #     # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
+        #     item.set_value(get_exp_value(items[itemName]))
+        #     PLAYER.commonItembag.add(item)
 
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
@@ -477,6 +477,8 @@ def main():
                                 CODEWND.scrollX = 0
                             elif CODEWND.isCursorInWindow(event.pos):
                                 last_mouse_pos = event.pos
+                            elif ITEMWND.isCursorInWindow(event.pos):
+                                pass
                         cmd = BTNWND.is_clicked(event.pos)
                     
                 elif event.type == pygame.MOUSEBUTTONUP:
@@ -1327,13 +1329,11 @@ class Map:
         """宝箱を作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         item = data["item"]
-        exp = data["exp"]
-        refs = data["refs"]
-        comments = data["comments"]
+        exps = data["exps"]
         vartype = data["vartype"]
-        linenum = data["linenum"]
+        fromTo = data["fromTo"]
         funcWarp = data["funcWarp"]
-        treasure = Treasure((x, y), item, exp, refs, comments, vartype, linenum, funcWarp)
+        treasure = Treasure((x, y), item, exps, vartype, fromTo, funcWarp)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1839,23 +1839,25 @@ class Player(Character):
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
             if isinstance(event, Treasure):
                 ### 宝箱を開けることの情報を送信する
-                self.sender.send_event({"item": event.item, "funcWarp": event.funcWarp})
+                self.sender.send_event({"item": event.item, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        event.open(itemResult['item'])
-                        item_comments = "%".join(event.comments)
-                        if item_comments:
-                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
-                        else:
-                            item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
-                        if itemResult.get("undefined", False):
-                            item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
-                        mymap.remove_event(event)
                         if itemResult.get('skip', False):
-                            item_get_message += f"%{itemResult['message']}"
-                            MSGWND.set(item_get_message, (['はい', 'いいえ'], 'func_skip'))
+                            MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
+                            event.open(itemResult['item'], event.exps)
+                            if (indexes := event.exps.get("indexes", None)):
+                                item_comments = "%".join(indexes)
+                            else:
+                                item_comments = None
+                            if item_comments:
+                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
+                            else:
+                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
+                            if itemResult.get("undefined", False):
+                                item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
+                            mymap.remove_event(event)
                             MSGWND.set(item_get_message)
                         PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
                     else:
@@ -2490,16 +2492,6 @@ class MessageWindow(Window):
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
-                        # if skipResult.get('type', None) == 'doWhile':
-                        #     move = PLAYER.move5History.pop()
-                        #     # 暗転
-                        #     DIMWND.setdf(200)
-                        #     DIMWND.show()
-                        #     fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                        #     PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                        #     PLAYER.commonItembag.items[-1] = move['cItems']
-                        #     PLAYER.itembag.items[-1] = move['items']
-                        #     fieldmap.add_chara(PLAYER)  # マップに再登録
                         self.set(skipResult['message'])
                         for name, value in skipResult["items"].items():
                             item = PLAYER.commonItembag.find(name)
@@ -2521,6 +2513,7 @@ class MessageWindow(Window):
                             if item is None:
                                 item = PLAYER.itembag.find(name)
                             if item is not None:
+                                print('here3')
                                 item.update_value(value)
                         # ここで取り除かれた変数のアイテムを復活させる
                         # 暗転
@@ -2546,7 +2539,7 @@ class MessageWindow(Window):
                         
                         newItems = []
                         for name, itemInfo in skipResult["skipTo"]["items"].items():
-                            item = Item(name, itemInfo["value"], itemInfo["type"], False)
+                            item = Item(name, itemInfo["value"], None, itemInfo["type"])
                             newItems.append(item)
                         PLAYER.itembag.items.append(newItems)
                         # 暗転
@@ -2632,7 +2625,8 @@ class MessageWindow(Window):
                         
                         newItems = []
                         for name, itemInfo in skipResult["skipTo"]["items"].items():
-                            item = Item(name, itemInfo["value"], itemInfo["type"], False)
+                            # ここの計算式の設定は後々考える
+                            item = Item(name, itemInfo["value"], None, itemInfo["type"])
                             newItems.append(item)
                         PLAYER.itembag.items.append(newItems)
                         # 暗転
@@ -2726,6 +2720,7 @@ class ItemWindow(Window):
     """ステータスウィンドウ"""
     FONT_HEIGHT = 16
     WHITE = Color(255, 255, 255, 255)
+    BLACK = Color(0, 0, 0, 255)
     RED = Color(255, 31, 31, 255)
     GREEN = Color(31, 255, 31, 255)
     BLUE = Color(31, 31, 255, 255)
@@ -2742,6 +2737,8 @@ class ItemWindow(Window):
         self.player = player
         self.image = Map.images[self.mapchip]
         self.itemChips = ItemChips()
+        self.items_changed: set[int] = set()
+        self.check_exps_line: tuple[int, bool] = (-1, False)
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2759,6 +2756,24 @@ class ItemWindow(Window):
         gvarnum = len(PLAYER.commonItembag.items[-1])
         offset_y = 10 + gvarnum * 25
         for j, item in enumerate(PLAYER.itembag.items[-1]):
+            is_item_changed = False
+            if item.itemvalue.exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 25:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(item.itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.items_changed.add(offset_y // 25)
+                item_rect = pygame.Rect(
+                    0,
+                    offset_y,
+                    self.rect.width,
+                    25
+                )
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
+
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
@@ -2770,15 +2785,14 @@ class ItemWindow(Window):
 
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
-                pass
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
                 # value_color = self.RED if item.itemvalue.undefined else self.WHITE
-                value_color = self.WHITE
+                value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
@@ -2791,6 +2805,23 @@ class ItemWindow(Window):
     def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int):
         text_x = offset_x
         for valuename, itemvalue in itemvalue_children.items():
+            is_item_changed = False
+            if itemvalue.exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 25:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.items_changed.add(offset_y // 25)
+                item_rect = pygame.Rect(
+                    0,
+                    offset_y,
+                    self.rect.width,
+                    25
+                )
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
@@ -2804,21 +2835,31 @@ class ItemWindow(Window):
             #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            # self.draw_string(text_x, offset_y, f"{valuename:<8}", self.RED if itemvalue.undefined else self.WHITE)
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.WHITE)
+            self.draw_string(text_x, offset_y, f"{valuename:<8}", self.BLACK if is_item_changed else self.WHITE)
             name_offset = self.myfont.get_rect(valuename).width + 30
             if itemvalue.value is not None:
-                # self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.RED if itemvalue.undefined else self.WHITE)
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.WHITE)
+                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", self.BLACK if is_item_changed else self.WHITE)
+                
+            # if itemvalue.exps is not None:
+            #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
+            #     change_icon = load_image('./', 'change.png')
+            #     self.surface.blit(change_icon, (text_x + name_offset + value_offset, offset_y))
 
             offset_y += 25
+
             if itemvalue.children:
                 offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25)
 
-            # value_color = self.RED if item.undefined else self.WHITE
-            # value_offset = self.myfont.get_rect(item.name).width + 30
-            # self.draw_string(text_x + value_offset, y, f"({item.value})", value_color)
         return offset_y
+    
+    def isCursorInWindow(self, pos : tuple[int, int]):
+        y_line = (pos[1] - self.y - 10) // 25
+        if self.x <= pos[0] <= self.rect[2] and y_line in self.items_changed:
+            if not MSGWND.is_visible:
+                self.check_exps_line = (y_line, False)
+            return True
+        else:
+            return False
 
                                                                                                                                                    
 # 88888888ba  88             88                                    I8,        8        ,8I 88                      88                                 
@@ -3258,25 +3299,23 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exp, refs, comments, vartype, linenum, funcWarp):
+    def __init__(self, pos, item, exps, vartype, fromTo, funcWarp):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
         self.item = item  # アイテム名
-        self.exp = exp # アイテムの値の代入式
-        self.refs = refs # アイテムを取得するのに必要なアイテム (変数)
-        self.comments = comments # アイテムの値の設定(計算)がどのように行われたかを説明するコメント
+        self.exps = exps # アイテムの値の設定(計算)がどのように行われたかを説明するコメントや計算式を格納
         self.vartype = vartype # アイテムの型
-        self.linenum = linenum # 宝箱を開けるタイミング
+        self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
-    def open(self, data: dict):
+    def open(self, data: dict, exps: list[str]):
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
-        item = Item(self.item, data, self.vartype)
+        item = Item(self.item, data, exps, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3550,9 +3589,10 @@ class Object:
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
 
-    def __init__(self, name, data, vartype):
+    def __init__(self, name: str, data, exps: dict, vartype: str):
         self.name = str(name)
-        self.itemvalue: ItemValue = ItemValue.from_dict(data)
+        self.index_exps = exps.get('indexes', None)
+        self.itemvalue: ItemValue = ItemValue.from_dict(data, exps["values"])
         self.vartype: str = vartype
 
     def get_value(self):
@@ -3572,16 +3612,18 @@ class Item:
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:
-    def __init__(self, value: str | None, children: dict[str | int, "ItemValue"]):
+    def __init__(self, value: str | None, exps: list[str] | None, children: dict[str | int, "ItemValue"]):
         self.value = value
+        self.exps = exps
         self.children = children
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ItemValue":
+    def from_dict(cls, data: dict, exps: dict | list[str] | None = None) -> "ItemValue":
         value: str | None = data["value"]
+        itemvalue_exps: list[str] = exps if isinstance(exps, list) else None
         children_dict: dict[str | int, dict] = data["children"]
-        children = {index: cls.from_dict(v) for index, v in children_dict.items()}
-        return cls(value, children)
+        children = {index: cls.from_dict(v, exps.get(f"\"{index}\"", None) if exps else None) for index, v in children_dict.items()}
+        return cls(value, itemvalue_exps, children)
 
 #                                                                             
 # 88                                      88888888ba                          
