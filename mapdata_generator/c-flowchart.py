@@ -1,6 +1,6 @@
 import argparse
-from parse import parseIndex, ASTtoFlowChart
-from generate_bit_map import GenBitMap
+from parse_1 import parseIndex, ASTtoFlowChart
+from generate_bit_map_1 import GenBitMap
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', required=True)
@@ -16,7 +16,7 @@ for cname, tu in translation_units.items():
     fchart.createErrorInfo(tu.diagnostics)
     fchart.write_ast(tu, programname)
 
-genBitMap = GenBitMap(programname, fchart.func_info, fchart.gvar_info, fchart.varNode_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move)
+genBitMap = GenBitMap(programname, fchart.func_info_dict, fchart.gvar_info, fchart.varNode_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move)
 genBitMap.startTracking()
 
-genBitMap.setMapChip(programname, fchart.line_info, args.u)
+genBitMap.setMapChip(programname, fchart.line_info_dict, args.u)

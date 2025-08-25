@@ -66,7 +66,7 @@ class VarsTracker:
 
         self.vars_changed = {}
         self.track(gvars, self.global_previous_values, [])
-        self.track(frame.GetVariables(True, True, False, True), self.previous_values[-1], [])
+        self.track(frame.GetVariables(True, True, True, True), self.previous_values[-1], [])
 
     def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="") -> list[str]:
         crnt_vars: list[str] = []
@@ -391,6 +391,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             varsDeclLines_copy = varsDeclLines[:]
 
+            print(varsDeclLines_copy)
             # やはり、変数は順番に取得させる
             while len(varsDeclLines_copy) != 0:
                 var = varsDeclLines_copy.pop(0)
