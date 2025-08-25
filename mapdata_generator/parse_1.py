@@ -159,7 +159,6 @@ class ASTtoFlowChart:
         #現在のカーソルからこの関数の戻り値と引数の型を取得するかどうかは後で考える
         arg_list: list[tuple[str, str]] = []
         #ノードがなければreturnのノードはつけないようにするため、Noneを設定しておく
-        nodeID = None
 
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
@@ -187,9 +186,13 @@ class ASTtoFlowChart:
                     nodeID = argNodeID
                 nodeID = self.parse_comp_stmt(cr, nodeID)
                 self.createRoomSizeEstimate(None)
-        if nodeID:
-            exitNodeID = self.createNode("", 'lpromoter')
-            self.createEdge(nodeID, exitNodeID)
+                if nodeID:
+                    # 最初行番を変更
+                    self.line_info_dict[self.scanning_func].setStart(cr.extent.end.line)
+                    self.func_info_dict[self.scanning_func].setStart(cr.extent.end.line)
+                    self.line_info_dict[self.scanning_func].setLine(cr.extent.end.line)
+                    returnNodeID = self.createNode(str(cr.extent.end.line), 'lpromoter')
+                    self.createEdge(nodeID, returnNodeID)
 
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
