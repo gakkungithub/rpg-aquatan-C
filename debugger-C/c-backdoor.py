@@ -433,16 +433,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         back_line_number = self.line_number
+                                        skipped_func_name = self.func_crnt_name
                                         while 1:
                                             self.step_conditionally()
+                                            if back_line_number == self.next_line_number:
+                                                retVal = thread.GetStopReturnValue().GetValue()
                                             if back_line_number == self.line_number:
                                                 break
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                     else:
                                         items = {}
                                         for argname, argtype in funcWarp[0]['args'].items():
                                             items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
-                                        self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
+                                        self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
                                         back_line_number = self.line_number
                                         while 1:
                                             if self.analyze_frame():
@@ -675,7 +678,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.event_sender({"message": "", "status": "ok"})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
-                        print('here')
                         break
 
             skipStart = None

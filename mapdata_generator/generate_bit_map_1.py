@@ -67,12 +67,13 @@ class MoveEvent:
         self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str, func_name: str):
         self.pos = pos
         self.name = name
         self.line_track = line_track
         self.exps = exps
         self.type = type
+        self.func_name = func_name
 
 class FuncWarp:
     def __init__(self, to_pos: tuple[int, int], args: dict[str, str], line: int):
@@ -200,7 +201,7 @@ class MapInfo:
                 # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID is not None:
                     c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
-                exp_str, var_refs, func_refs, exp_comments, exp_line_num = expNodeInfo
+                exp_comments = expNodeInfo[3] if expNodeInfo else []
                 self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
             else:
                 print("generation failed: try again!! 1")
@@ -208,7 +209,7 @@ class MapInfo:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str):
+    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str, crnt_func_name: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
@@ -216,7 +217,7 @@ class MapInfo:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             item_pos = (int(ry+y), int(rx+x))
             self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
-            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type))
+            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type, crnt_func_name))
         else:
             print("generation failed: try again!! 3")
 
@@ -293,7 +294,7 @@ class MapInfo:
             else:
                 vardecl_lines[converted_fromTo[0]] = [treasure.name]
 
-            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp})
+            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -783,7 +784,7 @@ class GenBitMap:
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
                     arrContExp_dict = self.setArrayTreasure(arrContNodeID_list)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}
@@ -791,12 +792,12 @@ class GenBitMap:
                         # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                         exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
                         memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type, self.func_name)
                 # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
                     # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type, self.func_name)
                 #次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -809,7 +810,7 @@ class GenBitMap:
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
                     # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type, self.func_name)
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)

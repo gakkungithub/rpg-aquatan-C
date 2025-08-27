@@ -1334,9 +1334,10 @@ class Map:
         item = data["item"]
         exps = data["exps"]
         vartype = data["vartype"]
+        func = data["func"]
         fromTo = data["fromTo"]
         funcWarp = data["funcWarp"]
-        treasure = Treasure((x, y), item, exps, vartype, fromTo, funcWarp)
+        treasure = Treasure((x, y), item, exps, vartype, func, fromTo, funcWarp)
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1860,6 +1861,8 @@ class Player(Character):
                                 item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
                             if itemResult.get("undefined", False):
                                 item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
+                            if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                                self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
                             mymap.remove_event(event)
                             MSGWND.set(item_get_message)
                         PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
@@ -2516,9 +2519,13 @@ class MessageWindow(Window):
                             if item is None:
                                 item = PLAYER.itembag.find(name)
                             if item is not None:
-                                print('here3')
                                 item.update_value(value)
-                        # ここで取り除かれた変数のアイテムを復活させる
+                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                        if isinstance(event, Treasure) and len(event.funcWarp) != 0:
+                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
                         # 暗転
                         DIMWND.setdf(200)
                         DIMWND.show()
@@ -2540,11 +2547,20 @@ class MessageWindow(Window):
                             PLAYER.move5History.pop(0)
                         PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
                         
-                        newItems = []
-                        for name, itemInfo in skipResult["skipTo"]["items"].items():
-                            item = Item(name, itemInfo["value"], {}, itemInfo["type"])
-                            newItems.append(item)
-                        PLAYER.itembag.items.append(newItems)
+                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                        if isinstance(event, Treasure) and len(event.funcWarp) != 0:
+                            newItems = []
+                            func_num_checked = len(PLAYER.checkedFuncs)
+                            arg_index = 0
+                            for name, itemInfo in skipResult["skipTo"]["items"].items():
+                                item = Item(name, itemInfo["value"], {event.exps[func_num_checked][arg_index]}, itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None))
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
+                            PLAYER.itembag.items.append(newItems)
                         # 暗転
                         DIMWND.setdf(200)
                         DIMWND.show()
@@ -3345,7 +3361,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exps, vartype, fromTo, funcWarp):
+    def __init__(self, pos, item, exps, vartype, func, fromTo, funcWarp):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -3354,6 +3370,7 @@ class Treasure():
         self.item = item  # アイテム名
         self.exps = exps # アイテムの値の設定(計算)がどのように行われたかを説明するコメントや計算式を格納
         self.vartype = vartype # アイテムの型
+        self.func = func
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
 
