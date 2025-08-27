@@ -563,8 +563,9 @@ class ASTtoFlowChart:
             self.check_cursor_error(cursor)
         return cursor
 
-    #式の項を一つずつ解析
-    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]) -> str:
+    # 式の項を一つずつ解析
+
+    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -756,14 +757,17 @@ class ASTtoFlowChart:
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
             castedExpType = self.unwrap_unexposed(cr).type.spelling
             if castedExpType:
-                calc_order_comments.append(f"{exp_terms} : {castedExp} の型({castedExpType}) を {cursor.type.spelling} に変換します")
+                calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
             else:
                 calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
         return exp_terms
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
-    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]):
+    # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, {"func": name}, arg3]}のように辞書型にする
+    # そして、コメントを表示するときに既に
+
+    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str | dict]):
         children = list(cursor.get_children())
         if not children:
             raise ValueError("CALL_EXPR に子ノードがありません")
@@ -776,22 +780,26 @@ class ASTtoFlowChart:
         ref_spell = func_cursor.spelling
         self.func_info_dict[self.scanning_func].setRef(ref_spell)
 
-        arg_exp_terms = []
-        arg_exp_comments = []
+        arg_exp_term_list = []
+        arg_calc_order_comments_list = []
         # --- 引数ノードとのエッジ作成 ---
         for i, arg_cursor in enumerate(children[1:]):
+            arg_calc_order_comments = []
             self.check_cursor_error(arg_cursor)
-            exp_term = self.parse_exp_term(arg_cursor, var_references, func_references, calc_order_comments)
-            arg_exp_terms.append(exp_term)
-            arg_exp_comments.append(f"{exp_term}を{i+1}つ目の実引数")
+            arg_exp_term_list.append(self.parse_exp_term(arg_cursor, var_references, func_references, arg_calc_order_comments))
+            arg_calc_order_comments_list.append([arg_calc_order_comment["comment"] if isinstance(arg_calc_order_comment, dict) else arg_calc_order_comment for arg_calc_order_comment in arg_calc_order_comments])
+            for arg_calc_order_comment in arg_calc_order_comments:
+                if isinstance(arg_calc_order_comment, dict):
+                    calc_order_comments.append(arg_calc_order_comment)
 
-        exp_terms = f"{ref_spell}( {", ".join(arg_exp_terms)} )"
-        calc_order_comments.append(", ".join(arg_exp_comments) + "として" + f"関数{ref_spell}を実行します" if len(arg_exp_comments) else f"引数なしで、関数{ref_spell}を実行します")
+        calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
+                                    "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
+                                    "args": arg_calc_order_comments_list})
 
         # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
         func_references.append(ref_spell)
         
-        return exp_terms
+        return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
 
     #typedefの解析
     def parse_typedef(self, cursor):

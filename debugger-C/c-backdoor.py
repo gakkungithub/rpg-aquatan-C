@@ -440,9 +440,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
                                     else:
                                         items = {}
-                                        for argname, argtype in funcWarp["args"].items():
-                                            items[argname] = {"item": self.vars_tracker.getValueByVar(argname), "type": argtype}
-                                        self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
+                                        for argname, argtype in funcWarp[0]['args'].items():
+                                            items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
+                                        self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
                                         back_line_number = self.line_number
                                         while 1:
                                             if self.analyze_frame():

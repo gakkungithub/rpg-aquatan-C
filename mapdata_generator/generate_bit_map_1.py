@@ -57,13 +57,14 @@ class ConditionLineTrackers:
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
-                    type: str, line_track: list[int | str | None], func_name: str):
+                    type: str, line_track: list[int | str | None], exps: list[str | dict], func_name: str):
         self.from_pos = from_pos
         self.to_pos = to_pos
         self.mapchip = mapchip
         self.type = type
         self.line_track = line_track
         self.func_name = func_name
+        self.exps = exps
 
 class Treasure:
     def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str):
@@ -104,12 +105,13 @@ class Door:
         self.dir = dir
 
 class CharaCheckCondition:
-    def __init__(self, func, pos, dir, type, line_track):
+    def __init__(self, func, pos, dir, type, line_track, exps):
         self.func = func
         self.pos = pos
         self.dir = dir
         self.type = type
         self.line_track = line_track
+        self.exps = exps
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -132,8 +134,7 @@ class MapInfo:
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
         if self.initPos:
-            return 
-        
+            return
         py, px, pheight, pwidth = self.room_info[initNodeID]
         zero_elements = np.argwhere(self.eventMap[py:py+pheight, px:px+pwidth] == 0)
         if zero_elements.size > 0:
@@ -179,7 +180,7 @@ class MapInfo:
 
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int] | None = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -199,7 +200,8 @@ class MapInfo:
                 # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID is not None:
                     c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
-                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, crnt_func_name))
+                exp_str, var_refs, func_refs, exp_comments, exp_line_num = expNodeInfo
+                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
             else:
                 print("generation failed: try again!! 1")
         else:
@@ -232,7 +234,8 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
-        self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1]))
+        exp_str, var_refs, func_refs, exp_comments, exp_line_num = expNodeInfo
+        self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1], exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
@@ -270,7 +273,7 @@ class MapInfo:
                 else:
                     converted_fromTo.append(condLine)
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
-                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp})
+                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp, "exps": move_event.exps})
             
         # アイテムの情報
         for treasure in self.treasures:
@@ -330,10 +333,9 @@ class MapInfo:
                 else:
                     converted_fromTo.append(condLine)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
-                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp})
+                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
 
         filename = f'{DATA_DIR}/{pname}/{pname}.json'
-
         with open(filename, 'w') as f:
             fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
             json.dump(fileContent, f) 
@@ -445,7 +447,7 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
+    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str | dict], int]], 
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
@@ -773,6 +775,7 @@ class GenBitMap:
                             arrContNodeID_list.append(childNodeID)
                         else:
                             indexNodeID = childNodeID
+                            # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                             exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                             index_comments += exp_comments
                             while (indexNodeID_list := self.getNextNodeInfo(indexNodeID)) != []:
@@ -785,11 +788,13 @@ class GenBitMap:
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}
                     for memberNodeID, _ in self.getNextNodeInfo(toNodeID):
+                        # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                         exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
                         memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type)
                 # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
+                    # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type)
                 #次のノード
@@ -802,6 +807,7 @@ class GenBitMap:
                 if self.getNodeShape(toNodeID) == 'signature':
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
+                    # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type)
                 # 次のノード
@@ -848,11 +854,6 @@ class GenBitMap:
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
-
-    def from_eni_to_dict(self, eniNodeID: str) -> dict:
-        exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(eniNodeID)
-        return {"exp": exp_str, "vars": var_refs, "funcs": func_refs, "comments": exp_comments, "line": exp_line_num}
-        
 
     # 配列の変数宣言用のアイテムの解析
     def setArrayTreasure(self, arrContNodeID_list: list[str]):

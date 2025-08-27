@@ -236,7 +236,7 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
-    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
+    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict):
         defaultMapChips = [503, 113, 343, 160, 32]
         floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
         # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
@@ -333,7 +333,6 @@ class MapInfo:
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp})
 
         filename = f'{DATA_DIR}/{pname}/{pname}.json'
-
         with open(filename, 'w') as f:
             fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
             json.dump(fileContent, f) 
@@ -367,10 +366,10 @@ class MapInfo:
         with open(filename, 'w') as f:
             config.write(f)
 
-    def writeLineFile(self, pname: str, line_info: dict[str, tuple[set[int], dict[int, int], int]]):
+    def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_nums)), loop_line_nums, start_line_num] for funcname, (line_nums, loop_line_nums, start_line_num) in line_info.items()}
+        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start] for funcname, line_info in line_info_dict.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
@@ -445,12 +444,12 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
+    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
         self.nextNodeInfo: dict[str, list[tuple[str, str]]] = {}
-        self.func_info = func_info
+        self.func_info_dict: dict = func_info_dict
         self.gvar_info = gvar_info
         self.varNode_info = varNode_info
         self.expNode_info = expNode_info
@@ -460,7 +459,7 @@ class GenBitMap:
         self.gotoRoom_list: dict[str, dict[str, GotoRoomInfo]] = gotoRoom_list # gotoラベルによるワープゾーンを作るための変数
         self.mapInfo = MapInfo(condition_move)
 
-    def setMapChip(self, pname, line_info, isUniversal):
+    def setMapChip(self, pname, line_info_dict, isUniversal):
         wallFlags = np.zeros(8, dtype=int)
         height, width = self.floorMap.shape
         bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
@@ -506,7 +505,7 @@ class GenBitMap:
 
         self.floorMap = bitMap_padded[1:height+1, 1:width+1]
 
-        self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info)
+        self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info_dict)
 
     def getFloorChipID(self, arr):
         floorChipID =  {
@@ -618,7 +617,7 @@ class GenBitMap:
     def startTracking(self):
         self.setNextNodeInfo()
         self.func_name = "main"
-        refInfo = self.func_info.pop(self.func_name)
+        refInfo = self.func_info_dict.pop(self.func_name)
         self.floorMap = np.ones((20,20))
         self.roomsMap = np.ones((20,20))
         self.trackFuncAST(refInfo)
@@ -648,7 +647,7 @@ class GenBitMap:
         return ''.join(["{", gvarString, "}"])
 
     def trackFuncAST(self, refInfo):
-        nodeID = refInfo["start"]
+        nodeID = refInfo.start_nodeID
         self.createRoom(nodeID)
         
         # 関数呼び出しのワープ情報を更新
@@ -657,10 +656,10 @@ class GenBitMap:
         if self.func_name in self.mapInfo.func_warps:
             # クラスの属性に値を設定
             self.mapInfo.func_warps[self.func_name].to_pos = self.mapInfo.setFuncWarpStartPos(nodeID)
-            self.mapInfo.func_warps[self.func_name].line = refInfo["line"]
+            self.mapInfo.func_warps[self.func_name].line = refInfo.start
         else:
             # クラスを生成
-            self.mapInfo.func_warps[self.func_name] = FuncWarp(self.mapInfo.setFuncWarpStartPos(nodeID), {}, refInfo["line"])
+            self.mapInfo.func_warps[self.func_name] = FuncWarp(self.mapInfo.setFuncWarpStartPos(nodeID), {}, refInfo.start)
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
@@ -669,8 +668,8 @@ class GenBitMap:
 
         self.mapInfo.setPlayerInitPos(nodeID)
 
-        for ref in refInfo["refs"]:
-            if (nextRefInfo := self.func_info.pop(ref, None)):
+        for ref in refInfo.refs:
+            if (nextRefInfo := self.func_info_dict.pop(ref, None)):
                 self.func_name = ref
                 self.trackFuncAST(nextRefInfo)
     
@@ -773,6 +772,7 @@ class GenBitMap:
                             arrContNodeID_list.append(childNodeID)
                         else:
                             indexNodeID = childNodeID
+                            # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                             exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                             index_comments += exp_comments
                             while (indexNodeID_list := self.getNextNodeInfo(indexNodeID)) != []:
@@ -785,11 +785,13 @@ class GenBitMap:
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}
                     for memberNodeID, _ in self.getNextNodeInfo(toNodeID):
+                        # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                         exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
                         memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type)
                 # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
+                    # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type)
                 #次のノード
@@ -802,6 +804,7 @@ class GenBitMap:
                 if self.getNodeShape(toNodeID) == 'signature':
                     var_type = self.varNode_info[toNodeID]
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
+                    # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type)
                 # 次のノード
