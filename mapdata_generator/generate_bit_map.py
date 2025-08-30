@@ -40,12 +40,12 @@ DATA_DIR = BASE_DIR + '/mapdata'
     #         print("generation failed: try again!! 5")
 
 class ConditionLineTracker:
-    def __init__(self, condition_line_track: tuple[str, list[int | str | None]]):
+    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | None]]):
         self.type = condition_line_track[0]
         self.condition_line_track = condition_line_track[1]
 
 class ConditionLineTrackers:
-    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | None]]]):
         self.tracks: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
 
     def get_condition_line_tracker(self, nodeID: str):
@@ -57,21 +57,23 @@ class ConditionLineTrackers:
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
-                    type: str, line_track: list[int | str | None], func_name: str):
+                    type: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: list[str | dict], func_name: str):
         self.from_pos = from_pos
         self.to_pos = to_pos
         self.mapchip = mapchip
         self.type = type
         self.line_track = line_track
         self.func_name = func_name
+        self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: dict, type: str, func_name: str):
         self.pos = pos
         self.name = name
         self.line_track = line_track
         self.exps = exps
         self.type = type
+        self.func_name = func_name
 
 class FuncWarp:
     def __init__(self, to_pos: tuple[int, int], args: dict[str, str], line: int):
@@ -83,13 +85,14 @@ class FuncWarp:
         return (self.to_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line: int):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps):
         self.pos = pos
         self.func_name = func_name
-        self.line = line
+        self.line_track = line_track
+        self.exps = exps
 
     def get_attributes(self):
-        return (self.pos, self.func_name, self.line)
+        return (self.pos, self.func_name, self.line_track)
 
 class AutoEvent:
     def __init__(self, pos: tuple[int, int], mapchip: int, dir: str):
@@ -104,12 +107,13 @@ class Door:
         self.dir = dir
 
 class CharaCheckCondition:
-    def __init__(self, func, pos, dir, type, line_track):
+    def __init__(self, func, pos, dir, type, line_track: tuple[str, list[list[str]]], exps):
         self.func = func
         self.pos = pos
         self.dir = dir
         self.type = type
         self.line_track = line_track
+        self.exps = exps
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -132,8 +136,7 @@ class MapInfo:
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
         if self.initPos:
-            return 
-        
+            return
         py, px, pheight, pwidth = self.room_info[initNodeID]
         zero_elements = np.argwhere(self.eventMap[py:py+pheight, px:px+pwidth] == 0)
         if zero_elements.size > 0:
@@ -156,15 +159,16 @@ class MapInfo:
             return None      
 
     # 話しかけると戻るキャラの設定
-    def setCharaReturn(self, roomNodeID, line, func_name):
+    def setCharaReturn(self, roomNodeID, line, func_name, funcNodeID, expNodeInfo):
         gy, gx, gheight, gwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             pos = (int(gy+y), int(gx+x))
             self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
-            self.chara_returns.append(CharaReturn(pos, func_name, None if line == '""' else int(line)))
+            _, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(funcNodeID)
+            exp_comments = expNodeInfo[3] if expNodeInfo else []
+            self.chara_returns.append(CharaReturn(pos, func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
         else:
             print("generation failed: try again!! 6")
 
@@ -179,7 +183,7 @@ class MapInfo:
 
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None = None):
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int] | None = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -199,14 +203,15 @@ class MapInfo:
                 # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
                 if warpNodeID is not None:
                     c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
-                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, crnt_func_name))
+                exp_comments = expNodeInfo[3] if expNodeInfo else []
+                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
             else:
                 print("generation failed: try again!! 1")
         else:
             print("generation failed: try again!! 2")
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str):
+    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str, crnt_func_name: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
@@ -214,7 +219,7 @@ class MapInfo:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             item_pos = (int(ry+y), int(rx+x))
             self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
-            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type))
+            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type, crnt_func_name))
         else:
             print("generation failed: try again!! 3")
 
@@ -232,7 +237,8 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
-        self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1]))
+        exp_str, var_refs, func_refs, exp_comments, exp_line_num = expNodeInfo
+        self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1], exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     # マップデータの生成
@@ -262,15 +268,15 @@ class MapInfo:
             me_func_warp = []
             converted_fromTo = []
             for condLine in move_event.line_track:
-                if isinstance(condLine, str):
-                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
-                    me_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(condLine, tuple):
+                    warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
+                    me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
                     converted_fromTo.append(condLine)
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
-                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp})
+                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp, "exps": move_event.exps})
             
         # アイテムの情報
         for treasure in self.treasures:
@@ -278,9 +284,9 @@ class MapInfo:
             t_func_warp = []
             converted_fromTo = []
             for itemLine in treasure.line_track:
-                if isinstance(itemLine, str):
-                    warp_pos, args, line = self.func_warps[itemLine].get_attributes()
-                    t_func_warp.append({"name": itemLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(itemLine, tuple):
+                    warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
+                    t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
@@ -290,7 +296,7 @@ class MapInfo:
             else:
                 vardecl_lines[converted_fromTo[0]] = [treasure.name]
 
-            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp})
+            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -311,26 +317,36 @@ class MapInfo:
         
         ### 関数の戻りに応じたキャラクターの情報
         for chara_return in self.chara_returns:
-            pos, funcName, line = chara_return.get_attributes()
+            pos, funcName, line_track = chara_return.get_attributes()
+            rc_func_warp = []
+            converted_fromTo = []
+            for returnLine in line_track:
+                if isinstance(returnLine, tuple):
+                    warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
+                    rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(returnLine)
             if funcName == "main":
-                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": line})
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "line": line})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
 
         for chara_checkCondition in self.chara_checkConditions:
             color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
             ccc_func_warp = []
             converted_fromTo = []
             for condLine in chara_checkCondition.line_track:
-                if isinstance(condLine, str):
-                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
-                    ccc_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(condLine, tuple):
+                    warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
+                    ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
                     converted_fromTo.append(condLine)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
-                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp})
+                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
 
         filename = f'{DATA_DIR}/{pname}/{pname}.json'
         with open(filename, 'w') as f:
@@ -369,7 +385,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start] for funcname, line_info in line_info_dict.items()}
+        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns] for funcname, line_info in line_info_dict.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
@@ -444,7 +460,7 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]], 
+    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str | dict], int]], 
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
@@ -744,7 +760,7 @@ class GenBitMap:
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
             # returnノードに行数ラベルをつけて、それで行数を確認する
-            self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name)
+            self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name, nodeID, self.getExpNodeInfo(nodeID))
         
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
@@ -780,7 +796,7 @@ class GenBitMap:
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
                     arrContExp_dict = self.setArrayTreasure(arrContNodeID_list)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}
@@ -788,12 +804,12 @@ class GenBitMap:
                         # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                         exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(memberNodeID)
                         memberExp_dict[self.getNodeLabel(memberNodeID)] = exp_comments
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": memberExp_dict}, var_type, self.func_name)
                 # スカラー変数
                 elif self.getNodeShape(toNodeID) == 'square':
                     # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(toNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type, self.func_name)
                 #次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -806,7 +822,7 @@ class GenBitMap:
                     valueNodeID, _ = self.getNextNodeInfo(toNodeID)[0]
                     # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                     exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(valueNodeID)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type)
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(toNodeID), valueNodeID, {"values": exp_comments}, var_type, self.func_name)
                 # 次のノード
                 else:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -851,11 +867,6 @@ class GenBitMap:
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
-
-    def from_eni_to_dict(self, eniNodeID: str) -> dict:
-        exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(eniNodeID)
-        return {"exp": exp_str, "vars": var_refs, "funcs": func_refs, "comments": exp_comments, "line": exp_line_num}
-        
 
     # 配列の変数宣言用のアイテムの解析
     def setArrayTreasure(self, arrContNodeID_list: list[str]):

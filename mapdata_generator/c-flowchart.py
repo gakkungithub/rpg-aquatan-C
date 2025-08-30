@@ -1,6 +1,6 @@
 import argparse
-from parse_1 import parseIndex, ASTtoFlowChart
-from generate_bit_map_1 import GenBitMap
+from parse import parseIndex, ASTtoFlowChart
+from generate_bit_map import GenBitMap
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', required=True)

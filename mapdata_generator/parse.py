@@ -52,6 +52,7 @@ class LineInfo:
     def __init__(self):
         self.lines = set()
         self.loops = {}
+        self.returns = {}
         self.start = 0
 
     def setLine(self, line: int):
@@ -59,6 +60,9 @@ class LineInfo:
 
     def setLoop(self, key: int, value: int):
         self.loops[key] = value
+
+    def setReturn(self, line: int, funcs: list[str]):
+        self.returns[line] = funcs
 
     def setStart(self, line: int, not_to_set: bool = False):
         if self.start or not_to_set:
@@ -209,7 +213,7 @@ class ASTtoFlowChart:
         return nodeID
 
     #色々な関数内や条件文内のコードの解析を行う
-    def parse_stmt(self, cr, nodeID, edgeName=""):
+    def parse_stmt(self, cr: ci.Cursor, nodeID, edgeName=""):
         #ループのbreakやcontinueの情報を保管する
         def createLoopBreakerInfo():
             self.loopBreaker_list.append({"break":[], "continue":[]})
@@ -249,9 +253,11 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.createNode(f"{cr.location.line}", 'lpromoter')
+            returnNodeID = self.get_exp(value_cursor, 'lpromoter', f"{cr.location.line}")
+            # returnによる行確認は個別に行う (step in, step outを残り関数の違いによって区別するため) 関数の遷移履歴、現在のframe_num、現在の行数で確認
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.createEdge(returnNodeID, self.get_exp(value_cursor))
+            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expNode_info[f'"{returnNodeID}"'][2])
+            self.condition_move[f'"{returnNodeID}"'] = ('return', self.expNode_info[f'"{returnNodeID}"'][2])
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None
         elif cr.kind == ci.CursorKind.IF_STMT:
@@ -563,8 +569,9 @@ class ASTtoFlowChart:
             self.check_cursor_error(cursor)
         return cursor
 
-    #式の項を一つずつ解析
-    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]) -> str:
+    # 式の項を一つずつ解析
+
+    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -756,14 +763,17 @@ class ASTtoFlowChart:
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
             castedExpType = self.unwrap_unexposed(cr).type.spelling
             if castedExpType:
-                calc_order_comments.append(f"{exp_terms} : {castedExp} の型({castedExpType}) を {cursor.type.spelling} に変換します")
+                calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
             else:
                 calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
         return exp_terms
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
-    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[str], calc_order_comments: list[str]):
+    # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, {"func": name}, arg3]}のように辞書型にする
+    # そして、コメントを表示するときに既に
+
+    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
         children = list(cursor.get_children())
         if not children:
             raise ValueError("CALL_EXPR に子ノードがありません")
@@ -776,22 +786,31 @@ class ASTtoFlowChart:
         ref_spell = func_cursor.spelling
         self.func_info_dict[self.scanning_func].setRef(ref_spell)
 
-        arg_exp_terms = []
-        arg_exp_comments = []
+        arg_exp_term_list = []
+        arg_calc_order_comments_list = []
+        arg_func_order_list: list[list[str]] = []
+
         # --- 引数ノードとのエッジ作成 ---
         for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
-            exp_term = self.parse_exp_term(arg_cursor, var_references, func_references, calc_order_comments)
-            arg_exp_terms.append(exp_term)
-            arg_exp_comments.append(f"{exp_term}を{i+1}つ目の実引数")
+            arg_calc_order_comments = []
+            arg_func_order: list[int] = []
+            arg_exp_term_list.append(self.parse_exp_term(arg_cursor, var_references, func_references, arg_calc_order_comments))
+            arg_calc_order_comments_list.append({"values": [arg_calc_order_comment["comment"] if isinstance(arg_calc_order_comment, dict) else arg_calc_order_comment for arg_calc_order_comment in arg_calc_order_comments]})
+            for arg_calc_order_comment in arg_calc_order_comments:
+                if isinstance(arg_calc_order_comment, dict):
+                    calc_order_comments.append(arg_calc_order_comment)
+                    arg_func_order.append(arg_calc_order_comment["name"])
+            arg_func_order_list.append(arg_func_order)
 
-        exp_terms = f"{ref_spell}( {", ".join(arg_exp_terms)} )"
-        calc_order_comments.append(", ".join(arg_exp_comments) + "として" + f"関数{ref_spell}を実行します" if len(arg_exp_comments) else f"引数なしで、関数{ref_spell}を実行します")
+        calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
+                                    "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
+                                    "args": arg_calc_order_comments_list})
 
         # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
-        func_references.append(ref_spell)
+        func_references.append((ref_spell, arg_func_order_list))
         
-        return exp_terms
+        return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
 
     #typedefの解析
     def parse_typedef(self, cursor):
@@ -840,7 +859,7 @@ class ASTtoFlowChart:
     #その関数の戻り値は条件先の最後の処理を示すノードとし、この戻り値→出口ノードとなる矢印をつける
     #リファクタリング後はchildrenがない場合nodeIDを返すことになっている。これで支障をきたす場合、少し変えることを考える
     def parse_if_stmt(self, cursor, nodeID, edgeName=""):
-        termNodeIDs = self.parse_if_branch(cursor, nodeID, edgeName)
+        termNodeIDs = self.parse_if_branch(cursor, nodeID, [], edgeName)
         endNodeID = self.createNode("", 'circle')
         self.createRoomSizeEstimate(endNodeID)
 
@@ -849,8 +868,8 @@ class ASTtoFlowChart:
 
         return endNodeID
 
-    def parse_if_branch(self, cursor, nodeID, edgeName="", line_track: list[int | str | None] | None = None):
-        def parse_if_branch_start(cursor, parentNodeID, line_track: list[int | str | None]):
+    def parse_if_branch(self, cursor, nodeID, line_track: list[int | tuple[str, list[list[str]]] | None], edgeName=""):
+        def parse_if_branch_start(cursor, parentNodeID, line_track: list[int | tuple[str, list[list[str]]] | None]):
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == ci.CursorKind.COMPOUND_STMT:
@@ -869,9 +888,6 @@ class ASTtoFlowChart:
         if not children:
             sys.exit(0)
 
-        if line_track is None:
-            line_track = []
-
         # --- 条件式処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
@@ -879,9 +895,6 @@ class ASTtoFlowChart:
         self.createEdge(nodeID, condNodeID, edgeName)
 
         line_track.append(cond_cursor.location.line)
-        # cond_func = list(self.expNode_info[f'"{condNodeID}"'][2])
-        # cond_func[1::2] = [line_track[0]] * (len(cond_func) - 1)
-        # line_track += cond_func
         line_track += self.expNode_info[f'"{condNodeID}"'][2]
         self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
 
@@ -910,7 +923,7 @@ class ASTtoFlowChart:
 
             if else_cursor.kind == ci.CursorKind.IF_STMT:
                 # else if の再帰処理
-                nodeIDs = [trueEndNodeID] + self.parse_if_branch(else_cursor, condNodeID, edgeName="False", line_track=line_track)
+                nodeIDs = [trueEndNodeID] + self.parse_if_branch(else_cursor, condNodeID, line_track, edgeName="False")
             else:
                 # else
                 falseEndNodeID = self.createNode("", 'terminator')
