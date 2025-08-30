@@ -1132,7 +1132,7 @@ class Map:
     movable_type = []  # マップチップが移動可能か？（0:移動不可, 1:移動可）
 
     def __init__(self, name):
-        self.name = name
+        self.name: str = name
         self.row = -1  # 行数
         self.col = -1  # 列数
         self.map = []  # マップデータ（2次元リスト）
@@ -1178,6 +1178,8 @@ class Map:
                 else:
                     screen.blit(self.images[self.map[y][x]],
                                 (x*GS-offsetx, y*GS-offsety))
+        if PLAYER.funcInfoWindow_chara:
+            PLAYER.funcInfoWindow_chara.draw(screen)
         # このマップにあるイベントを描画
         for event in self.events:
             event.draw(screen, offset)
@@ -1337,7 +1339,7 @@ class Map:
         func = data["func"]
         fromTo = data["fromTo"]
         funcWarp = data["funcWarp"]
-        treasure = Treasure((x, y), item, exps, vartype, func, fromTo, funcWarp)
+        treasure = Treasure((x, y), item, exps, vartype, func, fromTo, funcWarp, self.name.lower())
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1383,7 +1385,7 @@ class Map:
         func = data["func"]
         funcWarp = data["funcWarp"]
         exps = data["exps"]
-        chara = CharaReturn(name, (x, y), direction, movetype, message, fromTo, func, funcWarp, exps)
+        chara = CharaReturn(name, (x, y), direction, movetype, message, fromTo, func, funcWarp, exps, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1399,7 +1401,7 @@ class Map:
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
-        chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp, avoiding)
+        chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp, avoiding, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1685,6 +1687,7 @@ class Player(Character):
         self.ccchara: CharaCheckCondition = None
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
+        self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -1972,6 +1975,7 @@ class Player(Character):
             elif self.direction == UP:
                 chara.direction = DOWN
             chara.update(mymap)  # 向きを変えたので更新
+
             if isinstance(chara, Character):
                 msg = chara.message
                 MSGWND.set(msg)
@@ -2031,6 +2035,7 @@ class Player(Character):
                                         MSGWND.set(CCCharacterResult['message'])
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
+                                            PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
                                         else:
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
@@ -2061,6 +2066,7 @@ class Player(Character):
             returnResult = self.sender.receive_json()
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
+                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 else:
                     self.move5History.append({'mapname': mapname, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':True})
@@ -2090,6 +2096,7 @@ class Player(Character):
             returnResult = self.sender.receive_json()
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
+                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
                     MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
@@ -2519,6 +2526,7 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type == 'func_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
@@ -2578,6 +2586,7 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type in ['cond_func_skip', 'return_func_skip']:
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
@@ -2668,6 +2677,7 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None
@@ -3114,12 +3124,13 @@ class AutoEvent():
 
 class CharaReturn(Character):
     '''戻り値用のキャラクター'''
-    def __init__(self, name, pos, direction, movetype, message, fromTo, func, funcWarp, exps):
+    def __init__(self, name, pos, direction, movetype, message, fromTo, func, funcWarp, exps, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.fromTo: list[int] = fromTo
         self.func: str = func
         self.funcWarp: dict = funcWarp
         self.exps = exps
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
         
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
@@ -3128,7 +3139,7 @@ class CharaReturn(Character):
 
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp, avoiding):
+    def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp, avoiding, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction = direction
         self.back_direction = None
@@ -3137,6 +3148,7 @@ class CharaCheckCondition(Character):
         self.func = func
         self.funcWarp = funcWarp
         self.avoiding = avoiding
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
     def update(self, mymap: Map):
         """キャラクター状態を更新する。
@@ -3240,6 +3252,7 @@ class CharaMoveItemsEvent(CharaMoveEvent):
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.errmessage:s}"\
             f"{self.dest_map},{self.dest_x},{self.dest_y},{self.items},{self.funcName:s},{','.join(self.arguments)}"
 
+
 #                                                                                                         
 # 88b           d88                                    88888888888                                        
 # 888b         d888                                    88                                          ,d     
@@ -3267,8 +3280,7 @@ class MoveEvent():
         self.funcWarp = funcWarp
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
-        self.func_rect = Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE)
-        self.moveEventInfoWindow = MoveEventInfoWindow(self.func_rect, self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -3277,26 +3289,25 @@ class MoveEvent():
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
 
-        if PLAYER.x == self.x and PLAYER.y == self.y:
-            self.moveEventInfoWindow.draw(screen)
+        if PLAYER.x == self.x and PLAYER.y == self.y and PLAYER.funcInfoWindow_chara is None:
+            self.funcInfoWindow.draw(screen)
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
 
-class MoveEventInfoWindow(Window):
-    """デバッグコードウィンドウ"""
+class FuncInfoWindow(Window):
+    """関数の遷移歴を表示するウィンドウ"""
     FONT_SIZE = 20
     NOT_CHECKED_COLOR = (255, 0, 0)
     CHECKED_COLOR = (0, 255, 0)
     TEXT_COLOR = (255, 255, 255, 255)
 
-    def __init__(self, rect, funcs, warpPos):
-        Window.__init__(self, rect)
+    def __init__(self, funcs, warpPos):
+        Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs = funcs
         self.warpPos = warpPos
-        # self.funcCheckedNum = 0
         self.show()
 
     def draw_string(self, x, y, string, color):
@@ -3377,7 +3388,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exps, vartype, func, fromTo, funcWarp):
+    def __init__(self, pos, item, exps, vartype, func, fromTo, funcWarp, mapname):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -3389,6 +3400,7 @@ class Treasure():
         self.func = func
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
     def open(self, data: dict, exps: list[str]):
         """宝箱をあける"""
@@ -3434,6 +3446,9 @@ class Treasure():
 
             # テキストを描画
             screen.blit(text_surface, text_rect)
+
+        if PLAYER.x == self.x and PLAYER.y == self.y and PLAYER.funcInfoWindow_chara is None:
+            self.funcInfoWindow.draw(screen)
 
     def __str__(self):
         return f"TREASURE,{self.x},{self.y},{self.item}"
