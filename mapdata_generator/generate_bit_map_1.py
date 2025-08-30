@@ -85,13 +85,14 @@ class FuncWarp:
         return (self.to_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line: int):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | str | None], exps):
         self.pos = pos
         self.func_name = func_name
-        self.line = line
+        self.line_track = line_track
+        self.exps = exps
 
     def get_attributes(self):
-        return (self.pos, self.func_name, self.line)
+        return (self.pos, self.func_name, self.line_track)
 
 class AutoEvent:
     def __init__(self, pos: tuple[int, int], mapchip: int, dir: str):
@@ -158,15 +159,16 @@ class MapInfo:
             return None      
 
     # 話しかけると戻るキャラの設定
-    def setCharaReturn(self, roomNodeID, line, func_name):
+    def setCharaReturn(self, roomNodeID, line, func_name, funcNodeID, expNodeInfo):
         gy, gx, gheight, gwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
         if zero_elements.size > 0:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             pos = (int(gy+y), int(gx+x))
             self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            # とりあえずreturn文が必ずある場合のみを考える (void型は""となるのでint型ではキャストできない)
-            self.chara_returns.append(CharaReturn(pos, func_name, None if line == '""' else int(line)))
+            _, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(funcNodeID)
+            exp_comments = expNodeInfo[3] if expNodeInfo else []
+            self.chara_returns.append(CharaReturn(pos, func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
         else:
             print("generation failed: try again!! 6")
 
@@ -315,11 +317,21 @@ class MapInfo:
         
         ### 関数の戻りに応じたキャラクターの情報
         for chara_return in self.chara_returns:
-            pos, funcName, line = chara_return.get_attributes()
+            pos, funcName, line_track = chara_return.get_attributes()
+            rc_func_warp = []
+            converted_fromTo = []
+            for returnLine in line_track:
+                if isinstance(returnLine, str):
+                    warp_pos, args, line = self.func_warps[returnLine].get_attributes()
+                    rc_func_warp.append({"name": itemLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                    if line != 0:
+                        converted_fromTo.append(line)
+                else:
+                    converted_fromTo.append(returnLine)
             if funcName == "main":
-                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "line": line})
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "line": line})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
 
         for chara_checkCondition in self.chara_checkConditions:
             color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
@@ -373,7 +385,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start] for funcname, line_info in line_info_dict.items()}
+        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns] for funcname, line_info in line_info_dict.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
@@ -748,7 +760,7 @@ class GenBitMap:
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
             # returnノードに行数ラベルをつけて、それで行数を確認する
-            self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name)
+            self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name, nodeID, self.getExpNodeInfo(nodeID))
         
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:

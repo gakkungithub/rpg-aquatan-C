@@ -52,6 +52,7 @@ class LineInfo:
     def __init__(self):
         self.lines = set()
         self.loops = {}
+        self.returns = {}
         self.start = 0
 
     def setLine(self, line: int):
@@ -59,6 +60,9 @@ class LineInfo:
 
     def setLoop(self, key: int, value: int):
         self.loops[key] = value
+
+    def setReturn(self, line: int, funcs: list[str]):
+        self.returns[line] = funcs
 
     def setStart(self, line: int, not_to_set: bool = False):
         if self.start or not_to_set:
@@ -249,9 +253,11 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.createNode(f"{cr.location.line}", 'lpromoter')
+            returnNodeID = self.get_exp(value_cursor, 'lpromoter', f"{cr.location.line}")
+            # returnによる行確認は個別に行う (step in, step outを残り関数の違いによって区別するため) 関数の遷移履歴、現在のframe_num、現在の行数で確認
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.createEdge(returnNodeID, self.get_exp(value_cursor))
+            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expNode_info[f'"{returnNodeID}"'][2])
+            self.condition_move[f'"{returnNodeID}"'] = ('return', self.expNode_info[f'"{returnNodeID}"'][2])
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None
         elif cr.kind == ci.CursorKind.IF_STMT:
@@ -787,7 +793,7 @@ class ASTtoFlowChart:
             arg_calc_order_comments = []
             self.check_cursor_error(arg_cursor)
             arg_exp_term_list.append(self.parse_exp_term(arg_cursor, var_references, func_references, arg_calc_order_comments))
-            arg_calc_order_comments_list.append([arg_calc_order_comment["comment"] if isinstance(arg_calc_order_comment, dict) else arg_calc_order_comment for arg_calc_order_comment in arg_calc_order_comments])
+            arg_calc_order_comments_list.append({"values": [arg_calc_order_comment["comment"] if isinstance(arg_calc_order_comment, dict) else arg_calc_order_comment for arg_calc_order_comment in arg_calc_order_comments]})
             for arg_calc_order_comment in arg_calc_order_comments:
                 if isinstance(arg_calc_order_comment, dict):
                     calc_order_comments.append(arg_calc_order_comment)
