@@ -3332,18 +3332,34 @@ class FuncInfoWindow(Window):
         y_offset = 10
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         if self.funcs is not None:
+            func_pos_list: list[tuple[int, int]] = []
             for i, func in enumerate(self.funcs):
                 text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
+                text_width = self.font.get_rect(text).width
+                # 引数に関数が含まれる場合は段落をつけて関係を描画する
+                x_pos_max = 0
+                y_pos_sum = 0
+                func_num = 0
+                for children in func['children']:
+                    for child in children:
+                        func_pos = func_pos_list.pop(0)
+                        x_pos_max = max(x_pos, func_pos[0])
+                        y_pos_sum += func_pos[1]
+                        func_num += 1
+                x_pos = x_pos_max + 40 if func_num else x_offset
+                y_pos = y_pos_sum // func_num if func_num else y_offset
                 bg_rect = pygame.Rect(
-                    x_offset,
-                    y_offset,
-                    self.rect.width - 20,
+                    x_pos,
+                    y_pos,
+                    text_width,
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
                 # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
-                self.draw_string(x_offset, y_offset+2, text, self.TEXT_COLOR)
-                y_offset += self.FONT_SIZE + 10
+                self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
+                func_pos_list.append((x_pos+text_width, y_pos))
+                if func_num == 0:
+                    y_offset += self.FONT_SIZE + 10
         Window.blit(self, screen)
 
 #                                                                                                                                 
