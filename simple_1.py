@@ -1357,7 +1357,6 @@ class Map:
         door.close()
         self.events.append(door)
 
-    # events.append({"type": "SDOOR", "x": door.pos[1], "y": door.pos[0], "doorname": door.name, "dir": door.dir, "autoType": door.type, "fromTo": converted_fromTo, "funcWarp": d_func_warp})
     def create_smalldoor_j(self, data):
         """ドアを作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
@@ -3294,6 +3293,16 @@ class MoveEvent():
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
+
+                                                                                                                                                          
+# 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
+# 88                                         88              d8"            `8b       d8b       d8' ""                      88                                 
+# 88                                         88              88              "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaa 88       88 8b,dPPYba,   ,adPPYba, 88 8b,dPPYba, MM88MMM ,adPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""" 88       88 88P'   `"8a a8"     "" 88 88P'   `"8a  88   a8"     "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88      88       88 88       88 8b         88 88       88  88   8b       d8  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88      "8a,   ,a88 88       88 "8a,   ,aa 88 88       88  88   "8a,   ,a8"   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88       `"YbbdP'Y8 88       88  `"Ybbd8"' 88 88       88  88    `"YbbdP"'     `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
 
 class FuncInfoWindow(Window):
     """関数の遷移歴を表示するウィンドウ"""

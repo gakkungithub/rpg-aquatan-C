@@ -40,12 +40,12 @@ DATA_DIR = BASE_DIR + '/mapdata'
     #         print("generation failed: try again!! 5")
 
 class ConditionLineTracker:
-    def __init__(self, condition_line_track: tuple[str, list[int | str | None]]):
+    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | None]]):
         self.type = condition_line_track[0]
         self.condition_line_track = condition_line_track[1]
 
 class ConditionLineTrackers:
-    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | None]]]):
         self.tracks: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
 
     def get_condition_line_tracker(self, nodeID: str):
@@ -57,7 +57,7 @@ class ConditionLineTrackers:
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
-                    type: str, line_track: list[int | str | None], exps: list[str | dict], func_name: str):
+                    type: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: list[str | dict], func_name: str):
         self.from_pos = from_pos
         self.to_pos = to_pos
         self.mapchip = mapchip
@@ -67,7 +67,7 @@ class MoveEvent:
         self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | str | None], exps: dict, type: str, func_name: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: dict, type: str, func_name: str):
         self.pos = pos
         self.name = name
         self.line_track = line_track
@@ -85,7 +85,7 @@ class FuncWarp:
         return (self.to_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | str | None], exps):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps):
         self.pos = pos
         self.func_name = func_name
         self.line_track = line_track
@@ -107,7 +107,7 @@ class Door:
         self.dir = dir
 
 class CharaCheckCondition:
-    def __init__(self, func, pos, dir, type, line_track, exps):
+    def __init__(self, func, pos, dir, type, line_track: tuple[str, list[list[str]]], exps):
         self.func = func
         self.pos = pos
         self.dir = dir
@@ -268,9 +268,9 @@ class MapInfo:
             me_func_warp = []
             converted_fromTo = []
             for condLine in move_event.line_track:
-                if isinstance(condLine, str):
-                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
-                    me_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(condLine, tuple):
+                    warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
+                    me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
@@ -284,9 +284,9 @@ class MapInfo:
             t_func_warp = []
             converted_fromTo = []
             for itemLine in treasure.line_track:
-                if isinstance(itemLine, str):
-                    warp_pos, args, line = self.func_warps[itemLine].get_attributes()
-                    t_func_warp.append({"name": itemLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(itemLine, tuple):
+                    warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
+                    t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
@@ -321,9 +321,9 @@ class MapInfo:
             rc_func_warp = []
             converted_fromTo = []
             for returnLine in line_track:
-                if isinstance(returnLine, str):
-                    warp_pos, args, line = self.func_warps[returnLine].get_attributes()
-                    rc_func_warp.append({"name": itemLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(returnLine, tuple):
+                    warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
+                    rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
@@ -338,9 +338,9 @@ class MapInfo:
             ccc_func_warp = []
             converted_fromTo = []
             for condLine in chara_checkCondition.line_track:
-                if isinstance(condLine, str):
-                    warp_pos, args, line = self.func_warps[condLine].get_attributes()
-                    ccc_func_warp.append({"name": condLine, "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line})
+                if isinstance(condLine, tuple):
+                    warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
+                    ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 else:
