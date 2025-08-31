@@ -3829,7 +3829,7 @@ class ItemBag:
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
     code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
-                  "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer"]
+                  "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32

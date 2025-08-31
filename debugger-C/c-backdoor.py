@@ -118,10 +118,18 @@ class VarsTracker:
                             cstr = process.ReadCStringFromMemory(addr, 100, error)
                             if error.Success():
                                 print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
+                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                if cstr != var_previous_value:
+                                    if len(vars_path) == 0:
+                                        self.vars_changed[name] = [('[0]', )]
+                                    else:
+                                        if vars_path[0] in self.vars_changed:
+                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        else:
+                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable char*")
-
                         elif type_name == "int":
                             data = process.ReadMemory(addr, 4, error)
                             if error.Success():
@@ -129,7 +137,6 @@ class VarsTracker:
                                 print(f"{indent}→ {full_name} points to int: {val}")
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
-                                    print(vars_path, 'here')
                                     if len(vars_path) == 0:
                                         self.vars_changed[name] = [('[0]', )]
                                     else:
@@ -140,21 +147,37 @@ class VarsTracker:
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")
-
                         elif type_name == "float":
                             data = process.ReadMemory(addr, 4, error)
                             if error.Success():
                                 val = struct.unpack("f", data)[0]
                                 print(f"{indent}→ {full_name} points to float: {val}")
+                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                if val != var_previous_value:
+                                    if len(vars_path) == 0:
+                                        self.vars_changed[name] = [('[0]', )]
+                                    else:
+                                        if vars_path[0] in self.vars_changed:
+                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        else:
+                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable float*")
-
                         elif type_name == "double":
                             data = process.ReadMemory(addr, 8, error)
                             if error.Success():
                                 val = struct.unpack("d", data)[0]
                                 print(f"{indent}→ {full_name} points to double: {val}")
+                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                if val != var_previous_value:
+                                    if len(vars_path) == 0:
+                                        self.vars_changed[name] = [('[0]', )]
+                                    else:
+                                        if vars_path[0] in self.vars_changed:
+                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        else:
+                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable double*")
@@ -182,7 +205,6 @@ class VarsTracker:
                 self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
                 if len(self.vars_removed) != 0:
                     self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
-                    # print(self.vars_declared)
 
     def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
         indent = "    " * depth
@@ -445,10 +467,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
                         while crntFromTo:
                             if self.next_frame_num > self.frame_num:
-                                print(self.next_line_number, funcWarp)
                                 line_number_track.append(self.next_line_number)
                                 if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
-                                    self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True})
+                                    self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         back_line_number = self.line_number
@@ -826,7 +847,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if (funcWarps := event.get('funcWarp', None)) is not None:
                                     for funcWarp in funcWarps:
                                         if funcWarp["name"] == self.func_crnt_name and funcWarp["line"] == self.next_line_number:
-                                            self.event_sender({"message": "遷移先の関数の処理をスキップしますか?", "status": "ok", "skip": True})
+                                            self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skip": True})
                                             event = self.event_reciever()
                                             if event.get('skip', False):
                                                 back_line_number = self.line_number

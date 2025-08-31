@@ -352,9 +352,10 @@ class ASTtoFlowChart:
             self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
             nodeID = expNodeID
         else:
-            # 最初行番を変更
+            # 最初行番を変更 
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
+            # ここの計算式は計算式キャラクターに登録する
             expNodeID = self.get_exp(cr, 'rect')
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID

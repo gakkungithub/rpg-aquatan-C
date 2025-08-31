@@ -283,6 +283,7 @@ class MapInfo:
             # fromToは全てのアイテムで共通
             t_func_warp = []
             converted_fromTo = []
+            print(treasure.line_track)
             for itemLine in treasure.line_track:
                 if isinstance(itemLine, tuple):
                     warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
