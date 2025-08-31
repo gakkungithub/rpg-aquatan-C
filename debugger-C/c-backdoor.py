@@ -129,13 +129,14 @@ class VarsTracker:
                                 print(f"{indent}→ {full_name} points to int: {val}")
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
+                                    print(vars_path, 'here')
                                     if len(vars_path) == 0:
                                         self.vars_changed[name] = [('[0]', )]
                                     else:
                                         if vars_path[0] in self.vars_changed:
-                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], '[0]'))
+                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
                                         else:
-                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], '[0]')]
+                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")

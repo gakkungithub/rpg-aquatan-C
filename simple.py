@@ -3747,8 +3747,10 @@ class Item:
     def set_value(self, vals: dict):
         """値をセット"""
         path: list[str] = vals["path"]
+        print(path)
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
+            print(temp_itemvalue.children)
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
 
