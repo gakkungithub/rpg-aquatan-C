@@ -237,7 +237,7 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
-        exp_str, var_refs, func_refs, exp_comments, exp_line_num = expNodeInfo
+        exp_comments = expNodeInfo[3] if expNodeInfo else []
         self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1], exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 

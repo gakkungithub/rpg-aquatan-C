@@ -65,10 +65,10 @@ class VarsTracker:
                             gvars.append(var)
 
         self.vars_changed = {}
-        self.track(gvars, self.global_previous_values, [])
+        self.track(gvars, self.global_previous_values, [], isLocal=False)
         self.track(frame.GetVariables(True, True, True, True), self.previous_values[-1], [])
 
-    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="") -> list[str]:
+    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="", isLocal=True) -> list[str]:
         crnt_vars: list[str] = []
         
         indent = "    " * depth
@@ -94,7 +94,7 @@ class VarsTracker:
                 # print(f"{indent}{full_name} = {value}")
                 pass
 
-            if depth == 0:
+            if depth == 0 and isLocal:
                 crnt_vars.append(name)
 
             if name in var_previous_values:
@@ -127,6 +127,15 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("i", data)[0]
                                 print(f"{indent}→ {full_name} points to int: {val}")
+                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                if val != var_previous_value:
+                                    if len(vars_path) == 0:
+                                        self.vars_changed[name] = [('[0]', )]
+                                    else:
+                                        if vars_path[0] in self.vars_changed:
+                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], '[0]'))
+                                        else:
+                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")
@@ -155,24 +164,24 @@ class VarsTracker:
                             if deref.IsValid() and deref.GetNumChildren() > 0:
                                 print(f"{indent}→ Deref {full_name}")
                                 children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
+                                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
                     else:
                         children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
+                        self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
 
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
+                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
     
-        if depth == 0:
+        if depth == 0 and isLocal:
             if len(self.vars_declared) != 0:
                 self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
                 if len(self.vars_removed) != 0:
                     self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
-                    print(self.vars_declared)
+                    # print(self.vars_declared)
 
     def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
         indent = "    " * depth
@@ -340,14 +349,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if str(self.next_line_number) in self.line_data[self.func_crnt_name][3] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name][3][str(self.next_line_number)])
 
-            if self.line_data[self.func_crnt_name][0][-1] == self.next_line_number and str(self.next_line_number) not in self.line_data[self.func_crnt_name][3]:
-                self.thread.StepOut()
+            if str(self.next_line_number) not in self.line_data[self.func_crnt_name][3]:
+                self.thread.StepInto()
             else:
-                if len(self.func_checked) and len(self.func_checked[-1]) == 0:
+                if len(self.func_checked) and len(self.func_checked[-1]) != 0:
+                    self.func_checked[-1].pop(0)
+                    self.thread.StepInto()
+                else:
                     self.func_checked.pop()
                     self.thread.StepOut()
-                else:
-                    self.thread.StepInto()
 
             if (next_state := self.get_next_state()):
                 self.line_number = self.next_line_number
@@ -400,7 +410,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             varsDeclLines_copy = varsDeclLines[:]
 
-            print(varsDeclLines_copy)
             # やはり、変数は順番に取得させる
             while len(varsDeclLines_copy) != 0:
                 var = varsDeclLines_copy.pop(0)
@@ -493,6 +502,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             values_changed = list(set(common) - set(varsDeclLines))
             # その後、varsChangedをキーとしてvars_changedの変更値を取得する
 
+            print(self.vars_tracker.vars_declared[-1], common, values_changed)
             if len(values_changed) != 0:
                 vars_event = []
                 errorCnt = 0
@@ -541,6 +551,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                                 value_path = [*value_changed_tuple]
                                 isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
+                                print(value_path)
                                 print(isCorrect)
                                 value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
                         self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})

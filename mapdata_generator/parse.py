@@ -443,6 +443,7 @@ class ASTtoFlowChart:
                 if len(not_array_cursors) == 2 and not_array_cursors[0].kind == ci.CursorKind.TYPE_REF and not_array_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
                     not_array_cursors.pop(0)
                 for cr in not_array_cursors:
+                    print(cursor.spelling, cr.kind)
                     self.check_cursor_error(cr)
                     # 構造体の宣言でノードを作る
                     if cr.kind == ci.CursorKind.TYPE_REF:
@@ -482,7 +483,7 @@ class ASTtoFlowChart:
                         self.condition_move[f'"{nodeID}"'] = ('item', member_condition_move)
                         self.line_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
                         self.func_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
-                    # スカラー変数
+                    # スカラー変数とポインタ
                     else:
                         nodeID = self.get_exp(cr)
                         # 今は一行だが、複数行になる場合、関数の遷移前の行番を取得する必要がある。(関数がない場合は変数名の行数になる)

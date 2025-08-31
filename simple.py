@@ -2845,7 +2845,10 @@ class ItemWindow(Window):
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('%'.join(item.itemvalue.exps))
+                        comments = []
+                        for comment in item.itemvalue.exps:
+                            comments.append(comment["comment"] if isinstance(comment, dict) else comment)
+                        MSGWND.set('%'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
@@ -2893,7 +2896,10 @@ class ItemWindow(Window):
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('%'.join(itemvalue.exps))
+                        comments = []
+                        for comment in itemvalue.exps:
+                            comments.append(comment["comment"] if isinstance(comment, dict) else comment)
+                        MSGWND.set('%'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 25)
                 item_rect = pygame.Rect(
@@ -3371,8 +3377,8 @@ class FuncInfoWindow(Window):
                     text_width,
                     self.FONT_SIZE + 4
                 )
-                for i, x in enumerate(x_pos_list):
-                    draw_arrow(self.surface, self.LINE_COLOR, (x+10, y_pos_list[i] + (self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
+                for index_x_pos, x in enumerate(x_pos_list):
+                    draw_arrow(self.surface, self.LINE_COLOR, (x+10, y_pos_list[index_x_pos] + (self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
 
                 pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
                 # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
@@ -3761,7 +3767,7 @@ class ItemValue:
         value: str | None = data["value"]
         itemvalue_exps: list[str] = exps if isinstance(exps, list) else None
         children_dict: dict[str | int, dict] = data["children"]
-        children = {index: cls.from_dict(v, exps.get(f"\"{index}\"", None) if exps else None) for index, v in children_dict.items()}
+        children = {index: cls.from_dict(v, exps.get(f"\"{index}\"", None) if isinstance(exps, dict) else None) for index, v in children_dict.items()}
         return cls(value, itemvalue_exps, children)
 
 #                                                                             
