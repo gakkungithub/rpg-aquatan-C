@@ -342,7 +342,9 @@ class ASTtoFlowChart:
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
-            # 関数が単独で出た場合は、計算式キャラクターに登録する
+            # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
+            # 関数に入る前で止まれるようにlineを登録しておく
+            self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             expNodeID = self.createNode("")
             self.createEdge(nodeID, expNodeID)
             var_references = []
@@ -350,6 +352,7 @@ class ASTtoFlowChart:
             calc_order_comments = []
             exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
             self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
+            self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{nodeID}"'][2]) else [cr.location.line])
             nodeID = expNodeID
         else:
             # 最初行番を変更 
@@ -357,6 +360,7 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # ここの計算式は計算式キャラクターに登録する
             expNodeID = self.get_exp(cr, 'rect')
+            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{nodeID}"'][2]) else [cr.location.line])
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID
         return nodeID
@@ -497,7 +501,6 @@ class ASTtoFlowChart:
                         self.func_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
                         self.createEdge(varNodeID, nodeID)
             else:
-                print(cursor.spelling, 'noValue')
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
                 self.expNode_info[f'"{nodeID}"'] = ("?", [], [], [], cursor.location.line)

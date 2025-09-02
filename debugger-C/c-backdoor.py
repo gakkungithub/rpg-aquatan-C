@@ -573,8 +573,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                                 value_path = [*value_changed_tuple]
                                 isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
-                                print(value_path)
-                                print(isCorrect)
                                 value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
                         self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
                         break

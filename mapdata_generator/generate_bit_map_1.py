@@ -13,32 +13,6 @@ import mapChipID as mcID
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 
-    # 関数キャラの設定
-    # def setFuncWarp(self, func_warp):
-    #     for funcName, funcWarp in func_warp.items():
-    #         if funcWarp[0] and funcWarp[1]:
-    #             wy, wx, wheight, wwidth = self.room_info[funcWarp[0]]
-    #             zero_elements = np.argwhere(self.eventMap[wy:wy+wheight, wx:wx+wwidth] == 0)
-    #             if zero_elements.size > 0:
-    #                 y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-    #                 warpPos = (int(wy+y), int(wx+x))
-    #                 self.eventMap[warpPos[0], warpPos[1]] = self.ISEVENT
-    #                 for warpFuncInfo in funcWarp[1]:
-    #                     self.setCharaMoveItems(warpFuncInfo, (funcName, warpPos), funcWarp[2])
-
-    # # 話しかけると別の関数に進むキャラの設定
-    # def setCharaMoveItems(self, warpFuncInfo, warpTo, arguments):
-    #     roomNodeID, vars, funcName = warpFuncInfo
-    #     gy, gx, gheight, gwidth = self.room_info[roomNodeID]
-    #     zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-    #     if zero_elements.size > 0:
-    #         y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-    #         pos = (int(gy+y), int(gx+x))
-    #         self.eventMap[pos[0], pos[1]] = self.ISEVENT
-    #         self.chara_moveItems.append((pos, warpTo, vars, funcName, arguments))
-    #     else:
-    #         print("generation failed: try again!! 5")
-
 class ConditionLineTracker:
     def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | None]]):
         self.type = condition_line_track[0]
@@ -115,6 +89,15 @@ class CharaCheckCondition:
         self.line_track = line_track
         self.exps = exps
 
+class CharaExpression:
+    def __init__(self, pos: tuple[int, int], func: str):
+        self.pos = pos
+        self.func = func
+        self.exps_dict: dict[int, dict] = {}
+    
+    def addExp(self, line: int, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int], line_track: tuple[str, list[list[str]]]):
+        self.exps_dict[line] = {"comments": expNodeInfo[3], "line_track": line_track}
+
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
     ISEVENT = 2
@@ -132,6 +115,7 @@ class MapInfo:
         self.auto_events: list[AutoEvent] = []
         self.doors: list[Door] = []
         self.chara_checkConditions: list[CharaCheckCondition] = []
+        self.chara_expressions: dict[str, CharaExpression] = {}
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -162,15 +146,12 @@ class MapInfo:
     def setCharaReturn(self, roomNodeID, line, func_name, funcNodeID, expNodeInfo):
         gy, gx, gheight, gwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            pos = (int(gy+y), int(gx+x))
-            self.eventMap[pos[0], pos[1]] = self.ISEVENT
-            _, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(funcNodeID)
-            exp_comments = expNodeInfo[3] if expNodeInfo else []
-            self.chara_returns.append(CharaReturn(pos, func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
-        else:
-            print("generation failed: try again!! 6")
+        y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+        pos = (int(gy+y), int(gx+x))
+        self.eventMap[pos[0], pos[1]] = self.ISEVENT
+        _, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(funcNodeID)
+        exp_comments = expNodeInfo[3] if expNodeInfo else []
+        self.chara_returns.append(CharaReturn(pos, func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
 
     # gotoラベルによるワープゾーンの設定
     def setGotoWarpZone(self, gotoRooms, func_name):
@@ -189,39 +170,30 @@ class MapInfo:
         
         #まず遷移元を設定する
         zero_elements = np.argwhere(self.eventMap[sy:sy+sheight, sx:sx+swidth] == 0)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            warpFrom = (int(sy+y), int(sx+x))
-            self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
-            #次に遷移先を設定する
-            zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
-            if zero_elements.size > 0:
-                y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-                warpTo = (int(gy+y), int(gx+x))
-                self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
-                c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(goalNodeID)
-                # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
-                if warpNodeID is not None:
-                    c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
-                exp_comments = expNodeInfo[3] if expNodeInfo else []
-                self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
-            else:
-                print("generation failed: try again!! 1")
-        else:
-            print("generation failed: try again!! 2")
+        y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+        warpFrom = (int(sy+y), int(sx+x))
+        self.eventMap[warpFrom[0], warpFrom[1]] = self.ISEVENT
+        #次に遷移先を設定する
+        zero_elements = np.argwhere(self.eventMap[gy:gy+gheight, gx:gx+gwidth] == 0)
+        y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+        warpTo = (int(gy+y), int(gx+x))
+        self.eventMap[warpTo[0], warpTo[1]] = self.ISEVENT
+        c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(goalNodeID)
+        # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
+        if warpNodeID is not None:
+            c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
+        exp_comments = expNodeInfo[3] if expNodeInfo else []
+        self.move_events.append(MoveEvent(warpFrom, warpTo, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
     def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str, crnt_func_name: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
-        if zero_elements.size > 0:
-            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            item_pos = (int(ry+y), int(rx+x))
-            self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
-            self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type, crnt_func_name))
-        else:
-            print("generation failed: try again!! 3")
+        y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+        item_pos = (int(ry+y), int(rx+x))
+        self.eventMap[item_pos[0], item_pos[1]] = self.ISEVENT
+        self.treasures.append(Treasure(item_pos, item_name, line_track, item_exp_dict, var_type, crnt_func_name))
 
     # 一方通行パネルの設定
     def setOneWay(self, pos, dy, dx):
@@ -240,6 +212,17 @@ class MapInfo:
         exp_comments = expNodeInfo[3] if expNodeInfo else []
         self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1], exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
+
+    def addExpressionToCharaExpression(self, crntRoomID, expNodeInfo, lineNodeID, func):
+        _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
+        if crntRoomID not in self.chara_expressions:
+            ry, rx, rheight, rwidth = self.room_info[crntRoomID]
+            zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
+            y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
+            chara_pos = (int(ry+y), int(rx+x))
+            self.eventMap[chara_pos[0], chara_pos[1]] = self.ISEVENT
+            self.chara_expressions[crntRoomID] = CharaExpression(chara_pos, func)
+        self.chara_expressions[crntRoomID].addExp(expNodeInfo, line_track)
 
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict):
@@ -283,7 +266,6 @@ class MapInfo:
             # fromToは全てのアイテムで共通
             t_func_warp = []
             converted_fromTo = []
-            print(treasure.line_track)
             for itemLine in treasure.line_track:
                 if isinstance(itemLine, tuple):
                     warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
@@ -306,15 +288,6 @@ class MapInfo:
         # 入口用のドアの情報 (開けようとする時に行数を確認する)
         for door in self.doors:
             events.append({"type": "SDOOR", "x": door.pos[1], "y": door.pos[0], "doorname": door.name, "dir": door.dir})
-
-        # # ワープキャラの情報
-        # ### 関数の呼び出しに応じたキャラクターの情報
-        # for chara_moveItems in chara_moveItemsInfo:
-        #     pos, warpTo, vars, funcName, arguments = chara_moveItems
-        #     # キャラの色をでランダムにする
-        #     color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
-            
-        #     characters.append({"type": "CHARAMOVEITEMS", "name": str(color), "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"関数 {warpTo[0]} に遷移します!!", "errmessage": f"関数 {warpTo[0]} に遷移できません!!", "dest_map": pname, "dest_x": warpTo[1][1], "dest_y": warpTo[1][0], "items": vars, "funcName": funcName, "arguments": arguments})
         
         ### 関数の戻りに応じたキャラクターの情報
         for chara_return in self.chara_returns:
@@ -349,6 +322,24 @@ class MapInfo:
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
 
+        for chara_expression in self.chara_expressions.values():
+            # color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+            exps_dict = {}
+            for firstLine, exps in chara_expression.exps_dict.items():
+                ce_func_warp = []
+                converted_fromTo = []
+                for condLine in exps["line_track"]:
+                    if isinstance(condLine, tuple):
+                        warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
+                        ce_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
+                        if line != 0:
+                            converted_fromTo.append(line)
+                    else:
+                        converted_fromTo.append(condLine)
+                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"]}
+            characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
+                               "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
+            
         filename = f'{DATA_DIR}/{pname}/{pname}.json'
         with open(filename, 'w') as f:
             fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
@@ -857,7 +848,7 @@ class GenBitMap:
             crntRoomID = trueNodeID
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は line: 内容 という感じで追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
-            pass
+            self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)
         else:
             # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる
             # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
