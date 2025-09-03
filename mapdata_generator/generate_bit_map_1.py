@@ -222,7 +222,7 @@ class MapInfo:
             chara_pos = (int(ry+y), int(rx+x))
             self.eventMap[chara_pos[0], chara_pos[1]] = self.ISEVENT
             self.chara_expressions[crntRoomID] = CharaExpression(chara_pos, func)
-        self.chara_expressions[crntRoomID].addExp(expNodeInfo, line_track)
+        self.chara_expressions[crntRoomID].addExp(line_track[0], expNodeInfo, line_track)
 
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict):
@@ -328,6 +328,8 @@ class MapInfo:
             for firstLine, exps in chara_expression.exps_dict.items():
                 ce_func_warp = []
                 converted_fromTo = []
+                if len(exps["line_track"]):
+                    continue
                 for condLine in exps["line_track"]:
                     if isinstance(condLine, tuple):
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()

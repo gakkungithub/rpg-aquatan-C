@@ -1255,6 +1255,8 @@ class Map:
                 self.create_charamove_j(chara)
             elif chara_type == "CHARAMOVEITEMS": # キャラクター+アイテムが条件の遷移
                 self.create_charamoveitems_j(chara)
+            elif chara_type == "CHARAEXPRESSION": # 計算式のチェックを行うキャラクター
+                self.create_charaexpression_j(chara)
             elif chara_type == "CHARARETURN": #キャラクター+遷移元に戻る
                 self.create_charareturn_j(chara)
             elif chara_type == "CHARACHECKCONDITION":
@@ -1426,6 +1428,21 @@ class Map:
         arguments = data["arguments"]
         chara = CharaMoveItemsEvent(name, (x, y), direction, movetype, message, errmessage,
                                 dest_map, (dest_x, dest_y), items, funcName, arguments)
+        #print(chara)
+        self.charas.append(chara)
+
+            # characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
+            #                    "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
+    def create_charaexpression_j(self, data):
+        """計算式を確認するキャラクターを追加する"""
+        name = data["name"]
+        x, y = int(data["x"]), int(data["y"])
+        direction = int(data["dir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        func = data["func"]
+        exps = data["exps"]
+        chara = CharaExpression(name, (x, y), direction, movetype, message, func, exps)
         #print(chara)
         self.charas.append(chara)
 
@@ -2013,6 +2030,9 @@ class Player(Character):
                     parts = msg.split(" ", 1)
                     parts1 = parts[1].split(" ",1)
                     PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif isinstance(chara, CharaExpression):
+                    
+                    pass
                 elif isinstance(chara, CharaReturn):
                     PLAYER.set_waitingMove_return(mymap, chara)
                 elif isinstance(chara, CharaCheckCondition):
@@ -3250,6 +3270,15 @@ class CharaMoveItemsEvent(CharaMoveEvent):
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.errmessage:s}"\
             f"{self.dest_map},{self.dest_x},{self.dest_y},{self.items},{self.funcName:s},{','.join(self.arguments)}"
 
+class CharaExpression(Character):
+    def __init__(self, name, pos, direction, movetype, message, func, exps):
+        super().__init__(name, pos, direction, movetype, message)
+        self.func = func
+        self.exps = exps
+
+    def __str__(self):
+        return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
+            f"{self.direction:d},{self.movetype:d},{self.message:s},"
 
 #                                                                                                         
 # 88b           d88                                    88888888888                                        

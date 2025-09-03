@@ -352,7 +352,7 @@ class ASTtoFlowChart:
             calc_order_comments = []
             exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
             self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-            self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{nodeID}"'][2]) else [cr.location.line])
+            self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line])
             nodeID = expNodeID
         else:
             # 最初行番を変更 
@@ -360,7 +360,7 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # ここの計算式は計算式キャラクターに登録する
             expNodeID = self.get_exp(cr, 'rect')
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{nodeID}"'][2]) else [cr.location.line])
+            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line])
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID
         return nodeID
