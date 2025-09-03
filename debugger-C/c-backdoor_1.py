@@ -422,6 +422,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 print("[STDERR]")
                 print(stderr_output)
 
+        def get_new_values(self, values_changed):
+            value_changed_dict = []
+            for value_changed in values_changed:
+                for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
+                    value_path = [*value_changed_tuple]
+                    isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
+                    value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
+            return value_changed_dict
+        
         def vars_checker(self, isForFalse=False):
             if self.isEnd:
                 return
@@ -526,61 +535,57 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             # if, while True, while False, for In, for True, for False, switch Caseによる値の変化は無視できるようにする
             if len(values_changed) != 0:
-                vars_event = []
-                errorCnt = 0
-                if (event := self.event_reciever()) is None:
-                    return
-                while True:
-                    # if (itemset := event.get('itemset', None)) is not None:
-                    #     item, itemValue = itemset
-                    #     if item not in values_changed:
-                    #         errorCnt += 1
-                    #         print(f'your variables were incorrect!!\ncorrect variables: {values_changed}')
-                    #         # 複数回入力を間違えたらヒントをあげる
-                    #         if errorCnt >= 3:
-                    #             self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(values_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
-                    #         else:
-                    #             self.event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
-                    #         event = self.event_reciever()
-                    #         continue
-                    #     # ここはitemValueではなくどこの変数を変えようとするかが合致していればOKにする
-                    #     if itemValue != self.vars_tracker.getValueByVar(item):
-                    #         errorCnt += 1
-                    #         print(f'your variable numbers were incorrect!!\ncorrect variables: {values_changed}')
-                    #         # 複数回入力を間違えたらヒントをあげる
-                    #         if errorCnt >= 3:
-                    #             item_values_str = ', '.join(f"{name} は {self.vars_tracker.getValueByVar(name)}" for name in list(set(values_changed) - set(vars_event)))
-                    #             self.event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
-                    #         else:
-                    #             self.event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
-                    #         event = self.event_reciever()
-                    #         continue
-                    #     vars_event.append(item)
-                    #     if Counter(vars_event) == Counter(values_changed):
-                    #         print("you changed correct vars")
-                    #         self.event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, getLine)
-                    #         break
-                    #     self.event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, False)
-                    # else:
-                    #     errorCnt += 1
-                    #     self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
-                    #     event = self.event_reciever()
-                    #     continue
-                    
-                    if (event.get('itemsetall', False)):
-                        value_changed_dict = []
-                        for value_changed in values_changed:
-                            for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
-                                value_path = [*value_changed_tuple]
-                                isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
-                                value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
-                        self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
-                        break
-                    else:
+                if self.line_number in self.line_data[self.func_name][0]:
+                    self.vars_tracker.vars_changed = {var: self.vars_tracker.vars_changed[var] for var in values_changed}
+                else:
+                    vars_event = []
+                    errorCnt = 0
+                    if (event := self.event_reciever()) is None:
+                        return
+                    while True:
+                        # if (itemset := event.get('itemset', None)) is not None:
+                        #     item, itemValue = itemset
+                        #     if item not in values_changed:
+                        #         errorCnt += 1
+                        #         print(f'your variables were incorrect!!\ncorrect variables: {values_changed}')
+                        #         # 複数回入力を間違えたらヒントをあげる
+                        #         if errorCnt >= 3:
+                        #             self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(values_changed) - set(vars_event)))} の値を変えてください!!", "status": "ng"})
+                        #         else:
+                        #             self.event_sender({"message": f"異なるアイテム {item} の値を変えようとしています!!", "status": "ng"})
+                        #         event = self.event_reciever()
+                        #         continue
+                        #     # ここはitemValueではなくどこの変数を変えようとするかが合致していればOKにする
+                        #     if itemValue != self.vars_tracker.getValueByVar(item):
+                        #         errorCnt += 1
+                        #         print(f'your variable numbers were incorrect!!\ncorrect variables: {values_changed}')
+                        #         # 複数回入力を間違えたらヒントをあげる
+                        #         if errorCnt >= 3:
+                        #             item_values_str = ', '.join(f"{name} は {self.vars_tracker.getValueByVar(name)}" for name in list(set(values_changed) - set(vars_event)))
+                        #             self.event_sender({"message": f"ヒント: {item_values_str} に設定しましょう!!", "status": "ng"})
+                        #         else:
+                        #             self.event_sender({"message": f"アイテムに異なる値 {itemValue} を設定しようとしています!!", "status": "ng"})
+                        #         event = self.event_reciever()
+                        #         continue
+                        #     vars_event.append(item)
+                        #     if Counter(vars_event) == Counter(values_changed):
+                        #         print("you changed correct vars")
+                        #         self.event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, getLine)
+                        #         break
+                        #     self.event_sender({"message": f"アイテム {item} の値を {itemValue} で正確に設定できました!!", "status": "ok"}, False)
+                        # else:
+                        #     errorCnt += 1
+                        #     self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
+                        #     event = self.event_reciever()
+                        #     continue
+                        
+                        if event.get('itemsetall', False):
+                            value_changed_dict = self.get_new_values(values_changed)
+                            self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
+                            break
                         errorCnt += 1
                         self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
                         event = self.event_reciever()
-                        continue
 
             # 変数が初期化されない時、スキップされるので、それも読み取る
             target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
@@ -715,7 +720,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
-                        self.event_sender({"message": "", "status": "ok"})
+                        # 条件文での値の変化はここで一括で取得する (allではなくpartlyにするかどうかは考える)
+                        self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
                         break
@@ -865,7 +871,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     if back_line_number == self.line_number:
                                                         break
                                 else:
-                                    self.event_sender({"message": "", "status": "ok"})
+                                    self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
                                     self.vars_tracker.trackStart(self.frame)
                                     self.vars_checker()
                             elif type == 'continue':
@@ -967,7 +973,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 skipEnd = self.line_data[self.func_name][1][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True, "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
