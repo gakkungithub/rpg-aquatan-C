@@ -328,7 +328,7 @@ class MapInfo:
             for firstLine, exps in chara_expression.exps_dict.items():
                 ce_func_warp = []
                 converted_fromTo = []
-                if len(exps["line_track"]):
+                if len(exps["line_track"]) == 2:
                     continue
                 for condLine in exps["line_track"]:
                     if isinstance(condLine, tuple):
@@ -338,7 +338,7 @@ class MapInfo:
                             converted_fromTo.append(line)
                     else:
                         converted_fromTo.append(condLine)
-                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"]}
+                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": ce_func_warp}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             

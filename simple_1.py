@@ -1431,8 +1431,6 @@ class Map:
         #print(chara)
         self.charas.append(chara)
 
-            # characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
-            #                    "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
     def create_charaexpression_j(self, data):
         """計算式を確認するキャラクターを追加する"""
         name = data["name"]
@@ -1442,7 +1440,7 @@ class Map:
         message = data["message"]
         func = data["func"]
         exps = data["exps"]
-        chara = CharaExpression(name, (x, y), direction, movetype, message, func, exps)
+        chara = CharaExpression(name, (x, y), direction, movetype, message, func, exps, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1862,6 +1860,7 @@ class Player(Character):
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
+                        print(itemResult)
                         if itemResult.get('skip', False):
                             MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
@@ -2031,8 +2030,30 @@ class Player(Character):
                     parts1 = parts[1].split(" ",1)
                     PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif isinstance(chara, CharaExpression):
-                    
-                    pass
+                    linenum = self.sender.code_window.linenum
+                    if chara.linenum is None:
+                        chara.linenum = linenum
+                    if (exps := chara.exps.get(str(chara.linenum), None)):
+                        self.sender.send_event({"type": "func", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
+                        charaExpressionResult = self.sender.receive_json()
+                        if charaExpressionResult is not None:
+                            if charaExpressionResult['status'] == "ng":
+                                MSGWND.set(charaExpressionResult['message'])
+                            else:
+                                if charaExpressionResult.get('skipCond', False):
+                                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow_dict[str(chara.linenum)]
+                                    MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
+                                else:
+                                    if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
+                                        self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
+                                        chara.linenum = None
+                        else:
+                            return False
+                    else:
+                        self.sender.send_event({"itemsetall": True})
+                        itemsetAllResult = self.sender.receive_json()
+                        MSGWND.set(itemsetAllResult['message'])
+                        chara.linenum = None
                 elif isinstance(chara, CharaReturn):
                     PLAYER.set_waitingMove_return(mymap, chara)
                 elif isinstance(chara, CharaCheckCondition):
@@ -2599,7 +2620,7 @@ class MessageWindow(Window):
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     PLAYER.funcInfoWindow_chara = None
-                elif self.select_type in ['cond_func_skip', 'return_func_skip']:
+                elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
@@ -2634,6 +2655,11 @@ class MessageWindow(Window):
                                 PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
                             else:
                                 PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
+                        elif isinstance(chara, CharaExpression):
+                            if (fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
@@ -3271,10 +3297,12 @@ class CharaMoveItemsEvent(CharaMoveEvent):
             f"{self.dest_map},{self.dest_x},{self.dest_y},{self.items},{self.funcName:s},{','.join(self.arguments)}"
 
 class CharaExpression(Character):
-    def __init__(self, name, pos, direction, movetype, message, func, exps):
+    def __init__(self, name, pos, direction, movetype, message, func, exps_dict, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.func = func
-        self.exps = exps
+        self.exps = exps_dict
+        self.linenum = None
+        self.funcInfoWindow_dict = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line))) for line, exp in exps_dict.items()}
 
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
