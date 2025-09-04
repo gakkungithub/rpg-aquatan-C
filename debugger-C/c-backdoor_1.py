@@ -640,7 +640,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             funcWarp = funcWarp[func_num:]
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
-                        print(fromTo, line_number_track)
                         errorCnt += 1
                         self.event_sender({"message": f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                         while True:
@@ -677,12 +676,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if event.get('skip', False):
                                     retVal = None
                                     back_line_number = self.line_number
+                                    back_frame_num = self.frame_num
                                     skipped_func_name = self.func_crnt_name
                                     while 1:
                                         self.step_conditionally()
                                         if back_line_number == self.next_line_number:
                                             retVal = thread.GetStopReturnValue().GetValue()
-                                        if back_line_number == self.line_number:
+                                        elif back_line_number == self.line_number:
+                                            line_number_track.append(self.next_line_number)
+                                            break
+                                        # たまにvoid型の関数限定で元の場所以上に戻ってくることがあるので、その場合に対応する
+                                        elif condition_type == "func" and back_frame_num == self.next_frame_num and back_line_number < self.next_line_number:
+                                            line_number_track = fromTo
                                             break
                                     self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                 # スキップしない
@@ -699,7 +704,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             continue
                                         if back_line_number == self.line_number:
                                             break
-                                line_number_track.append(self.next_line_number)
+                                    line_number_track.append(self.next_line_number)
                                 func_num += 1
                             else:
                                 self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
