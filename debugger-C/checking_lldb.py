@@ -7,6 +7,7 @@ import struct
 import socket
 import threading
 import json
+import tempfile
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -162,10 +163,6 @@ class VarsTracker:
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
                 self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name)
-    
-    # def get_previous_value(self, vars_route: list[str | int]):
-
-    #     pass
 
     def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
         indent = "    " * depth
@@ -174,7 +171,6 @@ class VarsTracker:
             self.print_variables(previous_value.children, depth+1)
 
     def print_all_variables(self):
-        print("func_name: global")
         self.print_variables(self.global_previous_values)
         all_frames = self.frames[:-1]
         for i, frame in enumerate(all_frames):
@@ -200,6 +196,7 @@ def get_all_stdvalue(process):
 def step_conditionally(frame):
     thread = frame.GetThread()
     process = thread.GetProcess()
+
     target = process.GetTarget()
 
     # 現在の命令アドレス
@@ -214,6 +211,8 @@ def step_conditionally(frame):
 
     print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
     
+    process.PutSTDIN("\"aaaaa\"\n")
+
     thread.StepInto()
 
 def get_next_state():
@@ -236,14 +235,14 @@ def get_next_state():
     return state, frame, file_name, line_number, func_name, frame_num
 
 def get_std_outputs():
-    stdout_output, stderr_output = get_all_stdvalue(process)
-    if stdout_output:
-        print("[STDOUT]")
-        print(stdout_output)
+    # 新しい出力だけ読む
+    out_chunk = stdout_r.read()
+    err_chunk = stderr_r.read()
 
-    if stderr_output:
-        print("[STDERR]")
-        print(stderr_output)
+    if out_chunk:
+        print("[STDOUT]", out_chunk, end="")
+    if err_chunk:
+        print("[STDERR]", err_chunk, end="")
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]):
     def event_reciever():
@@ -299,14 +298,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     func_name = func_crnt_name
                     frame_num = next_frame_num
                     state, frame, file_name, next_line_number, func_crnt_name, next_frame_num = next_state
+                    print("stopped", state == lldb.eStateStopped)
+                    print("running", state == lldb.eStateRunning)
                     # print(func_name, func_crnt_name)
                     # print(line_number, next_line_number)
                     varsTracker.trackStart(frame)
                     print(varsTracker.vars_changed)
                     varsTracker.print_all_variables()
                     get_std_outputs()
-                    step_conditionally(frame)
                     event_sender(False)
+                    print("funcname", frame.GetFunctionName())
+                    step_conditionally(frame)
                 else:
                     event_sender(True)
                     event_reciever()
@@ -340,8 +342,19 @@ breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFil
 launch_info = lldb.SBLaunchInfo([])
 launch_info.SetWorkingDirectory(os.getcwd())
 
+stdout_file = tempfile.NamedTemporaryFile(delete=False)
+stderr_file = tempfile.NamedTemporaryFile(delete=False)
+
+# stdout, stderr を別々のパイプにする
+launch_info.AddOpenFileAction(1, stdout_file.name, True, True)  # fd=1 → stdout
+launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
+
 error = lldb.SBError()
 process = target.Launch(launch_info, error)
+
+# 読み取り用にlogファイルを常にopenしておく
+stdout_r = open(stdout_file.name, "r")
+stderr_r = open(stderr_file.name, "r")
 
 if not error.Success() or not process or not process.IsValid():
     print("failed in operation")
@@ -367,6 +380,13 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     server_thread.start()
 
     server_thread.join()
-    print("[サーバ終了]")
+
+stdout_r.close()
+stderr_r.close()
+
+os.unlink(stdout_file.name)
+os.unlink(stderr_file.name)
+
+print("[サーバ終了]")
 
 # endregion

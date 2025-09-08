@@ -691,10 +691,14 @@ class ASTtoFlowChart:
             exp_terms = next(cursor.get_tokens()).spelling
         #変数の呼び出し
         elif cursor.kind == ci.CursorKind.DECL_REF_EXPR:
-            exp_terms = next(cursor.get_tokens()).spelling
-            # グローバル変数ならグローバル変数のリファレンスを登録する
-            if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
-                self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
+            ref_expr_tokens = list(cursor.get_tokens())
+            if len(ref_expr_tokens):
+                exp_terms = ref_expr_tokens[0].spelling
+                # グローバル変数ならグローバル変数のリファレンスを登録する
+                if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
+                    self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
+            else:
+                exp_terms = cursor.spelling
             var_references.append(exp_terms)
         #配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
