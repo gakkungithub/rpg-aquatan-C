@@ -449,7 +449,6 @@ class ASTtoFlowChart:
                 if len(not_array_cursors) == 2 and not_array_cursors[0].kind == ci.CursorKind.TYPE_REF and not_array_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
                     not_array_cursors.pop(0)
                 for cr in not_array_cursors:
-                    print(cursor.spelling, cr.kind)
                     self.check_cursor_error(cr)
                     # 構造体の宣言でノードを作る
                     if cr.kind == ci.CursorKind.TYPE_REF:
@@ -671,6 +670,7 @@ class ASTtoFlowChart:
         }
         
         cursor = self.unwrap_unexposed(cursor)
+        print(cursor.kind)
         exp_terms = ""
 
         # print(cursor.kind)
@@ -802,6 +802,7 @@ class ASTtoFlowChart:
         arg_calc_order_comments_list = []
         arg_func_order_list: list[list[str]] = []
 
+        # print([c_cr.spelling for c_cr in children[1:]])
         # --- 引数ノードとのエッジ作成 ---
         for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
