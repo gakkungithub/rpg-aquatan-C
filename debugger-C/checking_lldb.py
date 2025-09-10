@@ -8,7 +8,6 @@ import socket
 import threading
 import json
 import tempfile
-import time
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -197,33 +196,24 @@ def get_all_stdvalue(process):
 def step_conditionally(frame):
     thread = frame.GetThread()
     process = thread.GetProcess()
+
     target = process.GetTarget()
 
+    # 現在の命令アドレス
     pc_addr = frame.GetPCAddress()
-    inst = target.ReadInstructions(pc_addr, 1)[0]
-    print(f"Next instruction: {inst.GetMnemonic(target)} {inst.GetOperands(target)}")
+
+    # 現在の命令を取得（必要な数だけ、ここでは1つ）
+    instructions = target.ReadInstructions(pc_addr, 1)
+
+    inst = instructions[0]
+    
+    mnemonic = inst.GetMnemonic(target)
+
+    print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
+    
+    process.PutSTDIN("1\n")
 
     thread.StepInto()
-
-    event = lldb.SBEvent()
-    print(lldb.SBProcess.GetStateFromEvent(event), lldb.eStateStopped)
-    
-    # start = time.time()
-    # while True:
-    #     event = lldb.SBEvent()
-    #     print(lldb.SBProcess.GetStateFromEvent(event), lldb.eStateStopped)
-    #     if listener.WaitForEvent(1, event):  # 1秒ごと
-    #         if lldb.SBProcess.EventIsProcessEvent(event):
-    #             state = lldb.SBProcess.GetStateFromEvent(event)
-    #             if state == lldb.eStateStopped:
-    #                 print("Stopped at:", thread.GetFrameAtIndex(0))
-    #                 break
-    #             elif state == lldb.eStateRunning:
-    #                 # 入力待ちかもしれないので一定時間で入力を送る
-    #                 if time.time() - start > 5:
-    #                     print("Still running, sending input...")
-    #                     process.PutSTDIN("aaaa\n")
-    #                     start = time.time()
 
 def get_next_state():
     state = process.GetState()
@@ -337,9 +327,9 @@ args = parser.parse_args()
 lldb.SBDebugger.Initialize()
 debugger = lldb.SBDebugger.Create()
 debugger.SetAsync(False)
-listener = debugger.GetListener()
 
 target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
+
 if not target:
     print("failed in build of target")
     exit(1)
@@ -352,12 +342,10 @@ breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFil
 launch_info = lldb.SBLaunchInfo([])
 launch_info.SetWorkingDirectory(os.getcwd())
 
-stdin_file = tempfile.NamedTemporaryFile(delete=False)
 stdout_file = tempfile.NamedTemporaryFile(delete=False)
 stderr_file = tempfile.NamedTemporaryFile(delete=False)
 
 # stdout, stderr を別々のパイプにする
-launch_info.AddOpenFileAction(0, stdin_file.name, True, True)  # fd=0 → stdin
 launch_info.AddOpenFileAction(1, stdout_file.name, True, True)  # fd=1 → stdout
 launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
 
@@ -396,7 +384,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 stdout_r.close()
 stderr_r.close()
 
-os.unlink(stdin_file.name)
 os.unlink(stdout_file.name)
 os.unlink(stderr_file.name)
 

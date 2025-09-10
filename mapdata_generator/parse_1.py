@@ -89,6 +89,7 @@ class ASTtoFlowChart:
         self.expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]] = {}
         self.condition_move : dict[str, tuple[str, list[int | str | None]]] = {}
         self.line_info_dict: dict[str, LineInfo] = {}
+        self.macro_pos = {}
     
     def createNode(self, nodeLabel, shape='rect'):
         nodeID = str(uuid.uuid4())
@@ -122,8 +123,12 @@ class ASTtoFlowChart:
                 sys.exit(0)
         return True
 
-    def write_ast(self, tu, programname):
+    def write_ast(self, tu: ci.TranslationUnit, programname):
         self.createErrorInfo(tu.diagnostics)
+        for cr in tu.cursor.get_children():
+            if cr.kind == ci.CursorKind.MACRO_INSTANTIATION:
+                loc = cr.location
+                self.macro_pos[(loc.file.name, loc.line, loc.column)] = cr.spelling
         for cursor in tu.cursor.get_children():
             self.check_cursor_error(cursor)
             if cursor.kind == ci.CursorKind.FUNCTION_DECL:
@@ -670,6 +675,8 @@ class ASTtoFlowChart:
         }
         
         cursor = self.unwrap_unexposed(cursor)
+        if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
+            return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
         print(cursor.kind)
         exp_terms = ""
 
@@ -682,6 +689,7 @@ class ASTtoFlowChart:
             exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
+            print((cursor.location.line, cursor.location.column))
             exp_terms = next(cursor.get_tokens()).spelling
         elif cursor.kind == ci.CursorKind.FLOATING_LITERAL:
             exp_terms = next(cursor.get_tokens()).spelling

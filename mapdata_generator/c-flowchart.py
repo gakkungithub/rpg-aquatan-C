@@ -13,7 +13,6 @@ programname = args.p
 
 for cname, tu in translation_units.items():
     fchart = ASTtoFlowChart()
-    fchart.createErrorInfo(tu.diagnostics)
     fchart.write_ast(tu, programname)
 
 genBitMap = GenBitMap(programname, fchart.func_info_dict, fchart.gvar_info, fchart.varNode_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move)
