@@ -176,22 +176,6 @@ class VarsTracker:
         for i, frame in enumerate(all_frames):
             print(f"func_name: {frame}")
             self.print_variables(self.previous_values[-(i+1)])
-  
-def get_all_stdvalue(process):
-    stdout_output = ""
-    stderr_output = ""
-
-    while True:
-        out = process.GetSTDOUT(1024)
-        err = process.GetSTDERR(1024)
-
-        if not out and not err:
-            break
-
-        stdout_output += out
-        stderr_output += err
-
-    return stdout_output, stderr_output
 
 def step_conditionally(frame):
     thread = frame.GetThread()

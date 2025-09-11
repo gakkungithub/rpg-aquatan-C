@@ -7,6 +7,7 @@ import struct
 import threading
 import socket
 import json
+import tempfile
 from collections import Counter
 
 # break pointを打ってスキップすることも考えられる
@@ -255,22 +256,6 @@ class VarsTracker:
     
     def setVarsDeclared(self, var):
         return self.vars_declared[-1].append(var)
-    
-def get_all_stdvalue(process):
-    stdout_output = ""
-    stderr_output = ""
-
-    while True:
-        out = process.GetSTDOUT(1024)
-        err = process.GetSTDERR(1024)
-
-        if not out and not err:
-            break
-
-        stdout_output += out
-        stderr_output += err
-
-    return stdout_output, stderr_output
 
 def get_instructions_for_current_line(frame, target):
     line_entry = frame.GetLineEntry()
@@ -317,12 +302,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.thread = thread
             self.line_loop = []
             self.func_checked = []
+            self.std_messages = []
+
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
                     self.line_data = json.load(f)
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
+                    self.get_std_outputs()
                     self.event_sender({"line": self.line_data[self.func_name][2], "items": self.vars_tracker.getGlobalValueAll()}, False)
                     self.line_number = self.line_data[self.func_name][2] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
@@ -393,6 +381,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.isEnd = True
                 self.line_number = self.next_line_number
 
+            self.get_std_outputs()
+
         def get_next_state(self):
             state = self.process.GetState()
 
@@ -413,14 +403,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             return state, frame, file_name, line_number, func_name, frame_num
 
         def get_std_outputs(self):
-            stdout_output, stderr_output = get_all_stdvalue(self.process)
-            if stdout_output:
-                print("[STDOUT]")
-                print(stdout_output)
+            # 新しい出力だけ読む
+            out_chunk = stdout_r.read()
 
-            if stderr_output:
-                print("[STDERR]")
-                print(stderr_output)
+            err_chunk = stderr_r.read()
+
+            if out_chunk:
+                self.std_messages.append(f"[STDOUT]: {out_chunk}")
+            if err_chunk:
+                self.std_messages.append(f"[STDERR]: {err_chunk}")
 
         def get_new_values(self, values_changed):
             value_changed_dict = []
@@ -449,6 +440,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 errorCnt = 0
                 line_number_track: list[int] = [self.line_number]
                 func_num = 0
+                std_messages = []
                 # 変数が合致していればstepinを実行して次に進む
                 while True:
                     # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
@@ -596,7 +588,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 for line in target_lines:
                     # skipped_varDecls = self.varsDeclLines_list.pop(line)
                     skipped_varDecls = self.varsDeclLines_list[line]
-                    print(skipped_varDecls)
                     vars_event = []
                     errorCnt = 0
                     if (event := self.event_reciever()) is None:
@@ -774,7 +765,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if not crntFromTo:
                         retVal = thread.GetStopReturnValue().GetValue()
                         self.step_conditionally()
-                        self.get_std_outputs()
                         self.event_sender({"message": f"関数 {self.func_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_name, "backToLine": backToLine, "retVal": retVal})
                         break
                     
@@ -1020,8 +1010,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             self.step_conditionally()
 
-            self.get_std_outputs()
-
             # 変数は前回の処理で変更されていたら見る
             self.vars_checker()
 
@@ -1039,13 +1027,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             return event
     
         def event_sender(self, msgJson, getLine=True):
+            msgJson["std"] = self.std_messages
             if getLine and msgJson["status"] == "ok":
                 target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
                 skipped_vars = []
                 for target_line in target_lines:
                     skipped_vars += list(set(self.varsDeclLines_list[target_line]) - set(self.vars_tracker.vars_declared[-1]))
                 
-                print(skipped_vars)
                 # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
                 if len(skipped_vars) != 0 and self.line_number not in self.line_data[self.func_name][0]:
                     msgJson["line"] = int(target_lines[0])
@@ -1094,8 +1082,19 @@ breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFil
 launch_info = lldb.SBLaunchInfo([])
 launch_info.SetWorkingDirectory(os.getcwd())
 
+stdout_file = tempfile.NamedTemporaryFile(delete=False)
+stderr_file = tempfile.NamedTemporaryFile(delete=False)
+
+# stdout, stderr を別々のパイプにする
+launch_info.AddOpenFileAction(1, stdout_file.name, True, True)  # fd=1 → stdout
+launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
+
 error = lldb.SBError()
 process = target.Launch(launch_info, error)
+
+# 読み取り用にlogファイルを常にopenしておく
+stdout_r = open(stdout_file.name, "r")
+stderr_r = open(stderr_file.name, "r")
 
 if not error.Success() or not process or not process.IsValid():
     print("failed in operation")
@@ -1123,5 +1122,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     server_thread.start()
 
     server_thread.join()
-    print("[サーバ終了]")
+
+stdout_r.close()
+stderr_r.close()
+
+os.unlink(stdout_file.name)
+os.unlink(stderr_file.name)
+
+print("[サーバ終了]")
 # endregion

@@ -780,7 +780,6 @@ def main():
                                         PLAYER.goaled = True 
                                         print('ステージ選択に戻る')       
 
-
                 if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
                     MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
 
@@ -1695,6 +1694,7 @@ class Player(Character):
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
+        self.stdMessages = []
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -2442,17 +2442,22 @@ class MessageWindow(Window):
         self.selectMsgText = None
         self.select_type = None
         self.selectingIndex = 0
+        self.new_stdMessages = []
 
     def set(self, message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if message:
             if selectMessages is not None:
                 self.selectMsgText, self.select_type = selectMessages
+            if len(self.new_stdMessages):
+                print(len(self.new_stdMessages))
+                message = "/".join(self.new_stdMessages) + "%" + message
+                self.new_stdMessages = []
+            print(message)
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
             self.hide_flag = False
-            print(message)
             # 全角スペースで初期化
             self.text = ""
             # メッセージをセット
@@ -4391,6 +4396,9 @@ class EventSender:
                                 item = PLAYER.itembag.find(itemvalues["item"])
                             if item:
                                 item.set_value(itemvalues)
+                    if len(msg["std"]) > len(PLAYER.stdMessages):
+                        MSGWND.new_stdMessages = msg["std"][len(PLAYER.stdMessages):]
+                    PLAYER.stdMessages = msg["std"]
                     return msg
                 except json.JSONDecodeError:
                     continue  # JSONがまだ完全でないので続けて待つ

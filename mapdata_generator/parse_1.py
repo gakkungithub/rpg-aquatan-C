@@ -53,7 +53,6 @@ class LineInfo:
         self.lines = set()
         self.loops = {}
         self.returns = {}
-        # self.inputs = {}
         self.start = 0
 
     def setLine(self, line: int):
@@ -344,27 +343,23 @@ class ASTtoFlowChart:
                 self.gotoLabel_list[cr.spelling] = {"toNodeID": f'"{self.roomSizeEstimate[0]}"', "fromNodeID": []}
             nodeID = self.parse_stmt(exec_cr, toNodeID)
         elif cr.kind == ci.CursorKind.CALL_EXPR:
-            # 最初行番を変更
-            self.line_info_dict[self.scanning_func].setStart(cr.location.line)
-            self.func_info_dict[self.scanning_func].setStart(cr.location.line)
-            # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
-            # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
-            # 関数に入る前で止まれるようにlineを登録しておく
-
-            expNodeID = self.createNode("")
-            self.createEdge(nodeID, expNodeID)
             var_references = []
             func_references = []
             calc_order_comments = []
             exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
-            print(exp_terms)
-            print(self.line_info_dict[self.scanning_func].lines)
-            if exp_terms not in ["scanf", "printf", "fprintf", "setvbuf"]:
+            if exp_terms != "setvbuf":
+                expNodeID = self.createNode("")
+                self.createEdge(nodeID, expNodeID)
+                # 最初行番を変更
+                self.line_info_dict[self.scanning_func].setStart(cr.location.line)
+                self.func_info_dict[self.scanning_func].setStart(cr.location.line)
+                # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
+                # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
+                # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-
-            self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-            self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
-            nodeID = expNodeID
+                self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
+                self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
+                nodeID = expNodeID
         else:
             # 最初行番を変更 
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
@@ -830,6 +825,7 @@ class ASTtoFlowChart:
             arg_func_order_list.append(arg_func_order)
 
         if ref_spell in ["setvbuf", "scanf", "printf", "fprintf"]:
+            func_references.append(ref_spell)
             return ref_spell
         else:
             calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 

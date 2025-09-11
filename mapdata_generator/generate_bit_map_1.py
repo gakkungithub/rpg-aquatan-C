@@ -250,13 +250,14 @@ class MapInfo:
         for move_event in self.move_events:
             me_func_warp = []
             converted_fromTo = []
-            print(move_event.line_track)
             for condLine in move_event.line_track:
                 if isinstance(condLine, tuple):
                     warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                     me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
+                elif isinstance(condLine, str):
+                    me_func_warp.append(condLine)
                 else:
                     converted_fromTo.append(condLine)
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
@@ -273,6 +274,8 @@ class MapInfo:
                     t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
+                elif isinstance(itemLine, str):
+                    t_func_warp.append(itemLine)
                 else:
                     converted_fromTo.append(itemLine)
             if converted_fromTo[0] in vardecl_lines:
@@ -301,6 +304,8 @@ class MapInfo:
                     rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
+                elif isinstance(returnLine, str):
+                    rc_func_warp.append(returnLine)
                 else:
                     converted_fromTo.append(returnLine)
             if funcName == "main":
@@ -318,6 +323,8 @@ class MapInfo:
                     ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
+                elif isinstance(condLine, str):
+                    ccc_func_warp.append(condLine)
                 else:
                     converted_fromTo.append(condLine)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
@@ -337,6 +344,8 @@ class MapInfo:
                         ce_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
+                    elif isinstance(condLine, str):
+                        ce_func_warp.append(condLine)
                     else:
                         converted_fromTo.append(condLine)
                 exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": ce_func_warp}
