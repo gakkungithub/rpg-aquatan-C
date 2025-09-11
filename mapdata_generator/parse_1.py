@@ -53,6 +53,7 @@ class LineInfo:
         self.lines = set()
         self.loops = {}
         self.returns = {}
+        # self.inputs = {}
         self.start = 0
 
     def setLine(self, line: int):
@@ -349,13 +350,18 @@ class ASTtoFlowChart:
             # 関数が単独で出た場合も、途中式に出てくる関数と同じ対応ができるように、仮のノードを作る
             # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
             # 関数に入る前で止まれるようにlineを登録しておく
-            self.line_info_dict[self.scanning_func].setLine(cr.location.line)
+
             expNodeID = self.createNode("")
             self.createEdge(nodeID, expNodeID)
             var_references = []
             func_references = []
             calc_order_comments = []
             exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
+            print(exp_terms)
+            print(self.line_info_dict[self.scanning_func].lines)
+            if exp_terms not in ["scanf", "printf", "fprintf", "setvbuf"]:
+                self.line_info_dict[self.scanning_func].setLine(cr.location.line)
+
             self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
             self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
             nodeID = expNodeID
@@ -689,7 +695,6 @@ class ASTtoFlowChart:
             exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments), ")"])
         #定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
-            print((cursor.location.line, cursor.location.column))
             exp_terms = next(cursor.get_tokens()).spelling
         elif cursor.kind == ci.CursorKind.FLOATING_LITERAL:
             exp_terms = next(cursor.get_tokens()).spelling
@@ -824,14 +829,15 @@ class ASTtoFlowChart:
                     arg_func_order.append(arg_calc_order_comment["name"])
             arg_func_order_list.append(arg_func_order)
 
-        calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
-                                    "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
-                                    "args": arg_calc_order_comments_list})
-
-        # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
-        func_references.append((ref_spell, arg_func_order_list))
-        
-        return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
+        if ref_spell in ["setvbuf", "scanf", "printf", "fprintf"]:
+            return ref_spell
+        else:
+            calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
+                                        "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
+                                        "args": arg_calc_order_comments_list})
+            # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
+            func_references.append((ref_spell, arg_func_order_list))
+            return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
 
     #typedefの解析
     def parse_typedef(self, cursor):

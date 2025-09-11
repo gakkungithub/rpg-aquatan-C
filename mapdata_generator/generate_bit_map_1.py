@@ -250,8 +250,8 @@ class MapInfo:
         for move_event in self.move_events:
             me_func_warp = []
             converted_fromTo = []
+            print(move_event.line_track)
             for condLine in move_event.line_track:
-                print(condLine)
                 if isinstance(condLine, tuple):
                     warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                     me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
