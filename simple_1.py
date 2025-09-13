@@ -1986,7 +1986,6 @@ class Player(Character):
 
             if isinstance(chara, Character):
                 msg = chara.message
-                MSGWND.set(msg)
                 # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
                 if isinstance(chara, CharaMoveItemsEvent):
                     itemsLacked_list = []
@@ -2047,6 +2046,8 @@ class Player(Character):
                                     if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                                         self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
                                         chara.linenum = None
+                                    # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
+                                    MSGWND.set(chara.message)
                         else:
                             return False
                     else:
@@ -2122,6 +2123,7 @@ class Player(Character):
                     self.waitingMove.dest_x = move['x']
                     self.waitingMove.dest_y = move['y']
                     self.fp.write("moveout, " + mapname + "," + str(self.x)+", " + str(self.y) + "\n")
+                    MSGWND.set(chara.message)
                 return
         # mainのreturnキャラ
         else:
@@ -2134,6 +2136,7 @@ class Player(Character):
                 elif returnResult.get('finished', False):
                     MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
                     self.fp.write("finished\n")
+                    MSGWND.set(chara.message)
                 return
         MSGWND.set(returnResult['message'])
     
@@ -2446,12 +2449,11 @@ class MessageWindow(Window):
 
     def set(self, message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
-        if message:
+        if message or len(self.new_stdMessages):
             if selectMessages is not None:
                 self.selectMsgText, self.select_type = selectMessages
             if len(self.new_stdMessages):
-                print(len(self.new_stdMessages))
-                message = "/".join(self.new_stdMessages) + "%" + message
+                message = "/".join(["コンソール出力:"] + self.new_stdMessages) + "%" + message
                 self.new_stdMessages = []
             print(message)
             self.cur_pos = 0

@@ -116,6 +116,7 @@ class MapInfo:
         self.doors: list[Door] = []
         self.chara_checkConditions: list[CharaCheckCondition] = []
         self.chara_expressions: dict[str, CharaExpression] = {}
+        self.input_lines: dict[str, dict[int, list[int]]] = {}
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -250,16 +251,27 @@ class MapInfo:
         for move_event in self.move_events:
             me_func_warp = []
             converted_fromTo = []
+            func_num = 0
+            input_order_num = []
             for condLine in move_event.line_track:
                 if isinstance(condLine, tuple):
+                    func_num += 1
                     warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                     me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 elif isinstance(condLine, str):
+                    func_num += 1
                     me_func_warp.append(condLine)
+                    if condLine == "scanf":
+                        input_order_num.append(func_num)
                 else:
                     converted_fromTo.append(condLine)
+            if len(input_order_num):
+                if move_event.func_name in self.input_lines:
+                    self.input_lines[move_event.func_name][converted_fromTo[0]] = input_order_num
+                else:
+                    self.input_lines[move_event.func_name] = {converted_fromTo[0]: input_order_num}
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
                         "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp, "exps": move_event.exps})
             
@@ -268,21 +280,31 @@ class MapInfo:
             # fromToは全てのアイテムで共通
             t_func_warp = []
             converted_fromTo = []
+            func_num = 0
+            input_order_num = []
             for itemLine in treasure.line_track:
                 if isinstance(itemLine, tuple):
+                    func_num += 1
                     warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
                     t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 elif isinstance(itemLine, str):
+                    func_num += 1
                     t_func_warp.append(itemLine)
+                    if itemLine == "scanf":
+                        input_order_num.append(func_num)
                 else:
                     converted_fromTo.append(itemLine)
             if converted_fromTo[0] in vardecl_lines:
                 vardecl_lines[converted_fromTo[0]].append(treasure.name)
             else:
                 vardecl_lines[converted_fromTo[0]] = [treasure.name]
-
+            if len(input_order_num):
+                if treasure.func_name in self.input_lines:
+                    self.input_lines[treasure.func_name][converted_fromTo[0]] = input_order_num
+                else:
+                    self.input_lines[treasure.func_name] = {converted_fromTo[0]: input_order_num}
             events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
 
         # 経路の一方通行情報
@@ -298,16 +320,27 @@ class MapInfo:
             pos, funcName, line_track = chara_return.get_attributes()
             rc_func_warp = []
             converted_fromTo = []
+            func_num = 0
+            input_order_num = []
             for returnLine in line_track:
                 if isinstance(returnLine, tuple):
+                    func_num += 1
                     warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
                     rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 elif isinstance(returnLine, str):
+                    func_num += 1
                     rc_func_warp.append(returnLine)
+                    if returnLine == "scanf":
+                        input_order_num.append(func_num)
                 else:
                     converted_fromTo.append(returnLine)
+            if len(input_order_num):
+                if funcName in self.input_lines:
+                    self.input_lines[funcName][converted_fromTo[0]] = input_order_num
+                else:
+                    self.input_lines[funcName] = {converted_fromTo[0]: input_order_num}
             if funcName == "main":
                 characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
             else:
@@ -317,16 +350,27 @@ class MapInfo:
             color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
             ccc_func_warp = []
             converted_fromTo = []
+            func_num = 0
+            input_order_num = []
             for condLine in chara_checkCondition.line_track:
                 if isinstance(condLine, tuple):
+                    func_num += 1
                     warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                     ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                     if line != 0:
                         converted_fromTo.append(line)
                 elif isinstance(condLine, str):
+                    func_num += 1
                     ccc_func_warp.append(condLine)
+                    if condLine == "scanf":
+                        input_order_num.append(func_num)
                 else:
                     converted_fromTo.append(condLine)
+            if len(input_order_num):
+                if chara_checkCondition.func in self.input_lines:
+                    self.input_lines[chara_checkCondition.func][converted_fromTo[0]] = input_order_num
+                else:
+                    self.input_lines[chara_checkCondition.func] = {converted_fromTo[0]: input_order_num}
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
 
@@ -336,19 +380,30 @@ class MapInfo:
             for firstLine, exps in chara_expression.exps_dict.items():
                 ce_func_warp = []
                 converted_fromTo = []
+                func_num = 0
+                input_order_num = []
                 if len(exps["line_track"]) == 2:
                     continue
                 for condLine in exps["line_track"]:
                     if isinstance(condLine, tuple):
+                        func_num += 1
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                         ce_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
                     elif isinstance(condLine, str):
+                        func_num += 1
                         ce_func_warp.append(condLine)
+                        if condLine == "scanf":
+                            input_order_num.append(func_num)
                     else:
                         converted_fromTo.append(condLine)
                 exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": ce_func_warp}
+                if len(input_order_num):
+                    if chara_expression.func in self.input_lines:
+                        self.input_lines[chara_expression.func][converted_fromTo[0]] = input_order_num
+                    else:
+                        self.input_lines[chara_expression.func] = {converted_fromTo[0]: input_order_num}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             
@@ -389,7 +444,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns] for funcname, line_info in line_info_dict.items()}
+        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns, self.input_lines[funcname] if funcname in self.input_lines else {}] for funcname, line_info in line_info_dict.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 

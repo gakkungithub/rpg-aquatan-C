@@ -303,6 +303,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.line_loop = []
             self.func_checked = []
             self.std_messages = []
+            self.input_check_num = []
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -323,7 +324,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.vars_tracker.trackStart(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self, var_check = True):
+        def step_conditionally(self, var_check = True, input_check = False):
             # プロセスの状態を更新
             if self.isEnd:
                 while True:
@@ -352,6 +353,22 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name][3] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name][3][str(self.next_line_number)])
+
+            if str(self.next_line_number) in self.line_data[self.func_crnt_name][4]:
+                self.input_check_num.append(self.line_data[self.func_crnt_name][4][str(self.next_line_number)])
+                # もし一番最初にinputの取得があるならinput_checkをTrueにする
+                if self.line_data[self.func_crnt_name][4][str(self.next_line_number)][0] == 1:
+                    input_check = True
+
+            # inputが入れられるまで次のstepには行かない
+            if input_check:
+                while True:
+                    if (event := self.event_reciever()) is None:
+                        return
+                    if (stdin := event.get('stdin', None)) is not None:
+                        self.process.PutSTDIN(stdin)
+                        break
+                    self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
 
             if str(self.next_line_number) not in self.line_data[self.func_crnt_name][3]:
                 self.thread.StepInto()
@@ -435,7 +452,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 errorCnt = 0
                 line_number_track: list[int] = [self.line_number]
                 func_num = 0
-                std_messages = []
                 # 変数が合致していればstepinを実行して次に進む
                 while True:
                     # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
@@ -481,9 +497,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             self.step_conditionally()
                                             if back_line_number == self.next_line_number:
                                                 retVal = thread.GetStopReturnValue().GetValue()
+                                                self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                             if back_line_number == self.line_number:
                                                 break
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                     else:
                                         items = {}
                                         for argname, argtype in funcWarp[0]['args'].items():
@@ -504,7 +520,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     break
                             # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
                             else:
-                                self.step_conditionally(False)
+                                self.step_conditionally(var_check=False)
                                 if crntFromTo[0] != self.line_number:
                                     self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng"})
                                     break
@@ -632,14 +648,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         self.step_conditionally()
                                         if back_line_number == self.next_line_number:
                                             retVal = thread.GetStopReturnValue().GetValue()
+                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                         elif back_line_number == self.line_number:
                                             line_number_track.append(self.next_line_number)
                                             break
                                         # たまにvoid型の関数限定で元の場所以上に戻ってくることがあるので、その場合に対応する
                                         elif condition_type == "func" and back_frame_num == self.next_frame_num and back_line_number < self.next_line_number:
                                             line_number_track = fromTo
+                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                             break
-                                    self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                 # スキップしない
                                 else:
                                     items = {}
@@ -671,7 +688,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     break
                             break
                         else:
-                            self.step_conditionally(False)
+                            self.step_conditionally(var_check=False)
 
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
@@ -742,9 +759,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         self.step_conditionally()
                                         if back_line_number == self.next_line_number:
                                             retVal = thread.GetStopReturnValue().GetValue()
+                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                         if back_line_number == self.line_number:
                                             break
-                                    self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                 # スキップしない
                                 else:
                                     items = {}
@@ -773,7 +790,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     break
                             break
                         else:
-                            self.step_conditionally(False)
+                            self.step_conditionally(var_check=False)
 
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
