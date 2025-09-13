@@ -237,7 +237,7 @@ def main():
         subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
 
         # サーバを立てる
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath], cwd="debugger-C", env=env)
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_2.py", "--name", programpath], cwd="debugger-C", env=env)
         # endregion
 
         # region マップの初期設定
@@ -685,6 +685,17 @@ def main():
                         cmd = "\0"
                         atxt = "\0"
                         PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    elif cmd == "stdin":
+                        try:
+                            parts = atxt.split(' ', 1)
+                            value = parts[0]
+                            sender.send_event({"stdin": value})
+                            stdinResult = sender.receive_json()
+                            MSGWND.set(stdinResult['message'])
+                        except (IndexError, ValueError):
+                            MSGWND.set("ERROR...")
+                        cmd = "\0"
+                        atxt = "\0"
                     elif cmd == "jump":
                         ## 関数の入り口まで飛ばしてくれる　同じマップ内だけ hogehoge
                         msg = "\u95a2\u6570 " + atxt + " \u306b\u9077\u79fb\u3057\u307e\u3059!!"
@@ -807,14 +818,6 @@ def main():
             pygame.display.flip()
 
         server.terminate()
-
-def get_exp_value(expList):
-    value = None
-    if (itemsLacked := set(expList[1]) - set(PLAYER.itembag.items[-1])):
-        MSGWND.set(f"このアイテムを取得するには　{','.join([item for item in itemsLacked])}　が足りません!!")
-    else:
-        value = 1
-    return value
 
 #                                                                                                                                                                                         
 #                                                                                       88                                                                                                

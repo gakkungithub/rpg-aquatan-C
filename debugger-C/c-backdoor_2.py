@@ -354,11 +354,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if str(self.next_line_number) in self.line_data[self.func_crnt_name][3] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name][3][str(self.next_line_number)])
 
-            if str(self.next_line_number) in self.line_data[self.func_crnt_name][4]:
-                self.input_check_num.append(self.line_data[self.func_crnt_name][4][str(self.next_line_number)])
+            if (str(self.next_line_number) in self.line_data[self.func_crnt_name][4] and 
+                (len(self.input_check_num) == 0 or self.input_check_num[-1] == (self.line_data[self.func_crnt_name][4][str(self.next_line_number)], self.next_frame_num))):
+                self.input_check_num.append((self.line_data[self.func_crnt_name][4][str(self.next_line_number)], self.next_frame_num))
                 # もし一番最初にinputの取得があるならinput_checkをTrueにする
                 if self.line_data[self.func_crnt_name][4][str(self.next_line_number)][0] == 1:
                     input_check = True
+
+            print(input_check)
 
             # inputが入れられるまで次のstepには行かない
             if input_check:
@@ -366,7 +369,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if (event := self.event_reciever()) is None:
                         return
                     if (stdin := event.get('stdin', None)) is not None:
-                        self.process.PutSTDIN(stdin)
+                        self.process.PutSTDIN(f"{stdin}\n")
+                        self.event_sender({"message": f"値がstdinに入力されました!!", "status": "ng"})
                         break
                     self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
 
