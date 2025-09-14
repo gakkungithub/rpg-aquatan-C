@@ -676,9 +676,9 @@ class ASTtoFlowChart:
         }
         
         cursor = self.unwrap_unexposed(cursor)
+        print(cursor.kind)
         if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
-        print(cursor.kind)
         exp_terms = ""
 
         # print(cursor.kind)
@@ -812,6 +812,9 @@ class ASTtoFlowChart:
 
         # print([c_cr.spelling for c_cr in children[1:]])
         # --- 引数ノードとのエッジ作成 ---
+        
+        if ref_spell == "scanf":
+            print(ref_spell)
         for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
             arg_calc_order_comments = []
@@ -824,7 +827,11 @@ class ASTtoFlowChart:
                     arg_func_order.append(arg_calc_order_comment["name"])
             arg_func_order_list.append(arg_func_order)
 
-        if ref_spell in ["setvbuf", "scanf", "printf", "fprintf"]:
+        if ref_spell == "scanf":
+            input_type_str = [t.spelling for t in children[1].get_tokens()][0]
+            func_references.append((ref_spell, input_type_str))
+            return ref_spell
+        elif ref_spell in ["setvbuf", "printf", "fprintf"]:
             func_references.append(ref_spell)
             return ref_spell
         else:

@@ -688,8 +688,8 @@ def main():
                     elif cmd == "stdin":
                         try:
                             parts = atxt.split(' ', 1)
-                            value = parts[0]
-                            sender.send_event({"stdin": value})
+                            value = " ".join(parts)
+                            sender.send_event({"stdin": f"{value}\n"})
                             stdinResult = sender.receive_json()
                             MSGWND.set(stdinResult['message'])
                         except (IndexError, ValueError):
@@ -3418,33 +3418,34 @@ class FuncInfoWindow(Window):
         if self.funcs is not None:
             func_pos_list: list[tuple[int, int]] = []
             for i, func in enumerate(self.funcs):
-                text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
-                text_width = self.font.get_rect(text).width
-                # 引数に関数が含まれる場合は段落をつけて関係を描画する
-                x_pos_list = []
-                y_pos_list = []
-                for children in func['children']:
-                    for child in children:
-                        func_pos = func_pos_list.pop(0)
-                        x_pos_list.append(func_pos[0])
-                        y_pos_list.append(func_pos[1])
-                x_pos = max(x_pos_list) + 60 if len(x_pos_list) else x_offset
-                y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else y_offset
-                bg_rect = pygame.Rect(
-                    x_pos,
-                    y_pos,
-                    text_width,
-                    self.FONT_SIZE + 4
-                )
-                for index_x_pos, x in enumerate(x_pos_list):
-                    draw_arrow(self.surface, self.LINE_COLOR, (x+10, y_pos_list[index_x_pos] + (self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
+                if isinstance(func, dict):
+                    text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
+                    text_width = self.font.get_rect(text).width
+                    # 引数に関数が含まれる場合は段落をつけて関係を描画する
+                    x_pos_list = []
+                    y_pos_list = []
+                    for children in func['children']:
+                        for child in children:
+                            func_pos = func_pos_list.pop(0)
+                            x_pos_list.append(func_pos[0])
+                            y_pos_list.append(func_pos[1])
+                    x_pos = max(x_pos_list) + 60 if len(x_pos_list) else x_offset
+                    y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else y_offset
+                    bg_rect = pygame.Rect(
+                        x_pos,
+                        y_pos,
+                        text_width,
+                        self.FONT_SIZE + 4
+                    )
+                    for index_x_pos, x in enumerate(x_pos_list):
+                        draw_arrow(self.surface, self.LINE_COLOR, (x+10, y_pos_list[index_x_pos] + (self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
 
-                pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
-                # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
-                self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
-                func_pos_list.append((x_pos+text_width, y_pos))
-                if len(y_pos_list) == 0:
-                    y_offset += self.FONT_SIZE + 10
+                    pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
+                    # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
+                    self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
+                    func_pos_list.append((x_pos+text_width, y_pos))
+                    if len(y_pos_list) == 0:
+                        y_offset += self.FONT_SIZE + 10
         Window.blit(self, screen)
 
 #                                                                                                                                 

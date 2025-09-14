@@ -9,6 +9,7 @@ import socket
 import json
 import tempfile
 from collections import Counter
+import re
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -304,6 +305,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.func_checked = []
             self.std_messages = []
             self.input_check_num = []
+            self.stdin_buffer = ""
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -324,7 +326,72 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.vars_tracker.trackStart(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self, var_check = True, input_check = False):
+        def step_conditionally(self, var_check = True, input_check = None):
+            # scanf フォーマット → Python 正規表現パターンの対応表
+            scanf_patterns = {
+                "%d": r"[-+]?\d+",
+                "%i": r"[-+]?(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)",
+                "%u": r"\d+",
+                "%o": r"[0-7]+",
+                "%x": r"[0-9a-fA-F]+",
+                "%X": r"[0-9a-fA-F]+",
+                "%f": r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?",
+                "%F": r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?",
+                "%e": r"[-+]?\d+(\.\d+)?[eE][-+]?\d+",
+                "%E": r"[-+]?\d+(\.\d+)?[eE][-+]?\d+",
+                "%g": r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?",
+                "%G": r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?",
+                "%c": r".",
+                "%s": r"\S+",
+                "%p": r"0x[0-9a-fA-F]+",
+                "%n": None,
+            }
+
+            def skip_whitespace(text, pos):
+                """空白・改行・タブをスキップ"""
+                while pos < len(text) and text[pos].isspace():
+                    pos += 1
+                return pos
+
+            def match_scanf(fmt: str, text: str):
+                tokens = re.findall(r"%\*?[diuoxXfFeEgGcspn]", fmt)
+                pos = 0
+                results = []
+
+                for token in tokens:
+                    if token.endswith("c"):
+                        pass
+                    elif token.endswith("n"):
+                        results.append(str(pos))
+                        continue
+                    else:
+                        pos = skip_whitespace(text, pos)
+
+                    pat = scanf_patterns.get(token.lstrip("*"))
+                    if not pat:
+                        raise ValueError(f"Unsupported format specifier: {token}")
+
+                    if pos >= len(text):
+                        return "incomplete", results, ""
+                    
+                    regex = re.compile(pat)
+                    match = regex.match(text, pos)
+                    if not match:
+                        return "mismatch", results, text[pos:]
+
+                    value = match.group(0)
+                    if not token.startswith("%*"):
+                        results.append(value)
+                    pos = match.end()
+
+                remaining = text[pos:]
+                return "ok", results, remaining
+
+            def is_complete_match(fmt: str, text: str):
+                """入力文字列がフォーマット全体に合致するかを確認"""
+                state, results, remaining = match_scanf(fmt, text)
+                return state, results, remaining
+            
             # プロセスの状態を更新
             if self.isEnd:
                 while True:
@@ -358,8 +425,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 (len(self.input_check_num) == 0 or self.input_check_num[-1] == (self.line_data[self.func_crnt_name][4][str(self.next_line_number)], self.next_frame_num))):
                 self.input_check_num.append((self.line_data[self.func_crnt_name][4][str(self.next_line_number)], self.next_frame_num))
                 # もし一番最初にinputの取得があるならinput_checkをTrueにする
-                if self.line_data[self.func_crnt_name][4][str(self.next_line_number)][0] == 1:
-                    input_check = True
+                if self.line_data[self.func_crnt_name][4][str(self.next_line_number)].get("1", None):
+                    input_check = "1"
 
             print(input_check)
 
@@ -368,9 +435,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 while True:
                     if (event := self.event_reciever()) is None:
                         return
-                    if (stdin := event.get('stdin', None)) is not None:
-                        self.process.PutSTDIN(f"{stdin}\n")
-                        self.event_sender({"message": f"値がstdinに入力されました!!", "status": "ng"})
+                    if (new_stdin := event.get('stdin', None)) is not None:
+                        state, results, remaining = is_complete_match(self.line_data[self.func_crnt_name][4][str(self.next_line_number)][input_check], self.stdin_buffer + new_stdin)
+                        if state == "incomplete":
+                            self.event_sender({"message": "入力が足りていません!! もう一度入力してください!!", "status": "ng"})
+                            continue
+                        self.stdin_buffer = remaining
+                        self.process.PutSTDIN(new_stdin)
+                        if state == "ok":
+                            self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok"})
+                        elif state == "mismatch":
+                            self.event_sender({"message": "値がscanfのフォーマットに合致しませんでした、、、", "status": "ng"})
                         break
                     self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
 
@@ -395,6 +470,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.isEnd = True
                 self.line_number = self.next_line_number
 
+            print('here')
             self.get_std_outputs()
 
         def get_next_state(self):
