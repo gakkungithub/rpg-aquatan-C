@@ -442,10 +442,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             continue
                         self.stdin_buffer = remaining
                         self.process.PutSTDIN(new_stdin)
-                        if state == "ok":
-                            self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok"})
-                        elif state == "mismatch":
-                            self.event_sender({"message": "値がscanfのフォーマットに合致しませんでした、、、", "status": "ng"})
                         break
                     self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
 
@@ -466,11 +462,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 if var_check:
                     self.vars_tracker.trackStart(self.frame)
+                if input_check:
+                    if state == "ok":
+                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                    elif state == "mismatch":
+                        self.event_sender({"message": "値がscanfのフォーマットに合致しませんでした、、、", "status": "ok", "items": self.vars_tracker.getValueAll()})
             else:
                 self.isEnd = True
                 self.line_number = self.next_line_number
 
-            print('here')
             self.get_std_outputs()
 
         def get_next_state(self):

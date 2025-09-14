@@ -691,6 +691,13 @@ def main():
                             value = " ".join(parts)
                             sender.send_event({"stdin": f"{value}\n"})
                             stdinResult = sender.receive_json()
+                            if stdinResult["status"] == "ok":
+                                for name, value in stdinResult["items"].items():
+                                    item = PLAYER.commonItembag.find(name)
+                                    if item is None:
+                                        item = PLAYER.itembag.find(name)
+                                    if item is not None:
+                                        item.update_value(value)
                             MSGWND.set(stdinResult['message'])
                         except (IndexError, ValueError):
                             MSGWND.set("ERROR...")
