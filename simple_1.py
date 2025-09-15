@@ -1995,7 +1995,6 @@ class Player(Character):
             chara.update(mymap)  # 向きを変えたので更新
 
             if isinstance(chara, Character):
-                msg = chara.message
                 # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
                 if isinstance(chara, CharaMoveItemsEvent):
                     itemsLacked_list = []
@@ -2055,7 +2054,7 @@ class Player(Character):
                                 else:
                                     if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                                         self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
-                                        chara.linenum = None
+                                    chara.linenum = None
                                     # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
                                     MSGWND.set(chara.message)
                         else:
@@ -4409,9 +4408,9 @@ class EventSender:
                                 item = PLAYER.itembag.find(itemvalues["item"])
                             if item:
                                 item.set_value(itemvalues)
-                    if len(msg["std"]) > len(PLAYER.stdMessages):
+                    if "std" in msg and len(msg["std"]) > len(PLAYER.stdMessages):
                         MSGWND.new_stdMessages = msg["std"][len(PLAYER.stdMessages):]
-                    PLAYER.stdMessages = msg["std"]
+                        PLAYER.stdMessages = msg["std"]
                     return msg
                 except json.JSONDecodeError:
                     continue  # JSONがまだ完全でないので続けて待つ

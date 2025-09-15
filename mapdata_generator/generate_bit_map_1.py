@@ -252,21 +252,22 @@ class MapInfo:
             me_func_warp = []
             converted_fromTo = []
             func_num = 0
-            input_order_num = {}
+            input_order_num: dict[int, list] = {}
             for condLine in move_event.line_track:
                 if isinstance(condLine, tuple):
-                    func_num += 1
                     if condLine[0] == "scanf":
-                        input_order_num[func_num] = condLine[1]
-                        me_func_warp.append(condLine[0])
+                        if func_num in input_order_num:
+                            input_order_num[func_num].append(condLine[1])
+                        else:
+                            input_order_num[func_num] = [condLine[1]]
                     else:
+                        func_num += 1
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                         me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
                 elif isinstance(condLine, str):
-                    func_num += 1
-                    me_func_warp.append(condLine)
+                    pass
                 else:
                     converted_fromTo.append(condLine)
             if len(input_order_num):
@@ -286,18 +287,19 @@ class MapInfo:
             input_order_num = {}
             for itemLine in treasure.line_track:
                 if isinstance(itemLine, tuple):
-                    func_num += 1
                     if itemLine[0] == "scanf":
-                        input_order_num[func_num] = itemLine[1]
-                        t_func_warp.append(itemLine[0])
+                        if func_num in input_order_num:
+                            input_order_num[func_num].append(itemLine[1])
+                        else:
+                            input_order_num[func_num] = [itemLine[1]]
                     else:
+                        func_num += 1
                         warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
                         t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
                 elif isinstance(itemLine, str):
-                    func_num += 1
-                    t_func_warp.append(itemLine)
+                    pass
                 else:
                     converted_fromTo.append(itemLine)
             if converted_fromTo[0] in vardecl_lines:
@@ -328,18 +330,19 @@ class MapInfo:
             input_order_num = {}
             for returnLine in line_track:
                 if isinstance(returnLine, tuple):
-                    func_num += 1
                     if returnLine[0] == "scanf":
-                        input_order_num[func_num] = returnLine[1]
-                        rc_func_warp.append(returnLine[0])
+                        if func_num in input_order_num:
+                            input_order_num[func_num].append(returnLine[1])
+                        else:
+                            input_order_num[func_num] = [returnLine[1]]
                     else:
+                        func_num += 1
                         warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
                         rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
                 elif isinstance(returnLine, str):
-                    func_num += 1
-                    rc_func_warp.append(returnLine)
+                    pass
                 else:
                     converted_fromTo.append(returnLine)
             if len(input_order_num):
@@ -360,18 +363,19 @@ class MapInfo:
             input_order_num = {}
             for condLine in chara_checkCondition.line_track:
                 if isinstance(condLine, tuple):
-                    func_num += 1
                     if condLine[0] == "scanf":
-                        input_order_num[func_num] = condLine[1]
-                        ccc_func_warp.append(condLine[0])
+                        if func_num in input_order_num:
+                            input_order_num[func_num].append(condLine[1])
+                        else:
+                            input_order_num[func_num] = [condLine[1]]
                     else:
+                        func_num += 1
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                         ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                         if line != 0:
                             converted_fromTo.append(line)
                 elif isinstance(condLine, str):
-                    func_num += 1
-                    ccc_func_warp.append(condLine)
+                    pass
                 else:
                     converted_fromTo.append(condLine)
             if len(input_order_num):
@@ -394,18 +398,19 @@ class MapInfo:
                     continue
                 for condLine in exps["line_track"]:
                     if isinstance(condLine, tuple):
-                        func_num += 1
                         if condLine[0] == "scanf":
-                            input_order_num[func_num] = condLine[1]
-                            ce_func_warp.append(condLine[0])
+                            if func_num in input_order_num:
+                                input_order_num[func_num].append(condLine[1])
+                            else:
+                                input_order_num[func_num] = [condLine[1]]
                         else:
+                            func_num += 1
                             warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
                             ce_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
                             if line != 0:
                                 converted_fromTo.append(line)
                     elif isinstance(condLine, str):
-                        func_num += 1
-                        ce_func_warp.append(condLine)
+                        pass
                     else:
                         converted_fromTo.append(condLine)
                 exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": ce_func_warp}
