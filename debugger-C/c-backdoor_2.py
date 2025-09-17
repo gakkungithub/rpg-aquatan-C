@@ -282,6 +282,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.std_messages = []
             self.input_check_num = {}
             self.stdin_buffer = ""
+            self.file_check_num = {}
+            self.file_info_to_send = []
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -373,7 +375,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 while True:
                     if (event := self.event_reciever()) is None:
                         continue
-                    if (retValue := event.get('return', None)) is not None:
+                    if event.get('return', None) is not None:
                         self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                         print("プログラムは正常に終了しました")
                         raise ProgramFinished()
@@ -399,8 +401,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name][4] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
                 self.input_check_num[(self.next_frame_num, self.next_line_number)] = (self.line_data[self.func_crnt_name][4][str(self.next_line_number)], -1)
-                # もし一番最初にinputの取得があるならinput_checkをTrueにする
-            
+
             input_check = None
             if ((self.next_frame_num, self.next_line_number)) in self.input_check_num:
                 if str(self.input_check_num[(self.next_frame_num, self.next_line_number)][1] + 1) in self.input_check_num[(self.next_frame_num, self.next_line_number)][0]:
@@ -426,9 +427,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             break
                     else:
                         self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
-                self.input_check_num[(self.next_frame_num, self.next_line_number)][0].pop(input_check, None)
+                self.input_check_num[(self.next_frame_num, self.next_line_number)][0].pop(input_check)
                 if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0]) == 0:
-                    self.input_check_num.pop((self.next_frame_num, self.next_line_number), None)
+                    self.input_check_num.pop((self.next_frame_num, self.next_line_number))
 
             if str(self.next_line_number) not in self.line_data[self.func_crnt_name][3]:
                 self.thread.StepInto()
@@ -452,6 +453,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
                     elif state == "mismatch":
                         self.event_sender({"message": "値がscanfのフォーマットに合致しませんでした、、、", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                
+                if str(self.line_number) in self.line_data[self.func_name][5] and (self.frame_num, self.line_number) not in self.file_check_num:
+                    self.file_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name][5][str(self.line_number)], -1)
+
+                if ((self.frame_num, self.line_number)) in self.file_check_num:
+                    self.file_check_num[(self.frame_num, self.line_number)] = (self.file_check_num[(self.frame_num, self.line_number)][0], self.file_check_num[(self.frame_num, self.line_number)][1] + 1)
+                    if str(self.file_check_num[(self.frame_num, self.line_number)][1]) in self.file_check_num[(self.frame_num, self.line_number)][0]:
+                        file_check = str(self.file_check_num[(self.frame_num, self.line_number)][1])
+                        self.file_info_to_send = self.file_check_num[(self.frame_num, self.line_number)][0][file_check]
+                        self.file_check_num[(self.frame_num, self.line_number)][0].pop(file_check)
+                        if len(self.file_check_num[(self.frame_num, self.line_number)][0]) == 0:
+                            self.file_check_num.pop((self.frame_num, self.line_number))
             else:
                 self.isEnd = True
                 self.line_number = self.next_line_number
@@ -525,7 +538,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if (item := event.get('item', None)) is not None:
                         if item != var:
                             errorCnt += 1
-                            print(f'your variables were incorrect!!\ncorrect variable: {var}')
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
                                 self.event_sender({"message": f"ヒント: アイテム {var} を取得してください!!", "status": "ng"})
@@ -542,8 +554,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
                         # アイテムを正しく取得できたら次の変数に移る
                         if not crntFromTo:
-                            print("you selected correct vars")
-                            self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "status": "ok"})
+                            self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "status": "ok"}, len(varsDeclLines_copy) == 0)
                             self.vars_tracker.setVarsDeclared(var)
                             break
 
@@ -1078,17 +1089,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         def event_sender(self, msgJson, getLine=True):
             if msgJson["status"] == "ok":
                 msgJson["std"] = self.std_messages
+                msgJson["files"] = self.file_info_to_send
+                self.file_info_to_send = []
                 if getLine:
                     target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
                     skipped_vars = []
                     for target_line in target_lines:
                         skipped_vars += list(set(self.varsDeclLines_list[target_line]) - set(self.vars_tracker.vars_declared[-1]))
-                    
                     # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
                     if len(skipped_vars) != 0 and self.line_number not in self.line_data[self.func_name][0]:
                         msgJson["line"] = int(target_lines[0])
                     else:
-                        print("aaaaaa", self.next_line_number)
                         msgJson["line"] = self.next_line_number
                         msgJson["removed"] = self.vars_tracker.vars_removed
             send_data = json.dumps(msgJson)

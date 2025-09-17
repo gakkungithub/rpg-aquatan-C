@@ -753,6 +753,8 @@ class ASTtoFlowChart:
                     break
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            if operator_spell == "=" and back == "fopen":
+                func_references[-1] = (back, func_references[-1][1], front)
             exp_terms = ''.join([front, operator_spell, back])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
@@ -813,8 +815,6 @@ class ASTtoFlowChart:
         # print([c_cr.spelling for c_cr in children[1:]])
         # --- 引数ノードとのエッジ作成 ---
         
-        if ref_spell == "scanf":
-            print(ref_spell)
         for i, arg_cursor in enumerate(children[1:]):
             self.check_cursor_error(arg_cursor)
             arg_calc_order_comments = []
@@ -831,7 +831,15 @@ class ASTtoFlowChart:
             input_type_str = [t.spelling for t in children[1].get_tokens()][0]
             func_references.append((ref_spell, input_type_str))
             return ref_spell
-        elif ref_spell in ["setvbuf", "printf", "fprintf"]:
+        elif ref_spell == "fopen":
+            file_name = [t.spelling for t in children[1].get_tokens()][0]
+            func_references.append((ref_spell, file_name))
+            return ref_spell
+        elif ref_spell == "fclose":
+            file_var = var_references[-1]
+            func_references.append((ref_spell, file_var))
+            return ref_spell
+        elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)
             return ref_spell
         else:

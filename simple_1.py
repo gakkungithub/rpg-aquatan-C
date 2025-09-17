@@ -341,15 +341,6 @@ def main():
         for gvar_name, values in initialResult["items"].items():
             PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
 
-        # # 初期アイテムの設定(グローバル変数)
-        # for itemName in items.keys():
-        #     # このitemValueをアイテムの初期値として設定するつもりです!!
-        #     # ここも後のグローバル変数の解析を考える時に修正する
-        #     item = Item(itemName)
-        #     # ここで変数名を送信してその初期値を取得する(グローバル変数のみ)
-        #     item.set_value(get_exp_value(items[itemName]))
-        #     PLAYER.commonItembag.add(item)
-
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
 
@@ -483,6 +474,7 @@ def main():
                                 last_mouse_pos = event.pos
                             elif ITEMWND.isCursorInWindow(event.pos):
                                 pass
+
                         cmd = BTNWND.is_clicked(event.pos)
                     
                 elif event.type == pygame.MOUSEBUTTONUP:
@@ -1705,6 +1697,7 @@ class Player(Character):
         self.goaled = False
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
         self.stdMessages = []
+        self.fvar_to_fname = {}
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -1870,7 +1863,6 @@ class Player(Character):
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
-                        print(itemResult)
                         if itemResult.get('skip', False):
                             MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
@@ -2455,6 +2447,7 @@ class MessageWindow(Window):
         self.select_type = None
         self.selectingIndex = 0
         self.new_stdMessages = []
+        self.file_message = ""
 
     def set(self, message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
@@ -2464,6 +2457,9 @@ class MessageWindow(Window):
             if len(self.new_stdMessages):
                 message = "/".join(["コンソール出力:"] + self.new_stdMessages) + "%" + message
                 self.new_stdMessages = []
+            if len(self.file_message):
+                message = message + "%" + self.file_message
+                self.file_message = ""
             print(message)
             self.cur_pos = 0
             self.cur_page = 0
@@ -2799,6 +2795,57 @@ class PauseWindow(Window):
 
         Window.blit(self, screen)
 
+                                                                                                             
+# 88888888888 88 88          I8,        8        ,8I 88                      88                                 
+# 88          "" 88          `8b       d8b       d8' ""                      88                                 
+# 88             88           "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaa     88 88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88"""""     88 88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          88 88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88 88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          88 88  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                              
+class FileWindow(Window):
+    """ファイル表示ウィンドウ"""
+    FONT_SIZE = 20
+    FONT_COLOR = (255, 255, 255)
+
+    def __init__(self):
+        Window.__init__(self, pygame.Rect(SBW_WIDTH // 3, 10, SBW_WIDTH // 3 , SBW_HEIGHT // 2))
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.filename = None
+        self.filelines = []
+
+    def toggle_is_visible(self, filename):
+        if filename == self.filename:
+            self.is_visible = False
+            self.filename = None
+        else:
+            self.is_visible = True
+            self.filename = filename
+            self.read_filelines()
+
+    def read_filelines(self):
+        if self.filename:
+            time.sleep(0.1)
+            with open(f"debugger-C/{self.filename[1:-1]}", "r", encoding="utf-8") as f:
+                self.filelines = f.read().splitlines()
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.FONT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE+2)-rect[3]))
+
+    def draw(self, screen):
+        if self.is_visible:
+            Window.draw(self)
+            offset_y = 10
+            for fileline in self.filelines:
+                self.draw_string(10, offset_y, fileline)
+                offset_y += 24
+            Window.blit(self, screen)
+
 #                                                                                                                          
 # 88                                    I8,        8        ,8I 88                      88                                 
 # 88   ,d                               `8b       d8b       d8' ""                      88                                 
@@ -2835,6 +2882,8 @@ class ItemWindow(Window):
         self.itemChips = ItemChips()
         self.items_changed: set[int] = set()
         self.check_exps_line: tuple[int, bool] = (-1, False)
+        self.file_buttons: dict[str, pygame.Rect] = {}
+        self.file_window = FileWindow()
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -2928,16 +2977,26 @@ class ItemWindow(Window):
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
+            if item.vartype == "FILE *" and item.name in PLAYER.fvar_to_fname:
+                name_offset = self.myfont.get_rect(item.name).width + 30
+                file_button = pygame.Rect(text_x + name_offset, offset_y + 2, 100, 20)
+                pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
+                label_surf, _ = self.myfont.render(PLAYER.fvar_to_fname[item.name], (255, 255, 255))
+                label_rect = label_surf.get_rect(center=file_button.center)
+                self.file_buttons[PLAYER.fvar_to_fname[item.name]] = file_button
+                self.surface.blit(label_surf, label_rect)
+
             # 配列などの値がないvalueは表示しない
-            if item.itemvalue.value is not None:
+            if item.itemvalue.value is not None and item.vartype != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
             offset_y += 25
-            if item.itemvalue.children:
+            if item.itemvalue.children and item.vartype != "FILE *":
                 offset_y = self.draw_values(item.itemvalue.children, offset_y, 25, 'local')
 
+        self.file_window.draw(screen)
         Window.blit(self, screen)
 
     def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int, type: str):
@@ -2999,6 +3058,12 @@ class ItemWindow(Window):
     
     def isCursorInWindow(self, pos : tuple[int, int]):
         y_line = (pos[1] - self.y - 10) // 25
+        local_pos = (pos[0] - self.x, pos[1] - self.y)
+        for filename, button in self.file_buttons.items():
+            if button.collidepoint(local_pos):
+                self.file_window.toggle_is_visible(filename)
+                return True
+            
         if self.x <= pos[0] <= self.rect[2] and y_line in self.items_changed:
             if not MSGWND.is_visible:
                 self.check_exps_line = (y_line, False)
@@ -3998,7 +4063,6 @@ class StageButtonWindow:
     def close(self):
         self.sock.close()
         self.stage_selecting = True
-    
 
                                                                                                                      
 #  ad88888ba                                          88888888ba                                                      
@@ -4411,6 +4475,19 @@ class EventSender:
                     if "std" in msg and len(msg["std"]) > len(PLAYER.stdMessages):
                         MSGWND.new_stdMessages = msg["std"][len(PLAYER.stdMessages):]
                         PLAYER.stdMessages = msg["std"]
+                    if "files" in msg:
+                        for file_info in msg["files"]:
+                            if file_info["type"] == "fopen":
+                                PLAYER.fvar_to_fname[file_info["varname"]] = file_info["filename"]
+                                MSGWND.file_message = f"{file_info["filename"][1:-1]}　を変数　{file_info["varname"]}　で開きました!!"
+                            else:
+                                MSGWND.file_message = f"{PLAYER.fvar_to_fname[file_info["varname"]][1:-1]}　を閉じました!!"
+                                ITEMWND.file_window.filename = None
+                                ITEMWND.file_window.is_visible = False
+                                ITEMWND.file_buttons.pop(PLAYER.fvar_to_fname[file_info["varname"]])
+                                PLAYER.fvar_to_fname.pop(file_info["varname"], None)
+                    if ITEMWND:
+                        ITEMWND.file_window.read_filelines()
                     return msg
                 except json.JSONDecodeError:
                     continue  # JSONがまだ完全でないので続けて待つ
