@@ -1698,6 +1698,7 @@ class Player(Character):
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
         self.stdMessages = []
         self.fvar_to_fname = {}
+        self.memory_in_var = {}
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -2885,10 +2886,14 @@ class ItemWindow(Window):
         self.file_buttons: dict[str, pygame.Rect] = {}
         self.file_window = FileWindow()
 
-    def draw_string(self, x, y, string, color):
+    def draw_string(self, x, y, string, color, size=None):
         """文字列出力"""
+        if size:
+            self.myfont.size = size
         surf, rect = self.myfont.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+        if size:
+            self.myfont.size = self.FONT_HEIGHT
 
     def draw(self, screen):
         """メッセージを描画する
@@ -2966,13 +2971,16 @@ class ItemWindow(Window):
             icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
             icon_y = offset_y
-            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+            text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
 
             if icon:
                 self.surface.blit(icon, (icon_x, icon_y))
 
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+
+            if item.name in PLAYER.memory_in_var:
+                self.draw_string(text_x - 12, offset_y + 6, PLAYER.memory_in_var[item.name]["size"], self.BLACK if is_item_changed else self.WHITE, 15)
 
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
@@ -2989,7 +2997,7 @@ class ItemWindow(Window):
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None and item.vartype != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
-                name_offset = self.myfont.get_rect(item.name).width + 30
+                name_offset = self.myfont.get_rect(item.name).width + 20
                 self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
             
             offset_y += 25
@@ -3026,7 +3034,7 @@ class ItemWindow(Window):
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
             # icon_y = offset_y
-            # text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
+            # text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
 
             # if icon:
             #     self.surface.blit(icon, (icon_x, icon_y))
@@ -3040,7 +3048,7 @@ class ItemWindow(Window):
             else:
                 color = self.BLACK if is_item_changed else self.WHITE
             self.draw_string(text_x, offset_y, f"{valuename:<8}", color)
-            name_offset = self.myfont.get_rect(valuename).width + 30
+            name_offset = self.myfont.get_rect(valuename).width + 20
             if itemvalue.value is not None:
                 self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", color)
                 
@@ -4486,6 +4494,12 @@ class EventSender:
                                 ITEMWND.file_window.is_visible = False
                                 ITEMWND.file_buttons.pop(PLAYER.fvar_to_fname[file_info["varname"]])
                                 PLAYER.fvar_to_fname.pop(file_info["varname"], None)
+                    if "memory" in msg:
+                        for memory_info in msg["memory"]:
+                            if memory_info["type"] == "malloc":
+                                PLAYER.memory_in_var[memory_info["varname"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"]}
+                            else:
+                                PLAYER.memory_in_var[memory_info["varname"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"]}
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg

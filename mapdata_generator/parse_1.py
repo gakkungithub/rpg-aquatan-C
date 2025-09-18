@@ -584,7 +584,7 @@ class ASTtoFlowChart:
 
     # 式の項を一つずつ解析
 
-    def parse_exp_term(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
+    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -676,7 +676,6 @@ class ASTtoFlowChart:
         }
         
         cursor = self.unwrap_unexposed(cursor)
-        print(cursor.kind)
         if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
         exp_terms = ""
@@ -753,8 +752,13 @@ class ASTtoFlowChart:
                     break
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            if operator_spell == "=" and back == "fopen":
-                func_references[-1] = (back, func_references[-1][1], front)
+            if operator_spell == "=" and len(func_references):
+                if back == "fopen":
+                    func_references[-1] = (back, func_references[-1][1], front)
+                if isinstance(func_references[-1], dict) and func_references[-1][0] in ["malloc", "realloc"]:
+                    func_references[-1]["varname"] = front
+                    if "vartype" not in func_references[-1]:
+                        func_references[-1]["vartype"] = self.unwrap_unexposed(exps[0]).type.spelling[:-1]
             exp_terms = ''.join([front, operator_spell, back])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
@@ -784,6 +788,8 @@ class ASTtoFlowChart:
             castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
             castedExpType = self.unwrap_unexposed(cr).type.spelling
+            if castedExp in ["malloc", "realloc"]:
+                func_references[-1]["vartype"] = cursor.type.spelling[:-1]
             if castedExpType:
                 calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
             else:
@@ -792,7 +798,7 @@ class ASTtoFlowChart:
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
-    # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, {"func": name}, arg3]}のように辞書型にする
+    # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
     # そして、コメントを表示するときに既に
 
     def parse_call_expr(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
@@ -838,6 +844,16 @@ class ASTtoFlowChart:
         elif ref_spell == "fclose":
             file_var = var_references[-1]
             func_references.append((ref_spell, file_var))
+            return ref_spell
+        elif ref_spell == "malloc":
+            size_str = "".join([t.spelling for t in children[1].get_tokens()])
+            func_references.append({"type": ref_spell, "size": size_str})
+            return ref_spell
+        elif ref_spell == "realloc":
+            size_str = "".join([t.spelling for t in children[2].get_tokens()])
+            func_references.append({"type": ref_spell, "size": size_str, "fromVar": var_references[-1]})
+            return ref_spell
+        elif ref_spell == "free":
             return ref_spell
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)

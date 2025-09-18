@@ -284,6 +284,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.stdin_buffer = ""
             self.file_check_num = {}
             self.file_info_to_send = []
+            self.memory_check_num = {}
+            self.memory_info_to_send = []
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -465,6 +467,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.file_check_num[(self.frame_num, self.line_number)][0].pop(file_check)
                         if len(self.file_check_num[(self.frame_num, self.line_number)][0]) == 0:
                             self.file_check_num.pop((self.frame_num, self.line_number))
+
+                if str(self.line_number) in self.line_data[self.func_name][6] and (self.frame_num, self.line_number) not in self.memory_check_num:
+                    self.memory_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name][6][str(self.line_number)], -1)
+
+                if ((self.frame_num, self.line_number)) in self.memory_check_num:
+                    self.memory_check_num[(self.frame_num, self.line_number)] = (self.memory_check_num[(self.frame_num, self.line_number)][0], self.memory_check_num[(self.frame_num, self.line_number)][1] + 1)
+                    if str(self.memory_check_num[(self.frame_num, self.line_number)][1]) in self.memory_check_num[(self.frame_num, self.line_number)][0]:
+                        memory_check = str(self.memory_check_num[(self.frame_num, self.line_number)][1])
+                        self.memory_info_to_send = [{"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "fromVar": memory_info.get("fromVar", None)} for memory_info in self.memory_check_num[(self.frame_num, self.line_number)][0][memory_check]]
+                        self.memory_check_num[(self.frame_num, self.line_number)][0].pop(memory_check)
+                        if len(self.memory_check_num[(self.frame_num, self.line_number)][0]) == 0:
+                            self.memory_check_num.pop((self.frame_num, self.line_number))
             else:
                 self.isEnd = True
                 self.line_number = self.next_line_number
@@ -1091,6 +1105,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 msgJson["std"] = self.std_messages
                 msgJson["files"] = self.file_info_to_send
                 self.file_info_to_send = []
+                msgJson["memory"] = self.memory_info_to_send
+                self.memory_info_to_send = []
                 if getLine:
                     target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
                     skipped_vars = []

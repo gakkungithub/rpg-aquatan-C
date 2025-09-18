@@ -178,6 +178,10 @@ class VarsTracker:
             self.print_variables(self.previous_values[-(i+1)])
 
 def step_conditionally(frame):
+    # 式の計算により、mallocやreallocのサイズを取得できる
+    # これと型を組み合わせて型*サイズの組みわせを取得してゲーム側に送信。
+    print("サイズの計算", frame.EvaluateExpression("5 * sizeof(int *)").GetValue())
+    print("サイズの計算1", frame.EvaluateExpression("5 * sizeof(int **)").GetValue())    
     thread = frame.GetThread()
     process = thread.GetProcess()
 
