@@ -276,6 +276,11 @@ class MapInfo:
                             file_order_num[func_num].append({"type": itemLine[0], "varname": itemLine[1]})
                         else:
                             file_order_num[func_num] = [{"type": itemLine[0], "varname": itemLine[1]}]
+                    elif itemLine[0] == "free":
+                        if func_num in memory_order_num:
+                            memory_order_num[func_num].append({"type": itemLine[0], "varname": itemLine[1]})
+                        else:
+                            memory_order_num[func_num] = [{"type": itemLine[0], "varname": itemLine[1]}]
                     else:
                         func_num += 1
                         warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
@@ -338,6 +343,11 @@ class MapInfo:
                             file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
                         else:
                             file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
+                    elif condLine[0] == "free":
+                        if func_num in memory_order_num:
+                            memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
+                        else:
+                            memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
                     else:
                         func_num += 1
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
@@ -405,6 +415,11 @@ class MapInfo:
                             file_order_num[func_num].append({"type": returnLine[0], "varname": returnLine[1]})
                         else:
                             file_order_num[func_num] = [{"type": returnLine[0], "varname": returnLine[1]}]
+                    elif returnLine[0] == "free":
+                        if func_num in memory_order_num:
+                            memory_order_num[func_num].append({"type": returnLine[0], "varname": returnLine[1]})
+                        else:
+                            memory_order_num[func_num] = [{"type": returnLine[0], "varname": returnLine[1]}]
                     else:
                         func_num += 1
                         warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
@@ -465,6 +480,11 @@ class MapInfo:
                             file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
                         else:
                             file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
+                    elif condLine[0] == "free":
+                        if func_num in memory_order_num:
+                            memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
+                        else:
+                            memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
                     else:
                         func_num += 1
                         warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
@@ -527,6 +547,11 @@ class MapInfo:
                                 file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
                             else:
                                 file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
+                        elif condLine[0] == "free":
+                            if func_num in memory_order_num:
+                                memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
+                            else:
+                                memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
                         else:
                             func_num += 1
                             warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()

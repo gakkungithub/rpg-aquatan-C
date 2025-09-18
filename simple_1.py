@@ -1698,7 +1698,7 @@ class Player(Character):
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
         self.stdMessages = []
         self.fvar_to_fname = {}
-        self.memory_in_var = {}
+        self.address_to_size = {}
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -2979,8 +2979,9 @@ class ItemWindow(Window):
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
-            if item.name in PLAYER.memory_in_var:
-                self.draw_string(text_x - 12, offset_y + 6, PLAYER.memory_in_var[item.name]["size"], self.BLACK if is_item_changed else self.WHITE, 15)
+            if item.itemvalue.value in PLAYER.address_to_size:
+                # print(item.name, item.itemvalue.value)
+                self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE, 15)
 
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
@@ -3596,6 +3597,7 @@ class Treasure():
         """宝箱をあける"""
 #        sounds["treasure"].play()
 #        アイテムを追加する処理
+
         item = Item(self.item, data, exps, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
@@ -3872,12 +3874,12 @@ class Object:
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
-
     def __init__(self, name: str, data, exps: dict, vartype: str):
         self.name = str(name)
         self.index_exps = exps.get('indexes', None)
-        self.itemvalue: ItemValue = ItemValue.from_dict(data, exps["values"])
+        self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: str = vartype
+        # ポインタならここでアドレスとサイズの対応関係を更新する
 
     def get_value(self):
         """値を返す"""
@@ -3886,15 +3888,14 @@ class Item:
     def set_value(self, vals: dict):
         """値をセット"""
         path: list[str] = vals["path"]
-        print(path)
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
-            print(temp_itemvalue.children)
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
 
     def update_value(self, data: dict):
         self.itemvalue = ItemValue.from_dict(data)
+        # ポインタならここでアドレスとサイズの対応関係を更新する
 
 ### ここにitemの値用の子クラスを作る
 class ItemValue:
@@ -3908,7 +3909,7 @@ class ItemValue:
         value: str | None = data["value"]
         itemvalue_exps: list[str] = exps if isinstance(exps, list) else None
         children_dict: dict[str | int, dict] = data["children"]
-        children = {index: cls.from_dict(v, exps.get(f"\"{index}\"", None) if isinstance(exps, dict) else None) for index, v in children_dict.items()}
+        children = {index: cls.from_dict(v, exps=exps.get(f"\"{index}\"", None) if isinstance(exps, dict) else None) for index, v in children_dict.items()}
         return cls(value, itemvalue_exps, children)
 
 #                                                                             
@@ -4480,6 +4481,7 @@ class EventSender:
                                 item = PLAYER.itembag.find(itemvalues["item"])
                             if item:
                                 item.set_value(itemvalues)
+                                
                     if "std" in msg and len(msg["std"]) > len(PLAYER.stdMessages):
                         MSGWND.new_stdMessages = msg["std"][len(PLAYER.stdMessages):]
                         PLAYER.stdMessages = msg["std"]
@@ -4497,9 +4499,11 @@ class EventSender:
                     if "memory" in msg:
                         for memory_info in msg["memory"]:
                             if memory_info["type"] == "malloc":
-                                PLAYER.memory_in_var[memory_info["varname"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"]}
+                                PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                            elif memory_info["type"] == "realloc":
+                                PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                             else:
-                                PLAYER.memory_in_var[memory_info["varname"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"]}
+                                PLAYER.address_to_size.pop(memory_info["address"], None)
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg

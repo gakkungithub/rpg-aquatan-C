@@ -854,6 +854,8 @@ class ASTtoFlowChart:
             func_references.append({"type": ref_spell, "size": size_str, "fromVar": var_references[-1]})
             return ref_spell
         elif ref_spell == "free":
+            free_var = var_references[-1]
+            func_references.append((ref_spell, free_var))
             return ref_spell
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)

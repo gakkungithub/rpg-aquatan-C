@@ -93,7 +93,7 @@ class VarsTracker:
                     else:
                         self.vars_changed[vars_path[0]] = [(*vars_path[1:], name)]
             else:
-                # print(f"{indent}{full_name} = {value}")
+                print(f"{indent}{full_name} = {value}")
                 pass
 
             if depth == 0 and isLocal:
@@ -123,7 +123,10 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if cstr != var_previous_value:
                                     if len(vars_path) == 0:
-                                        self.vars_changed[name] = [('[0]', )]
+                                        if name in self.vars_changed:
+                                            self.vars_changed[name].append(('[0]', ))
+                                        else:
+                                            self.vars_changed[name]= [('[0]', )]
                                     else:
                                         if vars_path[0] in self.vars_changed:
                                             self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
@@ -140,7 +143,10 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        self.vars_changed[name] = [('[0]', )]
+                                        if name in self.vars_changed:
+                                            self.vars_changed[name].append(('[0]', ))
+                                        else:
+                                            self.vars_changed[name]= [('[0]', )]
                                     else:
                                         if vars_path[0] in self.vars_changed:
                                             self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
@@ -157,7 +163,10 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        self.vars_changed[name] = [('[0]', )]
+                                        if name in self.vars_changed:
+                                            self.vars_changed[name].append(('[0]', ))
+                                        else:
+                                            self.vars_changed[name]= [('[0]', )]
                                     else:
                                         if vars_path[0] in self.vars_changed:
                                             self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
@@ -174,7 +183,10 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        self.vars_changed[name] = [('[0]', )]
+                                        if name in self.vars_changed:
+                                            self.vars_changed[name].append(('[0]', ))
+                                        else:
+                                            self.vars_changed[name]= [('[0]', )]
                                     else:
                                         if vars_path[0] in self.vars_changed:
                                             self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
@@ -475,7 +487,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.memory_check_num[(self.frame_num, self.line_number)] = (self.memory_check_num[(self.frame_num, self.line_number)][0], self.memory_check_num[(self.frame_num, self.line_number)][1] + 1)
                     if str(self.memory_check_num[(self.frame_num, self.line_number)][1]) in self.memory_check_num[(self.frame_num, self.line_number)][0]:
                         memory_check = str(self.memory_check_num[(self.frame_num, self.line_number)][1])
-                        self.memory_info_to_send = [{"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "fromVar": memory_info.get("fromVar", None)} for memory_info in self.memory_check_num[(self.frame_num, self.line_number)][0][memory_check]]
+                        for memory_info in self.memory_check_num[(self.frame_num, self.line_number)][0][memory_check]:
+                            if memory_info["type"] in ["malloc", "realloc"]:
+                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.vars_tracker.previous_values[-1][memory_info["varname"]].value, "fromVar": memory_info.get("fromVar", None)})
+                            else:
+                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "address": self.vars_tracker.previous_values[-1][memory_info["varname"]].value})
                         self.memory_check_num[(self.frame_num, self.line_number)][0].pop(memory_check)
                         if len(self.memory_check_num[(self.frame_num, self.line_number)][0]) == 0:
                             self.memory_check_num.pop((self.frame_num, self.line_number))
@@ -637,6 +653,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     while True:
                         if event.get('itemsetall', False):
                             value_changed_dict = self.get_new_values(values_changed)
+                            print(value_changed_dict)
                             self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
                             break
                         errorCnt += 1
