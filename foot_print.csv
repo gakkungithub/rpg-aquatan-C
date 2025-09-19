@@ -1,3 +1,2 @@
-start,06_function_definition,10, 12
-itemget, 06_function_definition,11, 13,r1
-end, 06_function_definition,11, 13
+start,20_memory_management,7, 11
+end, 20_memory_management,7, 11
