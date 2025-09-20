@@ -610,7 +610,7 @@ class ASTtoFlowChart:
 
     # 式の項を一つずつ解析
 
-    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
+    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -732,7 +732,7 @@ class ASTtoFlowChart:
                     self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
             else:
                 exp_terms = cursor.spelling
-            var_references.append(exp_terms)
+            var_references.append([exp_terms])
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -750,7 +750,7 @@ class ASTtoFlowChart:
                     break
             if member_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
                 member_chain.append(member_cursor.spelling)
-            print(list(reversed(member_chain)))
+                var_references.append(list(reversed(member_chain)))
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
             exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments)
@@ -841,7 +841,7 @@ class ASTtoFlowChart:
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
     # そして、コメントを表示するときに既に
 
-    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
+    def parse_call_expr(self, cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
         if not (children := list(cursor.get_children())):
             raise ValueError("CALL_EXPR に子ノードがありません")
 

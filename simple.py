@@ -6,7 +6,6 @@ import subprocess
 import random
 import struct
 import sys
-import re
 # socket通信を行う
 import socket
 import json
@@ -160,14 +159,15 @@ def main():
                             last_mouse_pos = event.pos
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
-                            # ステージのボタンを押した場合
-                            if code_name == SBWND.is_clicked(event.pos) == 'check lldb':
+                            if code_name == SBWND.is_clicked(event.pos) == 'color support':
+                                SBWND.color_support = not SBWND.color_support
+                            elif code_name == SBWND.is_clicked(event.pos) == 'check lldb':
                                 if server is not None:
                                     SBWND.close()
                                     server = None
                                 else:
                                     SBWND.stage_selecting = not SBWND.stage_selecting
-                                
+                            # ステージのボタンを押した場合
                             elif code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
                                     SBWND.hide()
@@ -226,8 +226,9 @@ def main():
         # cファイルを解析してマップデータを生成する
         # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
         cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
-        # if args.universal:
-        #     cfcode.append("-u")
+        if SBWND.color_support:
+            cfcode.append("-u")
+            SBWND.color_support = False
         try:
             subprocess.run(cfcode, cwd="mapdata_generator", check=True)
         except subprocess.CalledProcessError as e:
@@ -2751,6 +2752,8 @@ class PauseWindow(Window):
     """ポーズウィンドウ""" # 操作説明の表示については後々考える
     FONT_SIZE = 16
     TEXT_COLOR = (255, 255, 255)
+    HELP_COLOR = (100, 100, 100)
+    HELP_FONT_COLOR = (255, 255, 255)
     TO_GAME_BG_COLOR = (0, 0, 255) 
     TO_GAME_FONT_COLOR = (255, 255, 255)
     TO_SSELECT_BG_COLOR = (255, 0, 0) 
@@ -2761,15 +2764,26 @@ class PauseWindow(Window):
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 2 - 30, 200, 60)
         self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 2 - 30, 200, 60)
+        self.button_help_rect = pygame.Rect(self.rect.width - 80, 30, 50, 50)
 
     def draw(self, screen):
         """ポーズ画面を描画する"""
         Window.draw(self)
         if self.is_visible is False:
             return
-
+        
+        self.font.size = self.FONT_SIZE * 2
         surf, rect = self.font.render("Pause", self.TEXT_COLOR)
+        self.font.size = self.FONT_SIZE
         self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 2 - 100))
+
+        # ヘルプボタン
+        pygame.draw.rect(self.surface, self.HELP_COLOR, self.button_help_rect)
+        self.font.size = self.FONT_SIZE * 2
+        label_surf_help, _ = self.font.render("?", self.HELP_FONT_COLOR)
+        self.font.size = self.FONT_SIZE
+        label_rect_help = label_surf_help.get_rect(center=self.button_help_rect.center)
+        self.surface.blit(label_surf_help, label_rect_help)
 
         # ゲームボタン
         pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
@@ -3960,7 +3974,7 @@ class StageButtonWindow:
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
-    CHECKING_LLDB_BUTTON_FONT_SIZE = 12
+    MINI_BUTTON_FONT_SIZE = 12
 
     FONT_COLOR = (255, 255, 255)
 
@@ -3970,13 +3984,15 @@ class StageButtonWindow:
         self.surface.fill((128, 128, 128))
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = []
+        self.color_support_button_rect = pygame.Rect(self.rect.width - 220, 10, 100, 30)
         self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
         self.load_sb()
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
-        self.checking_lldb_button_font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.CHECKING_LLDB_BUTTON_FONT_SIZE)
+        self.mini_button_font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.MINI_BUTTON_FONT_SIZE)
         self.stage_selecting = True
+        self.color_support = False
 
     def show(self):
         """ウィンドウを表示"""
@@ -3997,21 +4013,31 @@ class StageButtonWindow:
         """blit"""
         screen.blit(self.surface, (self.rect[0], self.rect[1]))
 
-    def draw(self, screen):
+    def draw(self, screen: pygame.Surface):
         if self.is_visible:
             self.blit(screen)
             self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択" if self.stage_selecting else "lldb　処理チェック", self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
+
+            # 色覚サポートのあり/なしボタン
+            pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
+            color_support_label_surf, _ = self.mini_button_font.render("色覚サポートあり" if self.color_support else "色覚サポートなし", (0, 0, 0) if self.color_support else (255, 255, 255))
+            color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
+            screen.blit(color_support_label_surf, color_support_label_rect)
+
+            # ゲームモード/デバッグモードのボタン
             pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
-            label_surf, _ = self.checking_lldb_button_font.render("モード変更", (255, 255, 255))
-            label_rect = label_surf.get_rect(center=self.checking_lldb_button_rect.center)
-            screen.blit(label_surf, label_rect)
+            mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
+            mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+            screen.blit(mode_change_label_surf, mode_change_label_rect)
 
     def is_clicked(self,pos):
         for button in self.button_stages:
             if button.rect.collidepoint(pos):
                 return button.code_name
+            if self.color_support_button_rect.collidepoint(pos):
+                return 'color support'
             if self.checking_lldb_button_rect.collidepoint(pos):
                 return 'check lldb'
         return None
@@ -4476,9 +4502,9 @@ class EventSender:
                         for file_info in msg["files"]:
                             if file_info["type"] == "fopen":
                                 PLAYER.address_to_fname[file_info["address"]] = file_info["filename"]
-                                MSGWND.file_message = f"{file_info['filename'][1:-1]}　を変数　{file_info['varname']}　で開きました!!"
+                                MSGWND.file_message = f"{file_info["filename"][1:-1]}　を変数　{file_info["varname"]}　で開きました!!"
                             else:
-                                MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
+                                MSGWND.file_message = f"{PLAYER.address_to_fname[file_info["address"]][1:-1]}　を閉じました!!"
                                 ITEMWND.file_window.filename = None
                                 ITEMWND.file_window.is_visible = False
                                 fname = PLAYER.address_to_fname.pop(file_info["address"])
