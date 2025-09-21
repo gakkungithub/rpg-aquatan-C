@@ -59,7 +59,6 @@ BUTTON_WINDOW = None
 BUTTON_WIDTH = 50
 PATH = 'foot_print.csv'
 
-
 cmd = "aquatan"
 # time [ms]
 INTERVAL = 100
@@ -187,21 +186,21 @@ def main():
                                     SBWND.start_checking_lldb()
                             mouse_down = False
                             scroll_start = False
-                    if mouse_down:
-                        if event.type == pygame.MOUSEMOTION:
-                            scroll_start = True
-                            dx = - (event.pos[0] - last_mouse_pos[0])
-                            if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
-                                SBWND.scrollX += dx
-                            elif SBWND.scrollX + dx < 0:
-                                SBWND.scrollX = 0
-                            else:
-                                SBWND.scrollX = SBWND.maxScrollX
-                            if dx != 0:
-                                SBWND.load_sb()
-                            last_mouse_pos = event.pos
+                    if mouse_down and event.type == pygame.MOUSEMOTION:
+                        scroll_start = True
+                        dx = - (event.pos[0] - last_mouse_pos[0])
+                        if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
+                            SBWND.scrollX += dx
+                        elif SBWND.scrollX + dx < 0:
+                            SBWND.scrollX = 0
+                        else:
+                            SBWND.scrollX = SBWND.maxScrollX
+                        if dx != 0:
+                            SBWND.load_sb()
+                        last_mouse_pos = event.pos
                     
                     if server is not None and event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN):
+                        # ステップ実行してプログラムの終了に到達した時プログラムを終了する
                         if SBWND.step_into():
                             SBWND.close()
                             server = None
@@ -228,7 +227,6 @@ def main():
         cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
         if SBWND.color_support:
             cfcode.append("-u")
-            SBWND.color_support = False
         try:
             subprocess.run(cfcode, cwd="mapdata_generator", check=True)
         except subprocess.CalledProcessError as e:
@@ -307,7 +305,7 @@ def main():
 
         print("1")
         ## set mouse visible for debug
-        ##pygame.mouse.set_visible(0)
+        ## pygame.mouse.set_visible(0)
         print("2")
         # pygame.display.set_caption("あくあたんクエスト")
         # キャラクターチップをロード
@@ -335,12 +333,12 @@ def main():
         PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
         initialResult = sender.receive_json()
 
+        for gvar_name, values in initialResult["items"].items():
+            PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
+
         BTNWND = ArrowButtonWindow()
         BTNWND.show()
         mouse_down = False
-        
-        for gvar_name, values in initialResult["items"].items():
-            PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
 
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
@@ -375,34 +373,18 @@ def main():
         clock = pygame.time.Clock()
         print("5")
 
-        # PLAYER.append_automove(e)
         db_check_count = 0
 
         print("6")
         lightrooms = []
-        messages = []
         lightrooms = list(set(lightrooms))
         LIGHTWND.set_rooms(lightrooms)
-        if len(messages) > 0:
-            MSGWND.set("/".join(messages))
 
         PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-
-    #    if args.screenshot:
-    #        MSGWND.hide()
-    #        offset = calc_offset(PLAYER)
-    #        fieldmap.update()
-    #        fieldmap.draw(screen, offset)
-    #        pygame.display.update()
-    #        pygame.image.save(screen, "screenshot.png")
-    #        sys.exit()
-
-        #current_place = OMZN_STATUS.current_place()
 
         last_mouse_pos = None
         
         while not PLAYER.goaled:
-            messages = []
             clock.tick(MAX_FRAME_PER_SEC)
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
@@ -426,8 +408,6 @@ def main():
                 lightrooms = []
                 lightrooms = list(set(lightrooms))
                 LIGHTWND.set_rooms(lightrooms)
-                if len(messages) > 0:
-                    MSGWND.set("/".join(messages))
 
             db_check_count = db_check_count + 1
 
@@ -587,6 +567,7 @@ def main():
                         atxt = "\0"
                         PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     elif cmd == "restart":
+                        # ゲームを最初から始める
                         dest_x = int(config.get("game", "player_x"))
                         dest_y = int(config.get("game", "player_y"))
                         dest_map =  str(config.get("game", "map"))
@@ -598,7 +579,7 @@ def main():
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         cmd = "\0"
                         atxt = "\0"
-                        PLAYER.fp.write( "restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                        PLAYER.fp.write("restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     elif cmd == "echo":
                         MSGWND.set(atxt)
                         atxt = "\0"
@@ -690,57 +671,11 @@ def main():
                         cmd = "\0"
                         atxt = "\0"
                     elif cmd == "jump":
-                        ## 関数の入り口まで飛ばしてくれる　同じマップ内だけ hogehoge
-                        msg = "\u95a2\u6570 " + atxt + " \u306b\u9077\u79fb\u3057\u307e\u3059!!"
-                        MSGWND.set("Jump to \'"+atxt+"\' !!")
-                        for chara in fieldmap.charas:
-                            if chara.message is not None:
-                                if chara.message == msg:
-                                    target_chara = chara
-                                    ##print(chara.message)
-                        chara = target_chara
-                        if chara is None:
-                            MSGWND.set("Function \'"+atxt+"\' is not found...")
-                        else:
-                            if isinstance(chara, Character):
-                                msg = chara.message
-                                MSGWND.set(msg)
-                                if isinstance(chara, CharaMoveEvent):
-                                    if isinstance(chara, CharaMoveItemsEvent):
-                                        itemsLacked_list = []
-                                        for items in chara.items:
-                                            if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
-                                                itemsLacked_list.append(itemsLacked)
-                                        #アイテムが不足
-                                        if itemsLacked_list:
-                                            itemsLackedmessage_list = []
-                                            for itemsLacked in itemsLacked_list:
-                                                itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
-                                            MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
-                                        #必要なアイテムが存在
-                                        else:
-                                            PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                            if len(PLAYER.move5History) > 5:
-                                                PLAYER.move5History.pop(0)
-                                            #グローバル変数のアイテムを設定する
-                                            newItems = []
-                                            for argument in chara.arguments:
-                                                # ここは後に関数キャラを考える時に修正する
-                                                item = Item(argument)
-                                                item.value = 1
-                                                newItems.append(item)
-                                            PLAYER.itembag.items.append(newItems)
-                                            PLAYER.waitingMove = chara
-                                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
-                                    else:
-                                        PLAYER.waitingMove = chara
-                                        PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'line': CODEWND.linenum})
-                                        PLAYER.move5History.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                                        if len(PLAYER.move5History) > 5:
-                                            PLAYER.move5History.pop(0)
-                                elif isinstance(chara, CharaReturn):
-                                    PLAYER.set_waitingMove_return(fieldmap, chara)
-                        PLAYER.fp.write( "jump:" + atxt + ", " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                        # 関数の入り口まで飛ばしてくれる　同じマップ内だけ 
+                        # 部屋と関数名の関連付けを取得できるようになったらこのコマンドを有効にする
+                        # jumpするなら、デバッグモードに移行するなどを考える
+                        MSGWND.set("not valid yet...")
+                        # MSGWND.set("Function \'"+atxt+"\' is not found...")
                         cmd = "\0"
                         atxt = "\0"
                     elif cmd == "aquatan":
@@ -1245,10 +1180,6 @@ class Map:
             chara_type = chara["type"]
             if chara_type == "CHARA":  # キャラクター
                 self.create_chara_j(chara)
-            elif chara_type == "CHARAMOVE":  # キャラクター+移動
-                self.create_charamove_j(chara)
-            elif chara_type == "CHARAMOVEITEMS": # キャラクター+アイテムが条件の遷移
-                self.create_charamoveitems_j(chara)
             elif chara_type == "CHARAEXPRESSION": # 計算式のチェックを行うキャラクター
                 self.create_charaexpression_j(chara)
             elif chara_type == "CHARARETURN": #キャラクター+遷移元に戻る
@@ -1390,38 +1321,6 @@ class Map:
         func = data["func"]
         funcWarp = data["funcWarp"]
         chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp, avoiding, self.name.lower())
-        #print(chara)
-        self.charas.append(chara)
-
-    def create_charamove_j(self, data):
-        """キャラクター(移動付き)を作成してcharasに追加する"""
-        name = data["name"]
-        x, y = int(data["x"]), int(data["y"])
-        direction = int(data["dir"])
-        movetype = int(data["movetype"])
-        message = data["message"]
-        dest_map = data["dest_map"]
-        dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
-        chara = CharaMoveEvent(name, (x, y), direction, movetype, message,
-                                dest_map, (dest_x, dest_y))
-        #print(chara)
-        self.charas.append(chara)
-
-    def create_charamoveitems_j(self, data):
-        """キャラクター(移動付き)を作成してcharasに追加する"""
-        name = data["name"]
-        x, y = int(data["x"]), int(data["y"])
-        direction = int(data["dir"])
-        movetype = int(data["movetype"])
-        message = data["message"]
-        errmessage = data["errmessage"]
-        dest_map = data["dest_map"]
-        dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
-        items = data["items"]
-        funcName = data["funcName"]
-        arguments = data["arguments"]
-        chara = CharaMoveItemsEvent(name, (x, y), direction, movetype, message, errmessage,
-                                dest_map, (dest_x, dest_y), items, funcName, arguments)
         #print(chara)
         self.charas.append(chara)
 
@@ -1979,49 +1878,7 @@ class Player(Character):
             chara.update(mymap)  # 向きを変えたので更新
 
             if isinstance(chara, Character):
-                # CharaMoveItemsEvent→CharaMoveEventと範囲が大きくなるのでこの順で確認する(ネストを解除)
-                if isinstance(chara, CharaMoveItemsEvent):
-                    itemsLacked_list = []
-                    for items in chara.items:
-                        if (itemsLacked := set(items) - set([item.name for item in (PLAYER.itembag.items[-1] + PLAYER.commonItembag.items[-1])])):
-                            itemsLacked_list.append(itemsLacked)
-                    #アイテムが不足
-                    if itemsLacked_list:
-                        itemsLackedmessage_list = []
-                        for itemsLacked in itemsLacked_list:
-                            itemsLackedmessage_list.append(','.join(item for item in itemsLacked))
-                        MSGWND.set(f"{chara.errmessage}/変数 {','.join(itemsLackedmessage_list)} が不足しています!!")
-                    #必要なアイテムが存在
-                    else:
-                        # ここでchara.itemsとchara情報?を送信してその合致を確かめる
-                        # グローバル変数のアイテムを設定する
-                        PLAYER.move5History.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                        if len(PLAYER.move5History) > 5:
-                            PLAYER.move5History.pop(0)
-                        newItems = []
-                        for argument in chara.arguments:
-                            # ここも関数を考える時に後々修正する
-                            item = Item(argument)
-                            item.value = 1
-                            newItems.append(item)
-                        PLAYER.itembag.items.append(newItems)
-                        PLAYER.waitingMove = chara
-                        PLAYER.moveHistory.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'line': linenum})
-                        msg = chara.message
-                        parts = msg.split(" ", 1)
-                        parts1 = parts[1].split(" ",1)
-                        PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif isinstance(chara, CharaMoveEvent):   
-                    PLAYER.waitingMove = chara
-                    PLAYER.moveHistory.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y})
-                    PLAYER.move5History.append({'mapname': mymap.name, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                    if len(PLAYER.move5History) > 5:
-                        PLAYER.move5History.pop(0)
-                    msg = chara.message
-                    parts = msg.split(" ", 1)
-                    parts1 = parts[1].split(" ",1)
-                    PLAYER.fp.write("movein:" + parts1[0] + "," + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif isinstance(chara, CharaExpression):
+                if isinstance(chara, CharaExpression):
                     linenum = self.sender.code_window.linenum
                     if chara.linenum is None:
                         chara.linenum = linenum
@@ -2911,26 +2768,22 @@ class ItemWindow(Window):
         メッセージウィンドウが表示されていないときは何もしない"""
         if not self.is_visible:
             return
+        
         Window.draw(self)
         offset_y = 10
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = False
             if item.itemvalue.exps is not None:
                 is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 25:
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
                         MSGWND.set('%'.join(item.itemvalue.exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 25)
-                item_rect = pygame.Rect(
-                    0,
-                    offset_y,
-                    self.rect.width,
-                    25
-                )
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
+                self.items_changed.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
@@ -2945,22 +2798,22 @@ class ItemWindow(Window):
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.GREEN)
+            self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN)
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
                 name_offset = self.myfont.get_rect(item.name).width + 30
-                self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", self.GREEN)
+                self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", self.GREEN)
             
-            offset_y += 25
+            offset_y += 24
             if item.itemvalue.children:
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25, 'global')
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'global')
 
         for item in PLAYER.itembag.items[-1]:
             is_item_changed = False
             if item.itemvalue.exps is not None:
                 is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 25:
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
@@ -2969,14 +2822,9 @@ class ItemWindow(Window):
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('%'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 25)
-                item_rect = pygame.Rect(
-                    0,
-                    offset_y,
-                    self.rect.width,
-                    25
-                )
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
+                self.items_changed.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
@@ -2991,17 +2839,16 @@ class ItemWindow(Window):
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             if item.itemvalue.value in PLAYER.address_to_size:
-                # print(item.name, item.itemvalue.value)
                 self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE, 15)
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
+            self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
             if item.vartype == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname:
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 file_button = pygame.Rect(text_x + name_offset, offset_y + 2, 100, 20)
                 pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
-                label_surf, _ = self.myfont.render(PLAYER.address_to_fname[item.itemvalue.value], (255, 255, 255))
+                label_surf, _ = self.myfont.render(PLAYER.address_to_fname[item.itemvalue.value][1:-1], (255, 255, 255))
                 label_rect = label_surf.get_rect(center=file_button.center)
                 self.file_buttons[PLAYER.address_to_fname[item.itemvalue.value]] = file_button
                 self.surface.blit(label_surf, label_rect)
@@ -3010,11 +2857,11 @@ class ItemWindow(Window):
             if item.itemvalue.value is not None and item.vartype != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 20
-                self.draw_string(text_x + name_offset, offset_y, f"({item.itemvalue.value})", value_color)
+                self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", value_color)
             
-            offset_y += 25
+            offset_y += 24
             if item.itemvalue.children and item.vartype != "FILE *":
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 25, 'local')
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'local')
 
         self.file_window.draw(screen)
         Window.blit(self, screen)
@@ -3025,7 +2872,7 @@ class ItemWindow(Window):
             is_item_changed = False
             if itemvalue.exps is not None:
                 is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 25:
+                if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
@@ -3034,14 +2881,14 @@ class ItemWindow(Window):
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('%'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 25)
+                self.items_changed.add(offset_y // 24)
                 item_rect = pygame.Rect(
                     0,
                     offset_y,
                     self.rect.width,
-                    25
+                    24
                 )
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 25 and self.check_exps_line[1] else self.WHITE, item_rect)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, item_rect)
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
@@ -3059,25 +2906,25 @@ class ItemWindow(Window):
                 color = self.GREEN
             else:
                 color = self.BLACK if is_item_changed else self.WHITE
-            self.draw_string(text_x, offset_y, f"{valuename:<8}", color)
+            self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color)
             name_offset = self.myfont.get_rect(valuename).width + 20
             if itemvalue.value is not None:
-                self.draw_string(text_x + name_offset, offset_y, f"({itemvalue.value})", color)
+                self.draw_string(text_x + name_offset, offset_y+4, f"({itemvalue.value})", color)
                 
             # if itemvalue.exps is not None:
             #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
             #     change_icon = load_image('./', 'change.png')
             #     self.surface.blit(change_icon, (text_x + name_offset + value_offset, offset_y))
 
-            offset_y += 25
+            offset_y += 24
 
             if itemvalue.children:
-                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+25, type)
+                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+24, type)
 
         return offset_y
     
     def isCursorInWindow(self, pos : tuple[int, int]):
-        y_line = (pos[1] - self.y - 10) // 25
+        y_line = (pos[1] - self.y - 10) // 24
         local_pos = (pos[0] - self.x, pos[1] - self.y)
         for filename, button in self.file_buttons.items():
             if button.collidepoint(local_pos):
@@ -3280,8 +3127,16 @@ class CharaReturn(Character):
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.line:d}"
-    
-
+                                                                                                                                                                                                       
+#   ,ad8888ba,  88                                             ,ad8888ba,  88                                88         ,ad8888ba,                                   88 88         88                          
+#  d8"'    `"8b 88                                            d8"'    `"8b 88                                88        d8"'    `"8b                                  88 ""   ,d    ""                          
+# d8'           88                                           d8'           88                                88       d8'                                            88      88                                
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88            88,dPPYba,   ,adPPYba,  ,adPPYba, 88   ,d8 88             ,adPPYba,  8b,dPPYba,   ,adPPYb,88 88 MM88MMM 88  ,adPPYba,  8b,dPPYba,   
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88            88P'    "8a a8P_____88 a8"     "" 88 ,a8"  88            a8"     "8a 88P'   `"8a a8"    `Y88 88   88    88 a8"     "8a 88P'   `"8a  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 Y8,           88       88 8PP""""""" 8b         8888[    Y8,           8b       d8 88       88 8b       88 88   88    88 8b       d8 88       88  
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88  Y8a.    .a8P 88       88 "8b,   ,aa "8a,   ,aa 88`"Yba,  Y8a.    .a8P "8a,   ,a8" 88       88 "8a,   ,d88 88   88,   88 "8a,   ,a8" 88       88  
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8   `"Y8888Y"'  88       88  `"Ybbd8"'  `"Ybbd8"' 88   `Y8a  `"Y8888Y"'   `"YbbdP"'  88       88  `"8bbdP"Y8 88   "Y888 88  `"YbbdP"'  88       88  
+                                                                                                                                                                                                                                                                                                                                                                                                           
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
     def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp, avoiding, mapname):
@@ -3396,6 +3251,17 @@ class CharaMoveItemsEvent(CharaMoveEvent):
         return f"CHARAMOVEITEMS,{self.name:s},{self.x:d},{self.y:d},"\
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.errmessage:s}"\
             f"{self.dest_map},{self.dest_x},{self.dest_y},{self.items},{self.funcName:s},{','.join(self.arguments)}"
+                                                                                                                                                             
+#   ,ad8888ba,  88                                           88888888888                                                                   88                          
+#  d8"'    `"8b 88                                           88                                                                            ""                          
+# d8'           88                                           88                                                                                                        
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88aaaaa     8b,     ,d8 8b,dPPYba,  8b,dPPYba,  ,adPPYba, ,adPPYba, ,adPPYba, 88  ,adPPYba,  8b,dPPYba,   
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88"""""      `Y8, ,8P'  88P'    "8a 88P'   "Y8 a8P_____88 I8[    "" I8[    "" 88 a8"     "8a 88P'   `"8a  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 88             )888(    88       d8 88         8PP"""""""  `"Y8ba,   `"Y8ba,  88 8b       d8 88       88  
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88 88           ,d8" "8b,  88b,   ,a8" 88         "8b,   ,aa aa    ]8I aa    ]8I 88 "8a,   ,a8" 88       88  
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8 88888888888 8P'     `Y8 88`YbbdP"'  88          `"Ybbd8"' `"YbbdP"' `"YbbdP"' 88  `"YbbdP"'  88       88  
+#                                                                                    88                                                                                
+#                                                                                    88                                                                                
 
 class CharaExpression(Character):
     def __init__(self, name, pos, direction, movetype, message, func, exps_dict, mapname):
@@ -3473,7 +3339,7 @@ class FuncInfoWindow(Window):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
-        self.funcs = funcs
+        self.funcs: list[dict] = funcs
         self.warpPos = warpPos
         self.show()
 
@@ -3482,61 +3348,62 @@ class FuncInfoWindow(Window):
         surf, rect = self.font.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
 
+    def draw_arrow(surface, color, start, end, width=3, arrow_size=10):
+        # 直線を描画
+        pygame.draw.line(surface, color, start, end, width)
+
+        # ベクトル計算
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        angle = math.atan2(dy, dx)
+
+        # 矢印の先端（三角形の座標）
+        x1 = end[0] - arrow_size * math.cos(angle - math.pi / 6)
+        y1 = end[1] - arrow_size * math.sin(angle - math.pi / 6)
+        x2 = end[0] - arrow_size * math.cos(angle + math.pi / 6)
+        y2 = end[1] - arrow_size * math.sin(angle + math.pi / 6)
+
+        pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
+
     def draw(self, screen):
-        def draw_arrow(surface, color, start, end, width=3, arrow_size=10):
-            # 直線を描画
-            pygame.draw.line(surface, color, start, end, width)
-
-            # ベクトル計算
-            dx = end[0] - start[0]
-            dy = end[1] - start[1]
-            angle = math.atan2(dy, dx)
-
-            # 矢印の先端（三角形の座標）
-            x1 = end[0] - arrow_size * math.cos(angle - math.pi / 6)
-            y1 = end[1] - arrow_size * math.sin(angle - math.pi / 6)
-            x2 = end[0] - arrow_size * math.cos(angle + math.pi / 6)
-            y2 = end[1] - arrow_size * math.sin(angle + math.pi / 6)
-
-            pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
-
-        if not self.is_visible:
+        if not (self.is_visible and len(self.funcs)):
             return
+        
         Window.draw(self)
         x_offset = 10
         y_offset = 10
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
-        if self.funcs is not None:
-            func_pos_list: list[tuple[int, int]] = []
-            for i, func in enumerate(self.funcs):
-                if isinstance(func, dict):
-                    text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
-                    text_width = self.font.get_rect(text).width
-                    # 引数に関数が含まれる場合は段落をつけて関係を描画する
-                    x_pos_list = []
-                    y_pos_list = []
-                    for children in func['children']:
-                        for child in children:
-                            func_pos = func_pos_list.pop(0)
-                            x_pos_list.append(func_pos[0])
-                            y_pos_list.append(func_pos[1])
-                    x_pos = max(x_pos_list) + 60 if len(x_pos_list) else x_offset
-                    y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else y_offset
-                    bg_rect = pygame.Rect(
-                        x_pos,
-                        y_pos,
-                        text_width,
-                        self.FONT_SIZE + 4
-                    )
-                    for index_x_pos, x in enumerate(x_pos_list):
-                        draw_arrow(self.surface, self.LINE_COLOR, (x+10, y_pos_list[index_x_pos] + (self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
+        func_pos_list: list[tuple[int, int]] = []
+        for i, func in enumerate(self.funcs):
+            text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
+            text_width = self.font.get_rect(text).width
+            # 引数に関数が含まれる場合は段落をつけて関係を描画する
+            x_pos_list = []
+            y_pos_list = []
+            for children in func['children']:
+                for _ in children:
+                    func_pos = func_pos_list.pop(0)
+                    x_pos_list.append(func_pos[0])
+                    y_pos_list.append(func_pos[1])
+            x_pos = max(x_pos_list) + 60 if len(x_pos_list) else x_offset
+            y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else y_offset
 
-                    pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, bg_rect)
-                    # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
-                    self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
-                    func_pos_list.append((x_pos+text_width, y_pos))
-                    if len(y_pos_list) == 0:
-                        y_offset += self.FONT_SIZE + 10
+            # 関数と関数(関数とその引数に含まれる関数)を繋げる矢印を描画する
+            for x_pos_index, x_pos_start in enumerate(x_pos_list):
+                self.draw_arrow(self.surface, self.LINE_COLOR, (x_pos_start+10, y_pos_list[x_pos_index]+(self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
+
+            # 関数が遷移済みかどうかで背景色を変える
+            pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, 
+                             pygame.Rect(x_pos, y_pos, text_width, self.FONT_SIZE + 4))
+            
+            # 関数名を描画する
+            self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
+            # 現在の関数と次の関数に矢印を繋げるために先に登録しておく
+            func_pos_list.append((x_pos+text_width, y_pos))
+            # 引数に関数がない時は現在の関数の下に次の関数を描画する
+            if len(y_pos_list) == 0:
+                y_offset += self.FONT_SIZE + 10
+
         Window.blit(self, screen)
 
 #                                                                                                                                 
@@ -3606,9 +3473,8 @@ class Treasure():
 
     def open(self, data: dict, exps: list[str]):
         """宝箱をあける"""
-#        sounds["treasure"].play()
-#        アイテムを追加する処理
-
+        # sounds["treasure"].play()
+        # アイテムを追加する処理
         item = Item(self.item, data, exps, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
@@ -3627,10 +3493,10 @@ class Treasure():
                 fgcolor=(255, 255, 255),         # 文字色：白
                 bgcolor=(0, 0, 0, 128)           # 背景色：半透明黒（RGBA）
             )
-            # パディング値（上下左右の余白）
-            padding = 4
 
-            # 背景用の矩形（テキストサイズ + パディング）
+            # パディング
+            padding = 4
+            # アイテム名表示枠の矩形
             bg_rect = pygame.Rect(
                 text_rect.left - padding,
                 text_rect.top - padding,
@@ -3638,11 +3504,11 @@ class Treasure():
                 text_rect.height + 2 * padding
             )
 
-            # 表示位置（中央寄せ）
+            # アイテム名表示枠をアイテムに対して中央上に寄せる
             bg_rect.centerx = self.rect.centerx - offsetx
-            bg_rect.bottom = self.rect.top - offsety  # 宝箱の上
-
-            text_rect.center = bg_rect.center  # テキストを背景中央に配置
+            bg_rect.bottom = self.rect.top - offsety
+            # テキストを枠の中央に配置
+            text_rect.center = bg_rect.center
 
             # 背景を描画（半透明黒）
             pygame.draw.rect(screen, (0, 0, 0, 128), bg_rect)
@@ -3905,8 +3771,16 @@ class Item:
 
     def update_value(self, data: dict):
         self.itemvalue = ItemValue.from_dict(data)
-
-### ここにitemの値用の子クラスを作る
+                                                                                  
+# 88                                   8b           d8          88                         
+# 88   ,d                              `8b         d8'          88                         
+# 88   88                               `8b       d8'           88                         
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba, `8b     d8' ,adPPYYba, 88 88       88  ,adPPYba,  
+# 88   88   a8P_____88 88P'   "88"    "8a `8b   d8'  ""     `Y8 88 88       88 a8P_____88  
+# 88   88   8PP""""""" 88      88      88  `8b d8'   ,adPPPPP88 88 88       88 8PP"""""""  
+# 88   88,  "8b,   ,aa 88      88      88   `888'    88,    ,88 88 "8a,   ,a88 "8b,   ,aa  
+# 88   "Y888 `"Ybbd8"' 88      88      88    `8'     `"8bbdP"Y8 88  `"YbbdP'Y8  `"Ybbd8"'  
+                                                                                         
 class ItemValue:
     def __init__(self, value: str | None, exps: list[str] | None, children: dict[str | int, "ItemValue"]):
         self.value = value

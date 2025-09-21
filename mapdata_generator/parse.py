@@ -705,7 +705,6 @@ class ASTtoFlowChart:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
         exp_terms = ""
 
-        print(cursor.kind)
         # ()で囲まれている場合
         if cursor.kind == ci.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
@@ -868,6 +867,7 @@ class ASTtoFlowChart:
                     calc_order_comments.append(arg_calc_order_comment)
                     arg_func_order.append(arg_calc_order_comment["name"])
             arg_func_order_list.append(arg_func_order)
+        # 標準関数は特別な形でfunc_referencesに登録する
         if ref_spell == "strcpy":
             func_references.append((ref_spell, arg_exp_term_list[0], arg_exp_term_list[1]))
             return ref_spell
@@ -896,6 +896,7 @@ class ASTtoFlowChart:
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)
             return ref_spell
+        # 標準関数以外なら自作関数として登録する
         else:
             calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
                                         "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 

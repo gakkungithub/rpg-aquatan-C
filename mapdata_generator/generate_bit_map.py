@@ -677,7 +677,20 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns, self.input_lines.get(funcname, {}), self.file_lines.get(funcname, {}), self.memory_lines.get(funcname, {}), self.str_lines.get(funcname, {})] for funcname, line_info in line_info_dict.items()}
+        line_info_json = {funcname: 
+            {
+                "lines": sorted(list(line_info.lines)), 
+                "loops": line_info.loops, 
+                "start": line_info.start, 
+                "return": line_info.returns,
+                "input": self.input_lines.get(funcname, {}), 
+                "file": self.file_lines.get(funcname, {}), 
+                "memory": self.memory_lines.get(funcname, {}), 
+                "string": self.str_lines.get(funcname, {})
+            }
+            for funcname, line_info in line_info_dict.items()
+        }
+        
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 
