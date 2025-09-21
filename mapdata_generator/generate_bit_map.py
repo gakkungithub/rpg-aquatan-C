@@ -95,8 +95,8 @@ class CharaExpression:
         self.func = func
         self.exps_dict: dict[int, dict] = {}
     
-    def addExp(self, line: int, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int], line_track: tuple[str, list[list[str]]]):
-        self.exps_dict[line] = {"comments": expNodeInfo[3], "line_track": line_track}
+    def addExp(self, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int]):
+        self.exps_dict[line_track[0]] = {"comments": expNodeInfo[3], "line_track": line_track}
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -119,6 +119,7 @@ class MapInfo:
         self.input_lines: dict[str, dict[int, list[int]]] = {}
         self.file_lines: dict[str, dict[int, list[dict]]] = {}
         self.memory_lines: dict[str, dict[int, list[dict]]] = {}
+        self.str_lines: dict[str, dict[int, list[dict]]] = {}
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -225,7 +226,7 @@ class MapInfo:
             chara_pos = (int(ry+y), int(rx+x))
             self.eventMap[chara_pos[0], chara_pos[1]] = self.ISEVENT
             self.chara_expressions[crntRoomID] = CharaExpression(chara_pos, func)
-        self.chara_expressions[crntRoomID].addExp(line_track[0], expNodeInfo, line_track)
+        self.chara_expressions[crntRoomID].addExp(line_track, expNodeInfo)
 
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict):
@@ -256,12 +257,18 @@ class MapInfo:
             # fromToは全てのアイテムで共通
             t_func_warp = []
             converted_fromTo = []
+            str_order_num = {}
             input_order_num = {}
             file_order_num = {}
             memory_order_num = {}
             for itemLine in treasure.line_track:
                 if isinstance(itemLine, tuple):
-                    if itemLine[0] == "scanf":
+                    if itemLine[0] == "strcpy":
+                        if func_num in str_order_num:
+                            str_order_num[func_num].append({"type": itemLine[0], "copyTo": itemLine[1], "copyFrom": itemLine[2]})
+                        else:
+                            str_order_num[func_num] = [{"type": itemLine[0], "copyTo": itemLine[1], "copyFrom": itemLine[2]}]
+                    elif itemLine[0] == "scanf":
                         if func_num in input_order_num:
                             input_order_num[func_num].append(itemLine[1])
                         else:
@@ -317,18 +324,29 @@ class MapInfo:
                     self.memory_lines[treasure.func_name][converted_fromTo[0]] = memory_order_num
                 else:
                     self.memory_lines[treasure.func_name] = {converted_fromTo[0]: memory_order_num}
+            if len(str_order_num):
+                if treasure.func_name in self.str_lines:
+                    self.str_lines[treasure.func_name][converted_fromTo[0]] = str_order_num
+                else:
+                    self.str_lines[treasure.func_name] = {converted_fromTo[0]: str_order_num}
             events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
 
         for move_event in self.move_events:
             me_func_warp = []
             converted_fromTo = []
             func_num = 0
+            str_order_num = {}
             input_order_num: dict[int, list] = {}
             file_order_num: dict[int, list[dict]] = {}
             memory_order_num = {}
             for condLine in move_event.line_track:
                 if isinstance(condLine, tuple):
-                    if condLine[0] == "scanf":
+                    if condLine[0] == "strcpy":
+                        if func_num in str_order_num:
+                            str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
+                        else:
+                            str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
+                    elif condLine[0] == "scanf":
                         if func_num in input_order_num:
                             input_order_num[func_num].append(condLine[1])
                         else:
@@ -378,6 +396,11 @@ class MapInfo:
                     self.memory_lines[move_event.func_name][converted_fromTo[0]] = memory_order_num
                 else:
                     self.memory_lines[move_event.func_name] = {converted_fromTo[0]: memory_order_num}
+            if len(str_order_num):
+                if move_event.func_name in self.str_lines:
+                    self.str_lines[move_event.func_name][converted_fromTo[0]] = str_order_num
+                else:
+                    self.str_lines[move_event.func_name] = {converted_fromTo[0]: str_order_num}
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
                         "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp, "exps": move_event.exps})
 
@@ -395,12 +418,18 @@ class MapInfo:
             rc_func_warp = []
             converted_fromTo = []
             func_num = 0
+            str_order_num = {}
             input_order_num = {}
             file_order_num = {}
             memory_order_num = {}
             for returnLine in line_track:
                 if isinstance(returnLine, tuple):
-                    if returnLine[0] == "scanf":
+                    if returnLine[0] == "strcpy":
+                        if func_num in str_order_num:
+                            str_order_num[func_num].append({"type": returnLine[0], "copyTo": returnLine[1], "copyFrom": returnLine[2]})
+                        else:
+                            str_order_num[func_num] = [{"type": returnLine[0], "copyTo": returnLine[1], "copyFrom": returnLine[2]}]
+                    elif returnLine[0] == "scanf":
                         if func_num in input_order_num:
                             input_order_num[func_num].append(returnLine[1])
                         else:
@@ -450,6 +479,11 @@ class MapInfo:
                     self.memory_lines[funcName][converted_fromTo[0]] = memory_order_num
                 else:
                     self.memory_lines[funcName] = {converted_fromTo[0]: memory_order_num}
+            if len(str_order_num):
+                if funcName in self.str_lines:
+                    self.str_lines[funcName][converted_fromTo[0]] = str_order_num
+                else:
+                    self.str_lines[funcName] = {converted_fromTo[0]: str_order_num}
             if funcName == "main":
                 characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
             else:
@@ -460,12 +494,18 @@ class MapInfo:
             ccc_func_warp = []
             converted_fromTo = []
             func_num = 0
+            str_order_num = {}
             input_order_num = {}
             file_order_num = {}
             memory_order_num = {}
             for condLine in chara_checkCondition.line_track:
                 if isinstance(condLine, tuple):
-                    if condLine[0] == "scanf":
+                    if condLine[0] == "strcpy":
+                        if func_num in str_order_num:
+                            str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
+                        else:
+                            str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
+                    elif condLine[0] == "scanf":
                         if func_num in input_order_num:
                             input_order_num[func_num].append(condLine[1])
                         else:
@@ -515,6 +555,11 @@ class MapInfo:
                     self.memory_lines[chara_checkCondition.func][converted_fromTo[0]] = memory_order_num
                 else:
                     self.memory_lines[chara_checkCondition.func] = {converted_fromTo[0]: memory_order_num}
+            if len(str_order_num):
+                if chara_checkCondition.func in self.str_lines:
+                    self.str_lines[chara_checkCondition.func][converted_fromTo[0]] = str_order_num
+                else:
+                    self.str_lines[chara_checkCondition.func] = {converted_fromTo[0]: str_order_num}
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
 
@@ -525,14 +570,18 @@ class MapInfo:
                 ce_func_warp = []
                 converted_fromTo = []
                 func_num = 0
+                str_order_num = {}
                 input_order_num = {}
                 file_order_num = {}
                 memory_order_num = {}
-                if len(exps["line_track"]) == 2:
-                    continue
                 for condLine in exps["line_track"]:
                     if isinstance(condLine, tuple):
-                        if condLine[0] == "scanf":
+                        if condLine[0] == "strcpy":
+                            if func_num in str_order_num:
+                                str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
+                            else:
+                                str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
+                        elif condLine[0] == "scanf":
                             if func_num in input_order_num:
                                 input_order_num[func_num].append(condLine[1])
                             else:
@@ -583,6 +632,11 @@ class MapInfo:
                         self.memory_lines[chara_expression.func][converted_fromTo[0]] = memory_order_num
                     else:
                         self.memory_lines[chara_expression.func] = {converted_fromTo[0]: memory_order_num}
+                if len(str_order_num):
+                    if chara_expression.func in self.str_lines:
+                        self.str_lines[chara_expression.func][converted_fromTo[0]] = str_order_num
+                    else:
+                        self.str_lines[chara_expression.func] = {converted_fromTo[0]: str_order_num}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             
@@ -623,7 +677,7 @@ class MapInfo:
     def writeLineFile(self, pname: str, line_info_dict: dict):
         filename = f'{DATA_DIR}/{pname}/{pname}_line.json'
 
-        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns, self.input_lines.get(funcname, {}), self.file_lines.get(funcname, {}), self.memory_lines.get(funcname, {})] for funcname, line_info in line_info_dict.items()}
+        line_info_json = {funcname: [sorted(list(line_info.lines)), line_info.loops, line_info.start, line_info.returns, self.input_lines.get(funcname, {}), self.file_lines.get(funcname, {}), self.memory_lines.get(funcname, {}), self.str_lines.get(funcname, {})] for funcname, line_info in line_info_dict.items()}
         with open(filename, 'w') as f:
             json.dump(line_info_json, f)
 

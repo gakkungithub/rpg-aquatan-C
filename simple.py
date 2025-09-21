@@ -1688,7 +1688,7 @@ class Player(Character):
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
-        self.stdMessages = []
+        self.std_messages = []
         self.address_to_fname = {}
         self.address_to_size = {}
         
@@ -2026,7 +2026,7 @@ class Player(Character):
                     if chara.linenum is None:
                         chara.linenum = linenum
                     if (exps := chara.exps.get(str(chara.linenum), None)):
-                        self.sender.send_event({"type": "func", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
+                        self.sender.send_event({"type": "exp", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
                         charaExpressionResult = self.sender.receive_json()
                         if charaExpressionResult is not None:
                             if charaExpressionResult['status'] == "ng":
@@ -2438,19 +2438,26 @@ class MessageWindow(Window):
         self.selectMsgText = None
         self.select_type = None
         self.selectingIndex = 0
-        self.new_stdMessages = []
+        self.new_std_messages = []
         self.file_message = ""
+        self.str_messages = []
 
-    def set(self, message, selectMessages=None):
+    def set(self, base_message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
-        if message or len(self.new_stdMessages):
+        if base_message or len(self.new_std_messages) or len(self.str_messages):
             if selectMessages is not None:
                 self.selectMsgText, self.select_type = selectMessages
-            if len(self.new_stdMessages):
-                message = "/".join(["コンソール出力:"] + self.new_stdMessages) + "%" + message
-                self.new_stdMessages = []
+            message_list = []
+            if len(self.new_std_messages):
+                message_list.append("/".join(["コンソール出力:"] + self.new_std_messages))
+                self.new_std_messages = []
+            if len(self.str_messages):
+                message_list.append("/".join(self.str_messages))
+                self.str_messages = []
+            if len(base_message):
+                message_list.append(base_message)
             if len(self.file_message):
-                message = message + "%" + self.file_message
+                message_list.append(self.file_message)
                 self.file_message = ""
             self.cur_pos = 0
             self.cur_page = 0
@@ -2460,6 +2467,7 @@ class MessageWindow(Window):
             self.text = ""
             # メッセージをセット
             p = 0
+            message = "%".join(message_list)
             for ch in enumerate(message):
                 if ch[1] == "/":  # /は改行文字
                     self.text += "/"
@@ -4494,17 +4502,22 @@ class EventSender:
                                 item = PLAYER.itembag.find(itemvalues["item"])
                             if item:
                                 item.set_value(itemvalues)
-                                
-                    if "std" in msg and len(msg["std"]) > len(PLAYER.stdMessages):
-                        MSGWND.new_stdMessages = msg["std"][len(PLAYER.stdMessages):]
-                        PLAYER.stdMessages = msg["std"]
+                    if "str" in msg:
+                        for str_info in msg["str"]:
+                            if str_info['value'] is None or str_info['copyFrom'] == str_info['value']:
+                                MSGWND.str_messages.append(f"{str_info['copyFrom']}を{str_info['copyTo']}に代入しました!!")
+                            else:
+                                MSGWND.str_messages.append(f"{str_info['copyFrom']}({str_info['value'][1:-1]})を{str_info['copyTo']}に代入しました!!")
+                    if "std" in msg and len(msg["std"]) > len(PLAYER.std_messages):
+                        MSGWND.new_std_messages = msg["std"][len(PLAYER.std_messages):]
+                        PLAYER.std_messages = msg["std"]
                     if "files" in msg:
                         for file_info in msg["files"]:
                             if file_info["type"] == "fopen":
                                 PLAYER.address_to_fname[file_info["address"]] = file_info["filename"]
-                                MSGWND.file_message = f"{file_info["filename"][1:-1]}　を変数　{file_info["varname"]}　で開きました!!"
+                                MSGWND.file_message = f"{file_info['filename'][1:-1]}　を変数　{file_info['varname']}　で開きました!!"
                             else:
-                                MSGWND.file_message = f"{PLAYER.address_to_fname[file_info["address"]][1:-1]}　を閉じました!!"
+                                MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
                                 ITEMWND.file_window.filename = None
                                 ITEMWND.file_window.is_visible = False
                                 fname = PLAYER.address_to_fname.pop(file_info["address"])
@@ -4517,6 +4530,7 @@ class EventSender:
                                 PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                             else:
                                 PLAYER.address_to_size.pop(memory_info["address"], None)
+
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg

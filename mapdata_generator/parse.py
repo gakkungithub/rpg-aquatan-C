@@ -148,7 +148,6 @@ class ASTtoFlowChart:
                 self.parse_enum(cursor)
         output_dir = f'{DATA_DIR}/{programname}'
         os.makedirs(output_dir, exist_ok=True)
-        # print(self.condition_move)
         
         gv_dot_path = f'{output_dir}/{programname}'
         self.dot.render(gv_dot_path, format='dot')
@@ -383,7 +382,7 @@ class ASTtoFlowChart:
                 # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
                 self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-                self.condition_move[f'"{expNodeID}"'] = ('func', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
+                self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
                 nodeID = expNodeID
         else:
             # 最初行番を変更 
@@ -610,7 +609,7 @@ class ASTtoFlowChart:
 
     # 式の項を一つずつ解析
 
-    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
+    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -732,7 +731,7 @@ class ASTtoFlowChart:
                     self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
             else:
                 exp_terms = cursor.spelling
-            var_references.append(exp_terms)
+            var_references.append([exp_terms])
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             name_cursor, index_cursor = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -750,7 +749,8 @@ class ASTtoFlowChart:
                     break
             if member_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
                 member_chain.append(member_cursor.spelling)
-            print(list(reversed(member_chain)))
+                var_references.append(list(reversed(member_chain)))
+                exp_terms = ".".join(member_chain)
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
             exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments)
@@ -841,7 +841,7 @@ class ASTtoFlowChart:
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
     # そして、コメントを表示するときに既に
 
-    def parse_call_expr(self, cursor, var_references: list[str], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
+    def parse_call_expr(self, cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
         if not (children := list(cursor.get_children())):
             raise ValueError("CALL_EXPR に子ノードがありません")
 
@@ -849,7 +849,6 @@ class ASTtoFlowChart:
         func_cursor = self.unwrap_unexposed(children[0])
         self.check_cursor_error(func_cursor)
 
-        # ref_spell = next(func_cursor.get_tokens()).spelling
         ref_spell = func_cursor.spelling
         self.func_info_dict[self.scanning_func].setRef(ref_spell)
 
@@ -869,9 +868,8 @@ class ASTtoFlowChart:
                     calc_order_comments.append(arg_calc_order_comment)
                     arg_func_order.append(arg_calc_order_comment["name"])
             arg_func_order_list.append(arg_func_order)
-        
         if ref_spell == "strcpy":
-            print(ref_spell)
+            func_references.append((ref_spell, arg_exp_term_list[0], arg_exp_term_list[1]))
             return ref_spell
         elif ref_spell == "scanf":
             input_type_str = [t.spelling for t in children[1].get_tokens()][0]
@@ -882,8 +880,7 @@ class ASTtoFlowChart:
             func_references.append((ref_spell, file_name))
             return ref_spell
         elif ref_spell == "fclose":
-            file_var = var_references[-1]
-            func_references.append((ref_spell, file_var))
+            func_references.append((ref_spell, arg_exp_term_list[0]))
             return ref_spell
         elif ref_spell == "malloc":
             size_str = "".join([t.spelling for t in children[1].get_tokens()])
@@ -891,10 +888,10 @@ class ASTtoFlowChart:
             return ref_spell
         elif ref_spell == "realloc":
             size_str = "".join([t.spelling for t in children[2].get_tokens()])
-            func_references.append({"type": ref_spell, "size": size_str, "fromVar": var_references[-1]})
+            func_references.append({"type": ref_spell, "size": size_str, "fromVar": arg_exp_term_list[0]})
             return ref_spell
         elif ref_spell == "free":
-            func_references.append((ref_spell, var_references[-1]))
+            func_references.append((ref_spell, arg_exp_term_list[0]))
             return ref_spell
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)

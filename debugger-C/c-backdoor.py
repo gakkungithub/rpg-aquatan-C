@@ -220,18 +220,6 @@ class VarsTracker:
                 if len(self.vars_removed) != 0:
                     self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
 
-    def print_variables(self, previous_values: dict[str, VarPreviousValue], depth=1):
-        indent = "    " * depth
-        for name, previous_value in previous_values.items():
-            print(f"{indent}name: {name}: [value: {previous_value.value}, address: {previous_value.address}]")
-            self.print_variables(previous_value.children, depth+1)
-
-    def print_all_variables(self):
-        all_frames = self.frames[:-1]
-        for i, frame in enumerate(all_frames):
-            print(f"func_name: {frame}")
-            self.print_variables(self.previous_values[-(i+1)])
-
     def getValueAll(self):
         filtered_previous_values = {var: self.previous_values[-1][var] for var in self.vars_declared[-1] if var in self.previous_values[-1]}
         return self.getValuesDict(filtered_previous_values)
@@ -246,14 +234,11 @@ class VarsTracker:
         return values_dict
     
     def getValuePartly(self, value_path: list[str]):
-        if len(value_path) == 0:
-            return (False, None)
         temp_previous_values_dict = self.previous_values[-1]
         while 1:
-            if (varname := value_path.pop(0)) not in temp_previous_values_dict:
-                return (False, None)
+            varname = value_path.pop(0)
             if len(value_path) == 0:
-                return (True, temp_previous_values_dict[varname].value)
+                return temp_previous_values_dict[varname].value
             temp_previous_values_dict = temp_previous_values_dict[varname].children
 
     # "item": {"value": aaa, "children": {}}
@@ -298,6 +283,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.file_info_to_send = []
             self.memory_check_num = {}
             self.memory_info_to_send = []
+            self.str_check_num = {}
+            self.str_info_to_send = []
             self.skipped_lines = []
 
             if (next_state := self.get_next_state()):
@@ -497,6 +484,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 if var_check:
                     self.vars_tracker.trackStart(self.frame)
+                
                 if input_check:
                     if state == "ok":
                         self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
@@ -511,7 +499,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if str(self.file_check_num[(self.frame_num, self.line_number)][1]) in self.file_check_num[(self.frame_num, self.line_number)][0]:
                         file_check = str(self.file_check_num[(self.frame_num, self.line_number)][1])
                         for file_info in self.file_check_num[(self.frame_num, self.line_number)][0][file_check]:
-                            file_info["address"] = self.vars_tracker.previous_values[-1][file_info["varname"]].value
+                            file_info["address"] = self.frame.EvaluateExpression(file_info["varname"]).GetValue()
+                            print(file_info["address"])
                             self.file_info_to_send.append(file_info)
                         self.file_check_num[(self.frame_num, self.line_number)][0].pop(file_check)
                         if len(self.file_check_num[(self.frame_num, self.line_number)][0]) == 0:
@@ -526,12 +515,26 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         memory_check = str(self.memory_check_num[(self.frame_num, self.line_number)][1])
                         for memory_info in self.memory_check_num[(self.frame_num, self.line_number)][0][memory_check]:
                             if memory_info["type"] in ["malloc", "realloc"]:
-                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.vars_tracker.previous_values[-1][memory_info["varname"]].value, "fromVar": memory_info.get("fromVar", None)})
+                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue(), "fromVar": memory_info.get("fromVar", None)})
                             else:
-                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "address": self.vars_tracker.previous_values[-1][memory_info["varname"]].value})
+                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue()})
                         self.memory_check_num[(self.frame_num, self.line_number)][0].pop(memory_check)
                         if len(self.memory_check_num[(self.frame_num, self.line_number)][0]) == 0:
                             self.memory_check_num.pop((self.frame_num, self.line_number))
+
+                if str(self.line_number) in self.line_data[self.func_name][7] and (self.frame_num, self.line_number) not in self.str_check_num:
+                    self.str_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name][7][str(self.line_number)], -1)
+
+                if ((self.frame_num, self.line_number)) in self.str_check_num:
+                    self.str_check_num[(self.frame_num, self.line_number)] = (self.str_check_num[(self.frame_num, self.line_number)][0], self.str_check_num[(self.frame_num, self.line_number)][1] + 1)
+                    if str(self.str_check_num[(self.frame_num, self.line_number)][1]) in self.str_check_num[(self.frame_num, self.line_number)][0]:
+                        str_check = str(self.str_check_num[(self.frame_num, self.line_number)][1])
+                        for str_info in self.str_check_num[(self.frame_num, self.line_number)][0][str_check]:
+                            str_info["value"] = self.frame.EvaluateExpression(str_info["copyFrom"]).GetValue()
+                            self.str_info_to_send.append(str_info)
+                        self.str_check_num[(self.frame_num, self.line_number)][0].pop(str_check)
+                        if len(self.str_check_num[(self.frame_num, self.line_number)][0]) == 0:
+                            self.str_check_num.pop((self.frame_num, self.line_number))
             else:
                 self.isEnd = True
                 self.line_number = self.next_line_number
@@ -575,7 +578,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             for value_changed in values_changed:
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
-                    isCorrect, value = self.vars_tracker.getValuePartly([value_changed, *value_path])
+                    value = self.vars_tracker.getValuePartly([value_changed, *value_path])
                     value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
             return value_changed_dict
         
@@ -701,38 +704,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
 
             self.skipped_lines = target_lines
-            # if len(target_lines) != 0 and self.line_number not in self.line_data[self.func_name][0]:
-            #     # 変数が合致していればstepinを実行して次に進む
-            #     for line in target_lines:
-            #         # skipped_varDecls = self.varsDeclLines_list.pop(line)
-            #         skipped_varDecls = self.varsDeclLines_list[line]
-            #         vars_event = []
-            #         errorCnt = 0
-            #         if (event := self.event_reciever()) is None:
-            #             return
-            #         while True:
-            #             if (item := event.get('item', None)) is not None:
-            #                 if not item in skipped_varDecls:
-            #                     errorCnt += 1
-            #                     print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
-            #                     # 複数回入力を間違えたらヒントをあげる
-            #                     if errorCnt >= 3:
-            #                         self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
-            #                     else:
-            #                         self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
-            #                 else:
-            #                     vars_event.append(item)
-            #                     if Counter(vars_event) == Counter(skipped_varDecls):
-            #                         print("you selected correct vars")
-            #                         self.vars_tracker.setVarsDeclared(item)
-            #                         self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
-            #                         break
-            #                     self.vars_tracker.setVarsDeclared(item)
-            #                     self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
-            #             else:
-            #                 errorCnt += 1
-            #                 self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
-            #             event = self.event_reciever()
 
         def analyze_frame(self, backToLine: int = None):
             def check_condition(condition_type: str, fromTo: list[int], funcWarp):
@@ -973,7 +944,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
                     if len(fromTo) >= 2:
                         if fromTo[:2] == [self.line_number, self.next_line_number]:
-                            if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'func']:
+                            if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'exp']:
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse', 'forFalse', 'doWhileFalse']:
@@ -1162,6 +1133,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.file_info_to_send = []
                 msgJson["memory"] = self.memory_info_to_send
                 self.memory_info_to_send = []
+                msgJson["str"] = self.str_info_to_send
+                self.str_info_to_send = []
                 if getLine:
                     target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
                     skipped_vars = []
