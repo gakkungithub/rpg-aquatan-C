@@ -14,24 +14,23 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 
 class ConditionLineTracker:
-    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | None]]):
+    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | dict | None]]):
         self.type = condition_line_track[0]
         self.condition_line_track = condition_line_track[1]
 
 class ConditionLineTrackers:
-    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | None]]]):
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | dict | None]]]):
         self.tracks: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
 
     def get_condition_line_tracker(self, nodeID: str):
         if nodeID in self.tracks:
-            # return tuple(self.tracks[nodeID].__dict__.values())
             return (self.tracks[nodeID].type, self.tracks[nodeID].condition_line_track)
         else:
             return ('', [])
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
-                    type: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: list[str | dict], func_name: str):
+                    type: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: list[str | dict], func_name: str):
         self.from_pos = from_pos
         self.to_pos = to_pos
         self.mapchip = mapchip
@@ -41,12 +40,17 @@ class MoveEvent:
         self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: dict, type: str, func_name: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: dict, type: str, func_name: str):
         self.pos = pos
         self.name = name
-        self.line_track = line_track
-        self.exps = exps
         self.type = type
+        self.line_track = []
+        for line in line_track:
+            if isinstance(line, dict) and line["type"] in ["malloc", "realloc"]:
+                line["vartype"] = self.type[:-1]
+                line["varname"] = self.name
+            self.line_track.append(line)
+        self.exps = exps
         self.func_name = func_name
 
 class FuncWarp:
@@ -59,7 +63,7 @@ class FuncWarp:
         return (self.to_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps):
         self.pos = pos
         self.func_name = func_name
         self.line_track = line_track
@@ -237,7 +241,75 @@ class MapInfo:
         plt.title(pname)
         plt.savefig(f'{DATA_DIR}/{pname}/bm_{pname}.png')
 
-    
+    def line_track_transformer(self, line_track, func_name: str):
+        func_warp = []
+        converted_fromTo = []
+        str_order_num = {}
+        input_order_num = {}
+        file_order_num = {}
+        memory_order_num = {}
+        for line in line_track:
+            if isinstance(line, tuple):
+                if line[0] == "strcpy":
+                    if func_num in str_order_num:
+                        str_order_num[func_num].append({"type": line[0], "copyTo": line[1], "copyFrom": line[2]})
+                    else:
+                        str_order_num[func_num] = [{"type": line[0], "copyTo": line[1], "copyFrom": line[2]}]
+                elif line[0] == "scanf":
+                    if func_num in input_order_num:
+                        input_order_num[func_num].append(line[1])
+                    else:
+                        input_order_num[func_num] = [line[1]]
+                elif line[0] == "fopen":
+                    if func_num in file_order_num:
+                        file_order_num[func_num].append({"type": line[0], "filename": line[1], "varname": treasure.name})
+                    else:
+                        file_order_num[func_num] = [{"type": line[0], "filename": line[1], "varname": treasure.name}]
+                elif line[0] == "fclose":
+                    if func_num in file_order_num:
+                        file_order_num[func_num].append({"type": line[0], "varname": line[1]})
+                    else:
+                        file_order_num[func_num] = [{"type": line[0], "varname": line[1]}]
+                elif line[0] == "free":
+                    if func_num in memory_order_num:
+                        memory_order_num[func_num].append({"type": line[0], "varname": line[1]})
+                    else:
+                        memory_order_num[func_num] = [{"type": line[0], "varname": line[1]}]
+                else:
+                    func_num += 1
+                    warp_pos, args, line_start = self.func_warps[line[0]].get_attributes()
+                    func_warp.append({"name": line[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line_start, "children": line[1]})
+                    converted_fromTo.append(line_start)
+            elif isinstance(line, dict):
+                if func_num in memory_order_num:
+                    memory_order_num[func_num].append(line)
+                else:
+                    memory_order_num[func_num] = [line]
+            elif isinstance(line, str):
+                pass
+            else:
+                converted_fromTo.append(line)
+        if len(input_order_num):
+            if func_name in self.input_lines:
+                self.input_lines[func_name][converted_fromTo[0]] = input_order_num
+            else:
+                self.input_lines[func_name] = {converted_fromTo[0]: input_order_num}
+        if len(file_order_num):
+            if func_name in self.file_lines:
+                self.file_lines[func_name][converted_fromTo[0]] = file_order_num
+            else:
+                self.file_lines[func_name] = {converted_fromTo[0]: file_order_num}
+        if len(memory_order_num):
+            if func_name in self.memory_lines:
+                self.memory_lines[func_name][converted_fromTo[0]] = memory_order_num
+            else:
+                self.memory_lines[func_name] = {converted_fromTo[0]: memory_order_num}
+        if len(str_order_num):
+            if func_name in self.str_lines:
+                self.str_lines[func_name][converted_fromTo[0]] = str_order_num
+            else:
+                self.str_lines[func_name] = {converted_fromTo[0]: str_order_num}
+
     def writeMapJson(self, pname, bitMap, isUniversal, defaultMapChip=503):
         events = []
         characters = []
@@ -288,8 +360,6 @@ class MapInfo:
                         t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
                         converted_fromTo.append(line)
                 elif isinstance(itemLine, dict):
-                    itemLine["vartype"] = treasure.type[:-1]
-                    itemLine["varname"] = treasure.name
                     if func_num in memory_order_num:
                         memory_order_num[func_num].append(itemLine)
                     else:
@@ -298,10 +368,6 @@ class MapInfo:
                     pass
                 else:
                     converted_fromTo.append(itemLine)
-            if converted_fromTo[0] in vardecl_lines:
-                vardecl_lines[converted_fromTo[0]].append(treasure.name)
-            else:
-                vardecl_lines[converted_fromTo[0]] = [treasure.name]
             if len(input_order_num):
                 if treasure.func_name in self.input_lines:
                     self.input_lines[treasure.func_name][converted_fromTo[0]] = input_order_num
@@ -322,6 +388,11 @@ class MapInfo:
                     self.str_lines[treasure.func_name][converted_fromTo[0]] = str_order_num
                 else:
                     self.str_lines[treasure.func_name] = {converted_fromTo[0]: str_order_num}
+
+            if converted_fromTo[0] in vardecl_lines:
+                vardecl_lines[converted_fromTo[0]].append(treasure.name)
+            else:
+                vardecl_lines[converted_fromTo[0]] = [treasure.name]
             events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
 
         for move_event in self.move_events:
@@ -1089,7 +1160,7 @@ class GenBitMap:
                                 indexNodeID, _ = indexNodeID_list[0]
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
-                    arrContExp_dict = self.setArrayTreasure(arrContNodeID_list)
+                    arrContExp_dict = self.setArrayTreasure(arrContNodeID_list, [self.getNodeLabel(nodeID)])
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
@@ -1166,17 +1237,19 @@ class GenBitMap:
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
     # 配列の変数宣言用のアイテムの解析
-    def setArrayTreasure(self, arrContNodeID_list: list[str]):
+    def setArrayTreasure(self, arrContNodeID_list: list[str], var_path: list[str]):
         arrContExp_dict: dict = {}
         for arrContNodeID in arrContNodeID_list:
             # 末端のノードならその計算式を取得する
             if self.getNodeShape(arrContNodeID) == 'square':
                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(arrContNodeID)
                 arrContExp_dict[self.getNodeLabel(arrContNodeID)] = exp_comments
+                for line_track in self.mapInfo.condition_line_trackers.get_condition_line_tracker(arrContNodeID)[1]:
+                    pass
             # 途中のノード(box3d)ならその子要素を辿る
             else:
                 childNodeID_list = [nodeID for nodeID, _ in self.getNextNodeInfo(arrContNodeID)]
-                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = self.setArrayTreasure(childNodeID_list)
+                arrContExp_dict[self.getNodeLabel(arrContNodeID)] = self.setArrayTreasure(childNodeID_list, [*var_path, self.getNodeLabel(arrContNodeID)])
         return arrContExp_dict
 
     # 'label', 'shape'属性がある
