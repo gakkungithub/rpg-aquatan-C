@@ -14,12 +14,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
 
 class ConditionLineTracker:
-    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | None]]):
+    def __init__(self, condition_line_track: tuple[str, list[int | tuple[str, list[list[str]]] | dict | None]]):
         self.type = condition_line_track[0]
         self.condition_line_track = condition_line_track[1]
 
 class ConditionLineTrackers:
-    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | None]]]):
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | tuple[str, list[list[str]]] | dict | None]]]):
         self.tracks: dict[str, ConditionLineTracker] = {nodeID: ConditionLineTracker(line_track) for nodeID, line_track in condition_move.items()}
 
     def get_condition_line_tracker(self, nodeID: str):
@@ -31,7 +31,7 @@ class ConditionLineTrackers:
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], mapchip: int, 
-                    type: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: list[str | dict], func_name: str):
+                    type: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: list[str | dict], func_name: str):
         self.from_pos = from_pos
         self.to_pos = to_pos
         self.mapchip = mapchip
@@ -41,12 +41,17 @@ class MoveEvent:
         self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps: dict, type: str, func_name: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: dict, type: str, func_name: str):
         self.pos = pos
         self.name = name
-        self.line_track = line_track
-        self.exps = exps
         self.type = type
+        self.line_track = []
+        for line in line_track:
+            if isinstance(line, dict) and line["type"] in ["malloc", "realloc"]:
+                line["vartype"] = self.type[:-1]
+                line["varname"] = self.name
+            self.line_track.append(line)
+        self.exps = exps
         self.func_name = func_name
 
 class FuncWarp:
@@ -59,7 +64,7 @@ class FuncWarp:
         return (self.to_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | None], exps):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps):
         self.pos = pos
         self.func_name = func_name
         self.line_track = line_track
@@ -237,7 +242,78 @@ class MapInfo:
         plt.title(pname)
         plt.savefig(f'{DATA_DIR}/{pname}/bm_{pname}.png')
 
-    
+    def line_track_transformer(self, line_track, func_name: str):
+        func_num = 0
+        func_warp: list[dict] = []
+        converted_fromTo: list[int | None] = []
+        str_order_num: dict[int, list[dict]] = {}
+        input_order_num: dict[int, list[int]] = {}
+        file_order_num: dict[int, list[dict]] = {}
+        memory_order_num: dict[int, list[dict]] = {}
+        for line in line_track:
+            if isinstance(line, tuple):
+                func_num += 1
+                warp_pos, args, line_start = self.func_warps[line[0]].get_attributes()
+                func_warp.append({"name": line[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line_start, "children": line[1]})
+                converted_fromTo.append(line_start)
+            elif isinstance(line, dict):
+                if line["type"] == "strcpy":
+                    if func_num in str_order_num:
+                        str_order_num[func_num].append(line)
+                    else:
+                        str_order_num[func_num] = [line]
+                elif line["type"] == "scanf":
+                    if func_num in input_order_num:
+                        input_order_num[func_num].append(line["format"])
+                    else:
+                        input_order_num[func_num] = [line["format"]]
+                elif line["type"] == "fopen":
+                    if func_num in file_order_num:
+                        file_order_num[func_num].append(line)
+                    else:
+                        file_order_num[func_num] = [line]
+                elif line["type"] == "fclose":
+                    if func_num in file_order_num:
+                        file_order_num[func_num].append(line)
+                    else:
+                        file_order_num[func_num] = [line]
+                elif line["type"] in ["malloc", "realloc"]:
+                    if func_num in memory_order_num:
+                        memory_order_num[func_num].append(line)
+                    else:
+                        memory_order_num[func_num] = [line]
+                elif line["type"] == "free":
+                    if func_num in memory_order_num:
+                        memory_order_num[func_num].append(line)
+                    else:
+                        memory_order_num[func_num] = [line]
+            elif isinstance(line, str):
+                pass
+            else:
+                converted_fromTo.append(line)
+        if len(input_order_num):
+            if func_name in self.input_lines:
+                self.input_lines[func_name][converted_fromTo[0]] = input_order_num
+            else:
+                self.input_lines[func_name] = {converted_fromTo[0]: input_order_num}
+        if len(file_order_num):
+            if func_name in self.file_lines:
+                self.file_lines[func_name][converted_fromTo[0]] = file_order_num
+            else:
+                self.file_lines[func_name] = {converted_fromTo[0]: file_order_num}
+        if len(memory_order_num):
+            if func_name in self.memory_lines:
+                self.memory_lines[func_name][converted_fromTo[0]] = memory_order_num
+            else:
+                self.memory_lines[func_name] = {converted_fromTo[0]: memory_order_num}
+        if len(str_order_num):
+            if func_name in self.str_lines:
+                self.str_lines[func_name][converted_fromTo[0]] = str_order_num
+            else:
+                self.str_lines[func_name] = {converted_fromTo[0]: str_order_num}
+
+        return func_warp, converted_fromTo
+
     def writeMapJson(self, pname, bitMap, isUniversal, defaultMapChip=503):
         events = []
         characters = []
@@ -248,153 +324,18 @@ class MapInfo:
         # アイテムの情報
         func_num = 0
         for treasure in self.treasures:
-            # fromToは全てのアイテムで共通
-            t_func_warp = []
-            converted_fromTo = []
-            str_order_num = {}
-            input_order_num = {}
-            file_order_num = {}
-            memory_order_num = {}
-            for itemLine in treasure.line_track:
-                if isinstance(itemLine, tuple):
-                    if itemLine[0] == "strcpy":
-                        if func_num in str_order_num:
-                            str_order_num[func_num].append({"type": itemLine[0], "copyTo": itemLine[1], "copyFrom": itemLine[2]})
-                        else:
-                            str_order_num[func_num] = [{"type": itemLine[0], "copyTo": itemLine[1], "copyFrom": itemLine[2]}]
-                    elif itemLine[0] == "scanf":
-                        if func_num in input_order_num:
-                            input_order_num[func_num].append(itemLine[1])
-                        else:
-                            input_order_num[func_num] = [itemLine[1]]
-                    elif itemLine[0] == "fopen":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": itemLine[0], "filename": itemLine[1], "varname": treasure.name})
-                        else:
-                            file_order_num[func_num] = [{"type": itemLine[0], "filename": itemLine[1], "varname": treasure.name}]
-                    elif itemLine[0] == "fclose":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": itemLine[0], "varname": itemLine[1]})
-                        else:
-                            file_order_num[func_num] = [{"type": itemLine[0], "varname": itemLine[1]}]
-                    elif itemLine[0] == "free":
-                        if func_num in memory_order_num:
-                            memory_order_num[func_num].append({"type": itemLine[0], "varname": itemLine[1]})
-                        else:
-                            memory_order_num[func_num] = [{"type": itemLine[0], "varname": itemLine[1]}]
-                    else:
-                        func_num += 1
-                        warp_pos, args, line = self.func_warps[itemLine[0]].get_attributes()
-                        t_func_warp.append({"name": itemLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": itemLine[1]})
-                        converted_fromTo.append(line)
-                elif isinstance(itemLine, dict):
-                    itemLine["vartype"] = treasure.type[:-1]
-                    itemLine["varname"] = treasure.name
-                    if func_num in memory_order_num:
-                        memory_order_num[func_num].append(itemLine)
-                    else:
-                        memory_order_num[func_num] = [itemLine]
-                elif isinstance(itemLine, str):
-                    pass
-                else:
-                    converted_fromTo.append(itemLine)
+            func_warp, converted_fromTo = self.line_track_transformer(treasure.line_track, treasure.func_name)
             if converted_fromTo[0] in vardecl_lines:
                 vardecl_lines[converted_fromTo[0]].append(treasure.name)
             else:
                 vardecl_lines[converted_fromTo[0]] = [treasure.name]
-            if len(input_order_num):
-                if treasure.func_name in self.input_lines:
-                    self.input_lines[treasure.func_name][converted_fromTo[0]] = input_order_num
-                else:
-                    self.input_lines[treasure.func_name] = {converted_fromTo[0]: input_order_num}
-            if len(file_order_num):
-                if treasure.func_name in self.file_lines:
-                    self.file_lines[treasure.func_name][converted_fromTo[0]] = file_order_num
-                else:
-                    self.file_lines[treasure.func_name] = {converted_fromTo[0]: file_order_num}
-            if len(memory_order_num):
-                if treasure.func_name in self.memory_lines:
-                    self.memory_lines[treasure.func_name][converted_fromTo[0]] = memory_order_num
-                else:
-                    self.memory_lines[treasure.func_name] = {converted_fromTo[0]: memory_order_num}
-            if len(str_order_num):
-                if treasure.func_name in self.str_lines:
-                    self.str_lines[treasure.func_name][converted_fromTo[0]] = str_order_num
-                else:
-                    self.str_lines[treasure.func_name] = {converted_fromTo[0]: str_order_num}
-            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": t_func_warp, "func": treasure.func_name})
+            events.append({"type": "TREASURE", "x": treasure.pos[1], "y": treasure.pos[0], "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": func_warp, "func": treasure.func_name})
 
+        # ワープイベントの情報
         for move_event in self.move_events:
-            me_func_warp = []
-            converted_fromTo = []
-            func_num = 0
-            str_order_num = {}
-            input_order_num: dict[int, list] = {}
-            file_order_num: dict[int, list[dict]] = {}
-            memory_order_num = {}
-            for condLine in move_event.line_track:
-                if isinstance(condLine, tuple):
-                    if condLine[0] == "strcpy":
-                        if func_num in str_order_num:
-                            str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
-                        else:
-                            str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
-                    elif condLine[0] == "scanf":
-                        if func_num in input_order_num:
-                            input_order_num[func_num].append(condLine[1])
-                        else:
-                            input_order_num[func_num] = [condLine[1]]
-                    elif condLine[0] == "fopen":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": condLine[0], "filename": condLine[1], "varname": condLine[2]})
-                        else:
-                            file_order_num[func_num] = [{"type": condLine[0], "filename": condLine[1], "varname": condLine[2]}]
-                    elif condLine[0] == "fclose":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                        else:
-                            file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                    elif condLine[0] == "free":
-                        if func_num in memory_order_num:
-                            memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                        else:
-                            memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                    else:
-                        func_num += 1
-                        warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
-                        me_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
-                        converted_fromTo.append(line)
-                elif isinstance(condLine, dict):
-                    if func_num in memory_order_num:
-                        memory_order_num[func_num].append(condLine)
-                    else:
-                        memory_order_num[func_num] = [condLine]
-                elif isinstance(condLine, str):
-                    pass
-                else:
-                    converted_fromTo.append(condLine)
-            if len(input_order_num):
-                if move_event.func_name in self.input_lines:
-                    self.input_lines[move_event.func_name][converted_fromTo[0]] = input_order_num
-                else:
-                    self.input_lines[move_event.func_name] = {converted_fromTo[0]: input_order_num}
-            if len(file_order_num):
-                if move_event.func_name in self.file_lines:
-                    self.file_lines[move_event.func_name][converted_fromTo[0]] = file_order_num
-                else:
-                    self.file_lines[move_event.func_name] = {converted_fromTo[0]: file_order_num}
-            if len(memory_order_num):
-                if move_event.func_name in self.memory_lines:
-                    self.memory_lines[move_event.func_name][converted_fromTo[0]] = memory_order_num
-                else:
-                    self.memory_lines[move_event.func_name] = {converted_fromTo[0]: memory_order_num}
-            if len(str_order_num):
-                if move_event.func_name in self.str_lines:
-                    self.str_lines[move_event.func_name][converted_fromTo[0]] = str_order_num
-                else:
-                    self.str_lines[move_event.func_name] = {converted_fromTo[0]: str_order_num}
+            func_warp, converted_fromTo = self.line_track_transformer(move_event.line_track, move_event.func_name)
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
-                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": me_func_warp, "exps": move_event.exps})
+                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": func_warp, "exps": move_event.exps})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -407,225 +348,24 @@ class MapInfo:
         ### 関数の戻りに応じたキャラクターの情報
         for chara_return in self.chara_returns:
             pos, funcName, line_track = chara_return.get_attributes()
-            rc_func_warp = []
-            converted_fromTo = []
-            func_num = 0
-            str_order_num = {}
-            input_order_num = {}
-            file_order_num = {}
-            memory_order_num = {}
-            for returnLine in line_track:
-                if isinstance(returnLine, tuple):
-                    if returnLine[0] == "strcpy":
-                        if func_num in str_order_num:
-                            str_order_num[func_num].append({"type": returnLine[0], "copyTo": returnLine[1], "copyFrom": returnLine[2]})
-                        else:
-                            str_order_num[func_num] = [{"type": returnLine[0], "copyTo": returnLine[1], "copyFrom": returnLine[2]}]
-                    elif returnLine[0] == "scanf":
-                        if func_num in input_order_num:
-                            input_order_num[func_num].append(returnLine[1])
-                        else:
-                            input_order_num[func_num] = [returnLine[1]]
-                    elif returnLine[0] == "fopen":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": returnLine[0], "filename": returnLine[1], "varname": returnLine[2]})
-                        else:
-                            file_order_num[func_num] = [{"type": returnLine[0], "filename": returnLine[1], "varname": returnLine[2]}]
-                    elif returnLine[0] == "fclose":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": returnLine[0], "varname": returnLine[1]})
-                        else:
-                            file_order_num[func_num] = [{"type": returnLine[0], "varname": returnLine[1]}]
-                    elif returnLine[0] == "free":
-                        if func_num in memory_order_num:
-                            memory_order_num[func_num].append({"type": returnLine[0], "varname": returnLine[1]})
-                        else:
-                            memory_order_num[func_num] = [{"type": returnLine[0], "varname": returnLine[1]}]
-                    else:
-                        func_num += 1
-                        warp_pos, args, line = self.func_warps[returnLine[0]].get_attributes()
-                        rc_func_warp.append({"name": returnLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": returnLine[1]})
-                        converted_fromTo.append(line)
-                elif isinstance(returnLine, dict):
-                    if func_num in memory_order_num:
-                        memory_order_num[func_num].append(returnLine)
-                    else:
-                        memory_order_num[func_num] = [returnLine]
-                elif isinstance(returnLine, str):
-                    pass
-                else:
-                    converted_fromTo.append(returnLine)
-            if len(input_order_num):
-                if funcName in self.input_lines:
-                    self.input_lines[funcName][converted_fromTo[0]] = input_order_num
-                else:
-                    self.input_lines[funcName] = {converted_fromTo[0]: input_order_num}
-            if len(file_order_num):
-                if funcName in self.file_lines:
-                    self.file_lines[funcName][converted_fromTo[0]] = file_order_num
-                else:
-                    self.file_lines[funcName] = {converted_fromTo[0]: file_order_num}
-            if len(memory_order_num):
-                if funcName in self.memory_lines:
-                    self.memory_lines[funcName][converted_fromTo[0]] = memory_order_num
-                else:
-                    self.memory_lines[funcName] = {converted_fromTo[0]: memory_order_num}
-            if len(str_order_num):
-                if funcName in self.str_lines:
-                    self.str_lines[funcName][converted_fromTo[0]] = str_order_num
-                else:
-                    self.str_lines[funcName] = {converted_fromTo[0]: str_order_num}
+            func_warp, converted_fromTo = self.line_track_transformer(line_track, funcName)
             if funcName == "main":
-                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "exps": chara_return.exps})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": rc_func_warp, "exps": chara_return.exps})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "exps": chara_return.exps})
 
         for chara_checkCondition in self.chara_checkConditions:
             color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
-            ccc_func_warp = []
-            converted_fromTo = []
-            func_num = 0
-            str_order_num = {}
-            input_order_num = {}
-            file_order_num = {}
-            memory_order_num = {}
-            for condLine in chara_checkCondition.line_track:
-                if isinstance(condLine, tuple):
-                    if condLine[0] == "strcpy":
-                        if func_num in str_order_num:
-                            str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
-                        else:
-                            str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
-                    elif condLine[0] == "scanf":
-                        if func_num in input_order_num:
-                            input_order_num[func_num].append(condLine[1])
-                        else:
-                            input_order_num[func_num] = [condLine[1]]
-                    elif condLine[0] == "fopen":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": condLine[0], "filename": condLine[1], "varname": condLine[2]})
-                        else:
-                            file_order_num[func_num] = [{"type": condLine[0], "filename": condLine[1], "varname": condLine[2]}]
-                    elif condLine[0] == "fclose":
-                        if func_num in file_order_num:
-                            file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                        else:
-                            file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                    elif condLine[0] == "free":
-                        if func_num in memory_order_num:
-                            memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                        else:
-                            memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                    else:
-                        func_num += 1
-                        warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
-                        ccc_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
-                        converted_fromTo.append(line)
-                elif isinstance(condLine, dict):
-                    if func_num in memory_order_num:
-                        memory_order_num[func_num].append(condLine)
-                    else:
-                        memory_order_num[func_num] = [condLine]
-                elif isinstance(condLine, str):
-                    pass
-                else:
-                    converted_fromTo.append(condLine)
-            if len(input_order_num):
-                if chara_checkCondition.func in self.input_lines:
-                    self.input_lines[chara_checkCondition.func][converted_fromTo[0]] = input_order_num
-                else:
-                    self.input_lines[chara_checkCondition.func] = {converted_fromTo[0]: input_order_num}
-            if len(file_order_num):
-                if chara_checkCondition.func in self.file_lines:
-                    self.file_lines[chara_checkCondition.func][converted_fromTo[0]] = file_order_num
-                else:
-                    self.file_lines[chara_checkCondition.func] = {converted_fromTo[0]: file_order_num}
-            if len(memory_order_num):
-                if chara_checkCondition.func in self.memory_lines:
-                    self.memory_lines[chara_checkCondition.func][converted_fromTo[0]] = memory_order_num
-                else:
-                    self.memory_lines[chara_checkCondition.func] = {converted_fromTo[0]: memory_order_num}
-            if len(str_order_num):
-                if chara_checkCondition.func in self.str_lines:
-                    self.str_lines[chara_checkCondition.func][converted_fromTo[0]] = str_order_num
-                else:
-                    self.str_lines[chara_checkCondition.func] = {converted_fromTo[0]: str_order_num}
+            func_warp, converted_fromTo = self.line_track_transformer(chara_checkCondition.line_track, chara_checkCondition.func)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
-                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": ccc_func_warp, "exps": chara_checkCondition.exps})
+                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": func_warp, "exps": chara_checkCondition.exps})
 
         for chara_expression in self.chara_expressions.values():
             # color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
             exps_dict = {}
             for firstLine, exps in chara_expression.exps_dict.items():
-                ce_func_warp = []
-                converted_fromTo = []
-                func_num = 0
-                str_order_num = {}
-                input_order_num = {}
-                file_order_num = {}
-                memory_order_num = {}
-                for condLine in exps["line_track"]:
-                    if isinstance(condLine, tuple):
-                        if condLine[0] == "strcpy":
-                            if func_num in str_order_num:
-                                str_order_num[func_num].append({"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]})
-                            else:
-                                str_order_num[func_num] = [{"type": condLine[0], "copyTo": condLine[1], "copyFrom": condLine[2]}]
-                        elif condLine[0] == "scanf":
-                            if func_num in input_order_num:
-                                input_order_num[func_num].append(condLine[1])
-                            else:
-                                input_order_num[func_num] = [condLine[1]]
-                        elif condLine[0] == "fopen":
-                            if func_num in file_order_num:
-                                file_order_num[func_num].append({"type": condLine[0], "filename": condLine[1], "varname": condLine[2]})
-                            else:
-                                file_order_num[func_num] = [{"type": condLine[0], "filename": condLine[1], "varname": condLine[2]}]
-                        elif condLine[0] == "fclose":
-                            if func_num in file_order_num:
-                                file_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                            else:
-                                file_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                        elif condLine[0] == "free":
-                            if func_num in memory_order_num:
-                                memory_order_num[func_num].append({"type": condLine[0], "varname": condLine[1]})
-                            else:
-                                memory_order_num[func_num] = [{"type": condLine[0], "varname": condLine[1]}]
-                        else:
-                            func_num += 1
-                            warp_pos, args, line = self.func_warps[condLine[0]].get_attributes()
-                            ce_func_warp.append({"name": condLine[0], "x": warp_pos[1], "y": warp_pos[0], "args": args, "line": line, "children": condLine[1]})
-                            converted_fromTo.append(line)
-                    elif isinstance(condLine, dict):
-                        if func_num in memory_order_num:
-                            memory_order_num[func_num].append(condLine)
-                        else:
-                            memory_order_num[func_num] = [condLine]
-                    elif isinstance(condLine, str):
-                        pass
-                    else:
-                        converted_fromTo.append(condLine)
-                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": ce_func_warp}
-                if len(input_order_num):
-                    if chara_expression.func in self.input_lines:
-                        self.input_lines[chara_expression.func][converted_fromTo[0]] = input_order_num
-                    else:
-                        self.input_lines[chara_expression.func] = {converted_fromTo[0]: input_order_num}
-                if len(file_order_num):
-                    if chara_expression.func in self.file_lines:
-                        self.file_lines[chara_expression.func][converted_fromTo[0]] = file_order_num
-                    else:
-                        self.file_lines[chara_expression.func] = {converted_fromTo[0]: file_order_num}
-                if len(memory_order_num):
-                    if chara_expression.func in self.memory_lines:
-                        self.memory_lines[chara_expression.func][converted_fromTo[0]] = memory_order_num
-                    else:
-                        self.memory_lines[chara_expression.func] = {converted_fromTo[0]: memory_order_num}
-                if len(str_order_num):
-                    if chara_expression.func in self.str_lines:
-                        self.str_lines[chara_expression.func][converted_fromTo[0]] = str_order_num
-                    else:
-                        self.str_lines[chara_expression.func] = {converted_fromTo[0]: str_order_num}
+                func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
+                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             

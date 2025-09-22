@@ -105,7 +105,7 @@ class ASTtoFlowChart:
             self.diag_list.append(diag)
             print(f"{diag.spelling}, {diag.location.offset}")
             if any(x in diag.spelling for x in ["expected '}'", "expected ';'"]):
-                sys.exit(0)
+                sys.exit(-1)
 
     def check_cursor_error(self, cursor):
         # カーソルがファイルに属していないならスキップ
@@ -120,7 +120,7 @@ class ASTtoFlowChart:
             if (cursor.location.file.name == diag.location.file.name and
                 cursor.location.offset >= diag.location.offset - 1): 
                 print(f"{diag.spelling}")
-                sys.exit(0)
+                sys.exit(-1)
         return True
 
     def write_ast(self, tu: ci.TranslationUnit, programname):
@@ -418,6 +418,7 @@ class ASTtoFlowChart:
 
         #配列
         if isArray:
+            print("check: ", cursor.spelling)
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None
@@ -447,6 +448,9 @@ class ASTtoFlowChart:
                 else:
                     indexNodeID = self.get_exp(cr_index, "Mcircle")
                     index_condition_move += self.expNode_info[f'"{indexNodeID}"'][2]
+                for func in self.expNode_info[f'"{indexNodeID}"'][2]:
+                    if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
+                        sys.exit(-1)
                 self.createEdge(nodeID, indexNodeID)
                 nodeID = indexNodeID
 
@@ -489,7 +493,7 @@ class ASTtoFlowChart:
                             self.condition_move[f'"{nodeID}"'] = ('item', [cr.location.line])
                             self.line_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
                             self.func_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
-                    # 構造体系の初期化 (まだ、指定初期化子は考えない)
+                    # 構造体系の初期化
                     elif cr.kind == ci.CursorKind.INIT_LIST_EXPR:
                         members = list((f.spelling, f.type.spelling) for f in cursor.type.get_fields())
                         member_crs = list(cr.get_children())
@@ -497,18 +501,22 @@ class ASTtoFlowChart:
                         member_condition_move = []
                         isFunc = False
                         for i, member in enumerate(members):
-                            print("check: ", member[1])
                             if i < memberNum:
                                 self.check_cursor_error(member_crs[i])
                                 memberNodeID = self.get_exp(member_crs[i], label=member[0])
                                 self.createEdge(nodeID, memberNodeID)
                                 if len(self.expNode_info[f'"{memberNodeID}"'][2]) != 0:
+                                    for func in self.expNode_info[f'"{memberNodeID}"'][2]:
+                                        if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
+                                            sys.exit(-1)
                                     member_condition_move += self.expNode_info[f'"{memberNodeID}"'][2]
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
                                 self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], [], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
+                            # 構造体のメンバの型を取得する
+                            self.varNode_info[f'"{memberNodeID}"'] = member[1]
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
                             if member_condition_move[0] != member_crs[0].location.line:
@@ -522,6 +530,11 @@ class ASTtoFlowChart:
                     # スカラー変数とポインタ
                     else:
                         nodeID = self.get_exp(cr)
+                        if self.expNode_info[f'"{nodeID}"'][0] in ["malloc", "realloc"]:
+                            self.expNode_info[f'"{nodeID}"'][2][-1]["vartype"] = cursor.type.spelling
+                            self.expNode_info[f'"{nodeID}"'][2][-1]["varname"] = cursor.spelling
+                        elif self.expNode_info[f'"{nodeID}"'][0] == "fopen":
+                            self.expNode_info[f'"{nodeID}"'][2][-1]["varname"] = cursor.spelling
                         # 今は一行だが、複数行になる場合、関数の遷移前の行番を取得する必要がある。(関数がない場合は変数名の行数になる)
                         # -> expNodeInfo[2]には関数だけでなくその行番も含めて追加する必要がある
                         # ここでもstaticでなければself.line_infoの最初行番を変更する
@@ -541,12 +554,12 @@ class ASTtoFlowChart:
 
         return varNodeID
 
-    #配列(多次元も含む)の要素を取得する
+    # 配列(多次元も含む)の要素を取得する
     def parse_arr_contents(self, cr_iter: list[ci.Cursor], cr_index_list: list[ci.Cursor | int], arr_condition_move: list[int | str | None], line, depth=1):
         # print(type(cr_iter), type(cr_index_list), type(arr_condition_move), type(line))
         not_init_list_expr = True
         arrContNodeID_list = []
-        #要素を取得する
+        # 初期化の要素を取得する
         for i, cr in enumerate(cr_iter):
             if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
                 not_init_list_expr = False
@@ -559,6 +572,9 @@ class ASTtoFlowChart:
             # 子要素の中の要素が1つだけ
             else:
                 arrContNodeID = self.get_exp(cr, label=f"[{i}]" if not_init_list_expr else "[0]")
+                for func in self.expNode_info[f'"{arrContNodeID}"'][2]:
+                    if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
+                        sys.exit(-1)
                 if line != cr.location.line:
                     arr_condition_move = [*arr_condition_move, cr.location.line, *self.expNode_info[f'"{arrContNodeID}"'][2]]
                 else:
@@ -568,8 +584,10 @@ class ASTtoFlowChart:
         # 配列の子要素が全て1なら、その1つの要素を抽出する
         if (maxNum := len(max(arrContNodeID_list, key=len))) == 1:
             return [arrContNodeID[0] for arrContNodeID in arrContNodeID_list]
+        # 配列の中に配列(子配列)がある場合は、子配列のノードを配列のノードにくっつけていく
         else:
             arrNumNodeIDs = []
+            # 未定の添字があったら配列の要素数を添字に設定する
             if depth > len(cr_index_list):
                 cr_index_list.append(maxNum)
             for i, arrContNodeIDs in enumerate(arrContNodeID_list):
@@ -586,7 +604,7 @@ class ASTtoFlowChart:
                     # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
                         arrContNodeID = self.createNode(f"[{n}]", 'square')
-                        self.expNode_info[f'"{arrContNodeID}"'] = (str(maxNum), [], [], ['ランダムな値が設定されます'], line)
+                        self.expNode_info[f'"{arrContNodeID}"'] = (str(maxNum), [], [], ['ランダムな値が設定されてます'], line)
                         self.createEdge(arrNumNodeID, arrContNodeID)
                 arrNumNodeIDs.append(arrNumNodeID)
             return arrNumNodeIDs
@@ -608,7 +626,7 @@ class ASTtoFlowChart:
         return cursor
 
     # 式の項を一つずつ解析
-
+    # malloc, realloc, fopenが計算式に含まれる場合は特別な条件の下で解析を行う
     def parse_exp_term(self, cursor: ci.Cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
@@ -717,13 +735,17 @@ class ASTtoFlowChart:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
         exp_terms = ""
 
-        # ( ) で囲まれている場合 ()
+        # ()で囲まれている場合
         if cursor.kind == ci.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            calc_order_comments.append(f"{''.join([t.spelling for t in list(cursor.get_tokens())])} : ( ) で囲まれている部分は先に計算します")
-            exp_terms = ''.join(["(", self.parse_exp_term(cr, var_references, func_references, calc_order_comments), ")"])
-        # 定数
+            inside_exp_terms = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
+            if inside_exp_terms in ["malloc", "realloc", "fopen"]:
+                exp_terms = inside_exp_terms
+            else:
+                calc_order_comments.append(f"({inside_exp_terms}) : ( ) で囲まれている部分は先に計算します")
+                exp_terms = ''.join(["(", inside_exp_terms, ")"])
+        # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
             exp_terms = next(cursor.get_tokens()).spelling
         elif cursor.kind == ci.CursorKind.FLOATING_LITERAL:
@@ -749,19 +771,17 @@ class ASTtoFlowChart:
             while 1:
                 array_children = [self.unwrap_unexposed(cr) for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
                 if len(array_children) != 2:
-                    sys.exit(0)
+                    sys.exit(-1)
                 index_exp_terms_list.append(f"[{self.parse_exp_term(array_children[1], var_references, func_references, calc_order_comments)}]")
                 if array_children[0].kind == ci.CursorKind.DECL_REF_EXPR:
                     name_spell = array_children[0].spelling
                     break
                 if array_children[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
-                    sys.exit(0)
+                    sys.exit(-1)
                 cursor = array_children[0]
-                
             exp_terms = ''.join([name_spell, *list(reversed(index_exp_terms_list))])
-            print(exp_terms)
             if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
-                sys.exit(0)
+                sys.exit(-1)
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
             member_chain = []
@@ -786,12 +806,14 @@ class ASTtoFlowChart:
             idf_cursor = next(cursor.get_children())
             self.check_cursor_error(idf_cursor)
             operator = next(cursor.get_tokens())
-            #前置(++a)
             term = self.parse_exp_term(idf_cursor, var_references, func_references, calc_order_comments)
+            if "malloc" in term or "realloc" in term or "fopen" in term:
+                sys.exit(-1)
+            # 前置(++a)
             if operator.location.offset < idf_cursor.location.offset:
                 exp_terms = ''.join([operator.spelling, term])
                 comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
-            #後置(a++)
+            # 後置(a++)
             else:
                 operator = next(reversed(list(cursor.get_tokens())))
                 exp_terms = ''.join([term, operator.spelling])
@@ -818,16 +840,19 @@ class ASTtoFlowChart:
                     break
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            if operator_spell == "=" and len(func_references):
-                if back == "fopen":
-                    func_references[-1] = (back, func_references[-1][1], front)
-                if isinstance(func_references[-1], dict) and func_references[-1][0] in ["malloc", "realloc"]:
+            # 初期化式以外の計算式では代入文だけmalloc, realloc, fopenの内容を見る
+            if operator_spell == "=" and back in ["malloc", "realloc", "fopen"]:
+                if back in ["malloc", "realloc"]:
                     func_references[-1]["varname"] = front
                     if "vartype" not in func_references[-1]:
                         func_references[-1]["vartype"] = self.unwrap_unexposed(exps[0]).type.spelling[:-1]
-            exp_terms = ''.join([front, operator_spell, back])
-            comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
+                else:
+                    func_references[-1]["varname"] = front
+                exp_terms = back
+            else:
+                exp_terms = ''.join([front, operator_spell, back])
+                comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
+                calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
         # 複合代入演算子(a += b)
         elif cursor.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -838,13 +863,13 @@ class ASTtoFlowChart:
                     operator_spell = token.spelling
                     break
             front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            back =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([front, operator_spell, back])
             if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
-                sys.exit(0)
+                sys.exit(-1)
             comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
-        # 三項条件式(c? a : b) (ここはmallocやreallocを許さない)
+        # 三項条件式(c? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
@@ -852,20 +877,27 @@ class ASTtoFlowChart:
             trueExp = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             falseExp = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
+            # 対応できない関数はここでカットする
+            if ("malloc" in trueExp or "malloc" in falseExp) or ("realloc" in trueExp or "realloc" in falseExp) or ("fopen" in trueExp or "fopen" in falseExp):
+                sys.exit(-1)
             calc_order_comments.append(f"{exp_terms} : {condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
         # キャスト型
         elif cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
             castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
-            exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
-            castedExpType = self.unwrap_unexposed(cr).type.spelling
             if castedExp in ["malloc", "realloc"]:
                 func_references[-1]["vartype"] = cursor.type.spelling[:-1]
-            if castedExpType:
-                calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
+                exp_terms = castedExp
+            elif "malloc" in castedExp or "realloc" in castedExp or "fopen" in castedExp:
+                sys.exit(-1)
             else:
-                calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
+                exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
+                castedExpType = self.unwrap_unexposed(cr).type.spelling
+                if castedExpType:
+                    calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
+                else:
+                    calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
         return exp_terms
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
@@ -902,29 +934,25 @@ class ASTtoFlowChart:
             arg_func_order_list.append(arg_func_order)
         # 標準関数は特別な形でfunc_referencesに登録する
         if ref_spell == "strcpy":
-            func_references.append((ref_spell, arg_exp_term_list[0], arg_exp_term_list[1]))
+            func_references.append({"type": ref_spell, "copyTo": arg_exp_term_list[0], "copyFrom": arg_exp_term_list[1]})
             return ref_spell
         elif ref_spell == "scanf":
-            input_type_str = [t.spelling for t in children[1].get_tokens()][0]
-            func_references.append((ref_spell, input_type_str))
+            func_references.append({"type": ref_spell, "format": [t.spelling for t in children[1].get_tokens()][0]})
             return ref_spell
         elif ref_spell == "fopen":
-            file_name = [t.spelling for t in children[1].get_tokens()][0]
-            func_references.append((ref_spell, file_name))
+            func_references.append({"type": ref_spell, "filename": [t.spelling for t in children[1].get_tokens()][0]})
             return ref_spell
         elif ref_spell == "fclose":
-            func_references.append((ref_spell, arg_exp_term_list[0]))
+            func_references.append({"type": ref_spell, "varname": arg_exp_term_list[0]})
             return ref_spell
         elif ref_spell == "malloc":
-            size_str = "".join([t.spelling for t in children[1].get_tokens()])
-            func_references.append({"type": ref_spell, "size": size_str})
+            func_references.append({"type": ref_spell, "size": "".join([t.spelling for t in children[1].get_tokens()])})
             return ref_spell
         elif ref_spell == "realloc":
-            size_str = "".join([t.spelling for t in children[2].get_tokens()])
-            func_references.append({"type": ref_spell, "size": size_str, "fromVar": arg_exp_term_list[0]})
+            func_references.append({"type": ref_spell, "size": "".join([t.spelling for t in children[2].get_tokens()]), "fromVar": arg_exp_term_list[0]})
             return ref_spell
         elif ref_spell == "free":
-            func_references.append((ref_spell, arg_exp_term_list[0]))
+            func_references.append({"type": ref_spell, "varname": arg_exp_term_list[0]})
             return ref_spell
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
             func_references.append(ref_spell)
@@ -1010,9 +1038,8 @@ class ASTtoFlowChart:
                 return self.parse_stmt(cursor, parentNodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
-        children = list(cursor.get_children())
-        if not children:
-            sys.exit(0)
+        if not (children := list(cursor.get_children())):
+            sys.exit(-1)
 
         # --- 条件式処理 ---
         cond_cursor = children[0]
