@@ -709,6 +709,18 @@ class ASTtoFlowChart:
             '>>': "{left} を右に {right} ビット分シフトします。2進数で見ると桁が右にずれて、2の {right} 乗で割ったのと同じになります",
         }
         
+        compound_assignment_operator_comments = {
+            '+=': "{left} に {right} の値を足した結果を {left} に代入します",
+            '-=': "{left} から {right} の値を引いた結果を {left} に代入します",
+            '*=': "{left} に {right} の値を掛けた結果を {left} に代入します",
+            '/=': "{left} を {right} の値で割った結果を {left} に代入します",
+            '%=': "{left} の {right} で割った剰余を {left} に代入します",
+            '<<=': "{left} を {right} 分左シフトした結果を {left} に代入します",
+            '>>=': "{left} を {right} 分右シフトした結果を {left} に代入します",
+            '&=': "{left} と {right} のビットANDを {left} に代入します",
+            '^=': "{left} と {right} のビットXORを {left} に代入します",
+        }
+
         cursor = self.unwrap_unexposed(cursor)
         if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
@@ -758,9 +770,7 @@ class ASTtoFlowChart:
                 if array_children[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
                     sys.exit(0)
                 cursor = array_children[0]
-                
             exp_terms = ''.join([name_spell, *list(reversed(index_exp_terms_list))])
-            print(exp_terms)
             if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
                 sys.exit(0)
         # 構造体のメンバ
@@ -846,6 +856,8 @@ class ASTtoFlowChart:
             exp_terms = ''.join([self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments), operator_spell, self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)])
             if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
                 sys.exit(0)
+            comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
+            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
         # 三項条件式(c? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
