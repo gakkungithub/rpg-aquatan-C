@@ -227,15 +227,13 @@ class MapInfo:
         self.chara_expressions[crntRoomID].addExp(line_track, expNodeInfo)
 
     # マップデータの生成
-    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict):
+    def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
         defaultMapChips = [503, 113, 343, 160, 32]
-        floorMap = np.where(floorMap == 0, 390, floorMap) # gray thick brick
-        # self.floorMap = np.where(self.floorMap == 0, 43, self.floorMap) # grass floor
-        # self.floorMap = np.where(self.floorMap == 0, 402, self.floorMap) # gray thin brick
-        # self.floorMap = np.where(self.floorMap == 0, 31, self.floorMap) # dungeon_floor
+        floorMap = np.where(floorMap == 0, random.choice([390, 43, 402, 31]), floorMap) 
+        # gray thick brick, grass floor, gray thin brick, or dungeon_floor
 
         self.writeMapIni(pname, self.initPos, gvar_str)
-        self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[0])
+        self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type])
         self.writeLineFile(pname, line_info)
 
         plt.imshow(floorMap, cmap='gray', interpolation='nearest')
@@ -319,10 +317,10 @@ class MapInfo:
         characters = []
         vardecl_lines: dict[int, list[str]] = {}
 
+        # カラーユニバーサルデザインの色
         universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
 
         # アイテムの情報
-        func_num = 0
         for treasure in self.treasures:
             func_warp, converted_fromTo = self.line_track_transformer(treasure.line_track, treasure.func_name)
             if converted_fromTo[0] in vardecl_lines:
@@ -345,7 +343,7 @@ class MapInfo:
         for door in self.doors:
             events.append({"type": "SDOOR", "x": door.pos[1], "y": door.pos[0], "doorname": door.name, "dir": door.dir})
         
-        ### 関数の戻りに応じたキャラクターの情報
+        # 関数の戻りに応じたキャラクターの情報
         for chara_return in self.chara_returns:
             pos, funcName, line_track = chara_return.get_attributes()
             func_warp, converted_fromTo = self.line_track_transformer(line_track, funcName)
@@ -354,14 +352,14 @@ class MapInfo:
             else:
                 characters.append({"type": "CHARARETURN", "name": "15084", "x": pos[1], "y": pos[0], "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "exps": chara_return.exps})
 
+        # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
-            color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
+            color = random.choice(universal_colors) if isUniversal else random.randint(15102,15160)
             func_warp, converted_fromTo = self.line_track_transformer(chara_checkCondition.line_track, chara_checkCondition.func)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": func_warp, "exps": chara_checkCondition.exps})
 
         for chara_expression in self.chara_expressions.values():
-            # color = random.choice(universal_colors) if isUniversal else random.randint(15102,15161)
             exps_dict = {}
             for firstLine, exps in chara_expression.exps_dict.items():
                 func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
@@ -513,6 +511,8 @@ class GenBitMap:
         wallFlags = np.zeros(8, dtype=int)
         height, width = self.floorMap.shape
         bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
+        # ここで壁パネルの種類を選択する
+        wall_chip_type = random.randint(0, 4)
         for i in range(1, height+1):
             for j in range(1, width+1):
                 if bitMap_padded[i, j]:
@@ -551,13 +551,13 @@ class GenBitMap:
                         if bitMap_padded[i+1, j-1] == 0:
                             #左下角壁フラグ
                             wallFlags[7] = 1
-                    bitMap_padded[i, j] = self.getFloorChipID(wallFlags)
+                    bitMap_padded[i, j] = self.getFloorChipID(wallFlags, wall_chip_type)
 
         self.floorMap = bitMap_padded[1:height+1, 1:width+1]
 
-        self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info_dict)
+        self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info_dict, wall_chip_type)
 
-    def getFloorChipID(self, arr):
+    def getFloorChipID(self, arr, wall_chip_type: int):
         floorChipID =  {
             (0, 0, 0, 0, 0, 0, 0, 0): 14,
             (1, 0, 0, 0, 0, 0, 0, 0): 13,
@@ -658,11 +658,18 @@ class GenBitMap:
             (0, 0, 0, 0, 1, 1, 1, 1): 113
         }
 
-        return floorChipID[tuple(map(int, arr))] + 489 # wall-up
-        # return floorGrassChipID[tuple(map(int, arr))] # stone-grass
-        # return 343
-        # return 160
-        # return 32
+        floor_chip_list = [floorChipID[tuple(map(int, arr))] + 489, 
+                           floorGrassChipID[tuple(map(int, arr))],
+                           343,
+                           160,
+                           32]
+        
+        return floor_chip_list[wall_chip_type]
+        # return floorChipID[tuple(map(int, arr))] + 489 # wall-up
+        # # return floorGrassChipID[tuple(map(int, arr))] # stone-grass
+        # # return 343
+        # # return 160
+        # # return 32
 
     def startTracking(self):
         self.setNextNodeInfo()

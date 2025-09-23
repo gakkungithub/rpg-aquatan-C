@@ -1072,7 +1072,7 @@ class Map:
         self.row = -1  # 行数
         self.col = -1  # 列数
         self.map = []  # マップデータ（2次元リスト）
-        self.charas = []  # マップにいるキャラクターリスト
+        self.charas: list[Character] = []  # マップにいるキャラクターリスト
         self.events = []  # マップにあるイベントリスト
         self.lights = []  # マップにある光源リスト
         self.load_json()
@@ -2679,11 +2679,11 @@ class PauseWindow(Window):
         self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
 
         y = self.rect.height // 2 + 50
+        x = self.rect.width // 2 - 150
         for line in ["space:　前方に対するアクション", "f:　足元に対するアクション", "c:　コマンドラインを開く",
                         "b:　アイテムウィンドウを開く/閉じる", "i:　アイテム名を表示する/消す", "m:　マップ→コード→非表示を切り替える", 
                         "p:　ポーズ画面を開く", "esc:　ゲームを辞める/コマンドラインを閉じる"]:
             surf, rect = self.font.render(line, self.TEXT_COLOR)
-            x = (self.rect.width - rect[2]) // 2
             self.surface.blit(surf, (x , y))
             y += 20
 
@@ -3125,7 +3125,6 @@ class AutoEvent():
     def __str__(self):
         return f"AUTO,{self.x},{self.y},{self.mapchip},{''.join(self.sequence)},{self.type}"
 
-
 #                                                                                                                              
 #   ,ad8888ba,  88                                           88888888ba                                                        
 #  d8"'    `"8b 88                                           88      "8b             ,d                                        
@@ -3236,45 +3235,6 @@ class CharaCheckCondition(Character):
             self.vx, self.vy = 0, -self.speed
         self.avoiding = False
         self.moving = True
-
-#                                                                                                                                                                    
-#   ,ad8888ba,  88                                           88b           d88                                    88888888888                                        
-#  d8"'    `"8b 88                                           888b         d888                                    88                                          ,d     
-# d8'           88                                           88`8b       d8'88                                    88                                          88     
-# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88 `8b     d8' 88  ,adPPYba,  8b       d8  ,adPPYba, 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM  
-# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88  `8b   d8'  88 a8"     "8a `8b     d8' a8P_____88 88""""" `8b     d8' a8P_____88 88P'   `"8a  88     
-# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 88   `8b d8'   88 8b       d8  `8b   d8'  8PP""""""" 88       `8b   d8'  8PP""""""" 88       88  88     
-#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88 88    `888'    88 "8a,   ,a8"   `8b,d8'   "8b,   ,aa 88        `8b,d8'   "8b,   ,aa 88       88  88,    
-#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8 88     `8'     88  `"YbbdP"'      "8"      `"Ybbd8"' 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  
-#                                                                                                                                                                    
-#                                                                                                                                                                    
-# 
-
-class CharaMoveEvent(Character):
-    """キャラ＋移動"""
-    def __init__(self, name, pos, direction, movetype, message, dest_map, dest_pos):
-        super().__init__(name, pos, direction, movetype, message)
-        self.dest_map = dest_map  # 移動先マップ名
-        self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
-
-    def __str__(self):
-        return f"CHARAMOVE,{self.name:s},{self.x:d},{self.y:d},"\
-            f"{self.direction:d},{self.movetype:d},{self.message:s},"\
-            f"{self.dest_map},{self.dest_x},{self.dest_y}"
-
-class CharaMoveItemsEvent(CharaMoveEvent):
-    """キャラ＋移動(アイテム込み)"""
-    def __init__(self, name, pos, direction, movetype, message, errmessage, dest_map, dest_pos, items, funcName, arguments):
-        super().__init__(name, pos, direction, movetype, message, dest_map, dest_pos)
-        self.items = items
-        self.errmessage = errmessage
-        self.funcName = funcName
-        self.arguments = arguments
-
-    def __str__(self):
-        return f"CHARAMOVEITEMS,{self.name:s},{self.x:d},{self.y:d},"\
-            f"{self.direction:d},{self.movetype:d},{self.message:s},{self.errmessage:s}"\
-            f"{self.dest_map},{self.dest_x},{self.dest_y},{self.items},{self.funcName:s},{','.join(self.arguments)}"
                                                                                                                                                              
 #   ,ad8888ba,  88                                           88888888888                                                                   88                          
 #  d8"'    `"8b 88                                           88                                                                            ""                          
@@ -3340,8 +3300,7 @@ class MoveEvent():
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
-
-                                                                                                                                                          
+                                                                                                                                                    
 # 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
 # 88                                         88              d8"            `8b       d8b       d8' ""                      88                                 
 # 88                                         88              88              "8,     ,8"8,     ,8"                          88                                 
@@ -4208,14 +4167,16 @@ class MiniMapWindow(Window, Map):
     """"ミニマップウィンドウ"""
     tile_num = 60
     offset_x = 0
-    offset_y = 0
+    offset_y = 10
     radius = 0
     RED = (255, 0, 0)
     BLUE = (0, 0, 255)
     BLACK = (0, 0, 0)
+    GREEN = (0, 255, 0)
+    YELLOW = (255, 255, 0)
 
     def __init__(self, rect, name):
-        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE
+        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE - 10
         self.radius = MIN_MAP_SIZE / self.tile_num
         Window.__init__(self, rect)
         Map.__init__(self, name)
@@ -4234,11 +4195,22 @@ class MiniMapWindow(Window, Map):
                     tile = self.default
                 if tile >= 489 and 535 >= tile:
                     continue
-                pos_x = x * MIN_MAP_SIZE/ self.tile_num + self.offset_x
+                pos_x = x * MIN_MAP_SIZE / self.tile_num + self.offset_x
                 pos_y = y * MIN_MAP_SIZE / self.tile_num + self.offset_y
                 image = pygame.transform.scale(self.images[tile], (int(MIN_MAP_SIZE / self.tile_num), int(MIN_MAP_SIZE / self.tile_num)))
                 screen.blit(image, (pos_x, pos_y))
         
+        # Treasureの場所を表示　青丸
+        for event in map.events:
+            if isinstance(event, Treasure):
+                tx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+                ty = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                pygame.draw.circle(screen, self.BLUE, (tx, ty), self.radius)
+            elif isinstance(event, MoveEvent):
+                mx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
+                my = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                pygame.draw.circle(screen, self.GREEN, (mx, my), self.radius)
+
         # Playerの場所を表示　赤丸
         px = PLAYER.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
         py = PLAYER.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
@@ -4249,16 +4221,7 @@ class MiniMapWindow(Window, Map):
             if not isinstance(chara, Player):
                 cx = chara.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
                 cy = chara.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
-                pygame.draw.circle(screen, self.BLACK, (cx, cy), self.radius)
-        # Treasureの場所を表示　青丸
-        for event in map.events:
-            if isinstance(event, Treasure):
-                tx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
-                ty = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
-                pygame.draw.circle(screen, self.BLUE, (tx, ty), self.radius)
-    
-
-
+                pygame.draw.circle(screen, self.YELLOW if chara.name == "15161" else self.BLACK, (cx, cy), self.radius)
                                                                                                                                    
 #   ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
 #  d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
