@@ -484,6 +484,14 @@ def main():
                                         cmd = ""    
                                         PAUSEWND.hide()
                                         PLAYER.goaled = True   
+                                    # elif PAUSEWND.button_help_rect.collidepoint(local_pos):
+                                    #     cmd = ""
+                                    #     if PAUSEWND.mode == "pause":
+                                    #         PAUSEWND.mode = "help"
+                                    #     elif PAUSEWND.mode == "help":
+                                    #         PAUSEWND.mode = "pause"
+                                    #     PAUSEWND.draw(screen)
+                                    #     pygame.display.update()
 
                 if mouse_down:
                     if event.type == pygame.MOUSEMOTION and last_mouse_pos:
@@ -712,12 +720,18 @@ def main():
                                     if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
                                         cmd = ""
                                         PAUSEWND.hide()
-                                        print('ゲームに戻る')
                                     elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
                                         cmd = ""    
                                         PAUSEWND.hide()
-                                        PLAYER.goaled = True 
-                                        print('ステージ選択に戻る')       
+                                        PLAYER.goaled = True
+                                    # elif PAUSEWND.button_help_rect.collidepoint(local_pos):
+                                    #     cmd = ""
+                                    #     if PAUSEWND.mode == "pause":
+                                    #         PAUSEWND.mode = "help"
+                                    #     elif PAUSEWND.mode == "help":
+                                    #         PAUSEWND.mode = "pause"
+                                    #     PAUSEWND.draw(screen)
+                                    #     pygame.display.update()      
 
                 if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
                     MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
@@ -2070,7 +2084,7 @@ class Window:
         self.y = rect[1]
         self.surface = pygame.Surface(
             (self.width, self.height), pygame.SRCALPHA)
-#        self.surface.convert_alpha()
+        # self.surface.convert_alpha()
         self.rect = Rect(0, 0, self.width, self.height)  # 一番外側の白い矩形
         # 内側の黒い矩形
         self.inner_rect = self.rect.inflate(-self.EDGE_WIDTH, -self.EDGE_WIDTH)
@@ -2627,28 +2641,30 @@ class PauseWindow(Window):
     def __init__(self, rect):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.button_help_rect = pygame.Rect(self.rect.width - 80, 30, 50, 50)
         self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 2 - 30, 200, 60)
         self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 2 - 30, 200, 60)
-        self.button_help_rect = pygame.Rect(self.rect.width - 80, 30, 50, 50)
+        self.mode = "pause"
 
     def draw(self, screen):
         """ポーズ画面を描画する"""
-        Window.draw(self)
         if self.is_visible is False:
             return
+
+        Window.draw(self)
         
+        # ヘルプボタン
+        # pygame.draw.rect(self.surface, self.HELP_COLOR, self.button_help_rect)
+        # self.font.size = self.FONT_SIZE * 2
+        # label_surf_help, _ = self.font.render("?" if self.mode == "pause" else "←", self.HELP_FONT_COLOR)
+        # self.font.size = self.FONT_SIZE
+        # label_rect_help = label_surf_help.get_rect(center=self.button_help_rect.center)
+        # self.surface.blit(label_surf_help, label_rect_help)
+
         self.font.size = self.FONT_SIZE * 2
         surf, rect = self.font.render("Pause", self.TEXT_COLOR)
         self.font.size = self.FONT_SIZE
         self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 2 - 100))
-
-        # ヘルプボタン
-        pygame.draw.rect(self.surface, self.HELP_COLOR, self.button_help_rect)
-        self.font.size = self.FONT_SIZE * 2
-        label_surf_help, _ = self.font.render("?", self.HELP_FONT_COLOR)
-        self.font.size = self.FONT_SIZE
-        label_rect_help = label_surf_help.get_rect(center=self.button_help_rect.center)
-        self.surface.blit(label_surf_help, label_rect_help)
 
         # ゲームボタン
         pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
@@ -2661,6 +2677,15 @@ class PauseWindow(Window):
         label_surf_toStageSelect, _ = self.font.render("ステージ選択画面に戻る", self.TO_SSELECT_FONT_COLOR)
         label_rect_toStageSelect = label_surf_toStageSelect.get_rect(center=self.button_toStageSelect_rect.center)
         self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
+
+        y = self.rect.height // 2 + 50
+        for line in ["space:　前方に対するアクション", "f:　足元に対するアクション", "c:　コマンドラインを開く",
+                        "b:　アイテムウィンドウを開く/閉じる", "i:　アイテム名を表示する/消す", "m:　マップ→コード→非表示を切り替える", 
+                        "p:　ポーズ画面を開く", "esc:　ゲームを辞める/コマンドラインを閉じる"]:
+            surf, rect = self.font.render(line, self.TEXT_COLOR)
+            x = (self.rect.width - rect[2]) // 2
+            self.surface.blit(surf, (x , y))
+            y += 20
 
         Window.blit(self, screen)
 
@@ -3211,7 +3236,6 @@ class CharaCheckCondition(Character):
             self.vx, self.vy = 0, -self.speed
         self.avoiding = False
         self.moving = True
-
 
 #                                                                                                                                                                    
 #   ,ad8888ba,  88                                           88b           d88                                    88888888888                                        
@@ -4160,9 +4184,9 @@ class CommandWindow(Window):
         return self.txt
 
     def draw(self, screen, font):
-        Window.draw(self)
         if not self.is_visible:
             return
+        Window.draw(self)
         result = self.read(screen, font)
         Window.blit(self, screen)
         return result
