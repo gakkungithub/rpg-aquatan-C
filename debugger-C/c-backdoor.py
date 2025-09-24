@@ -294,7 +294,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
                     self.get_std_outputs()
-                    self.event_sender({"line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "status": "ok"}, False)
+                    self.event_sender({"line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
                     self.line_number = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
                     self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
@@ -395,7 +395,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             
             mnemonic = inst.GetMnemonic(target)
 
-            print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
+            # print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])

@@ -332,6 +332,13 @@ def main():
         
         PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
         initialResult = sender.receive_json()
+        if "end" in initialResult:
+            PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            PLAYER.fp.close()
+            server.terminate()
+            sys.exit()
+        
+        PLAYER.func = initialResult["firstFunc"]
 
         for gvar_name, values in initialResult["items"].items():
             PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
@@ -1604,6 +1611,7 @@ class Player(Character):
         self.std_messages = []
         self.address_to_fname = {}
         self.address_to_size = {}
+        self.func = None
         
         ## start
         self.fp = open(PATH, mode='w')
@@ -1662,15 +1670,19 @@ class Player(Character):
             global cmd
             if cmd == "down":
                 direction = 'd'
+                # self.append_automove('d')
                 cmd = "\0"
             elif cmd == "left":
                 direction = 'l'
+                # self.append_automove('l')
                 cmd = "\0"
             elif cmd == "right":
                 direction = 'r'
+                # self.append_automove('r')
                 cmd = "\0"
             elif cmd == "up":
                 direction = 'u'
+                # self.append_automove('u')
                 cmd = "\0"
             # endregion
 
@@ -1684,19 +1696,19 @@ class Player(Character):
                     pressed_keys = pygame.key.get_pressed()
 
             # cmd入力と自動移動の許可を判断 (入力の独立性は既に確保されているので一緒に判断しても良い)
-            if direction in ('u', 'd', 'l', 'r'):
-                if ((self.y - self.prevPos[0][1] == -1 and direction == 'd')
-                or (self.x - self.prevPos[0][0] == 1 and direction == 'l')
-                or (self.x - self.prevPos[0][0] == -1 and direction == 'r')
-                or (self.y - self.prevPos[0][1] == 1 and direction == 'u')):
-                    tempPrevPos = [None, self.prevPos[0]]
-                    MSGWND.set("ここから先は進入できません!!")
-                self.pop_automove()
-            elif direction == 'x':
-                self.wait += 1
-                if self.wait > 60:
-                    self.wait = 0
-                    self.pop_automove()
+            # if direction in ('u', 'd', 'l', 'r'):
+            #     if ((self.y - self.prevPos[0][1] == -1 and direction == 'd')
+            #     or (self.x - self.prevPos[0][0] == 1 and direction == 'l')
+            #     or (self.x - self.prevPos[0][0] == -1 and direction == 'r')
+            #     or (self.y - self.prevPos[0][1] == 1 and direction == 'u')):
+            #         tempPrevPos = [None, self.prevPos[0]]
+            #         MSGWND.set("ここから先は進入できません!!")
+            #     self.pop_automove()
+            # elif direction == 'x':
+            #     self.wait += 1
+            #     if self.wait > 60:
+            #         self.wait = 0
+            #         self.pop_automove()
 
             if direction == 'd' or (pressed_keys and pressed_keys[K_DOWN]):
                 self.direction = DOWN  # 移動できるかに関係なく向きは変える
@@ -1739,11 +1751,6 @@ class Player(Character):
         self.frame += 1
         self.image = self.images[self.name][self.direction *
                                             4+(self.frame // self.animcycle % 4)]
-
-    def set_automove(self, seq):
-        """自動移動シーケンスをセットする"""
-        self.automove = seq
-        #print(self.automove)
 
     def get_next_automove(self):
         """次の移動先を得る"""
@@ -1982,6 +1989,7 @@ class Player(Character):
                         # ここは辞書を使うかどうかを考える
                         checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
                         PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1] = (checkedFunc[0], returnResult["retVal"])
+                    PLAYER.func = returnResult["backToFunc"]
                     self.waitingMove = chara
                     self.waitingMove.dest_map = move['mapname']
                     self.waitingMove.dest_x = move['x']
@@ -2473,6 +2481,8 @@ class MessageWindow(Window):
                         dest_map = fieldmap.name
                         dest_x = skipResult["skipTo"]["x"]
                         dest_y = skipResult["skipTo"]["y"]
+
+                        PLAYER.func = skipResult["skipTo"]["name"]
 
                         from_map = fieldmap.name
                         PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
@@ -3057,7 +3067,7 @@ class StatusWindow(Window):
     BLUE = Color(31, 31, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
-    def __init__(self, rect, player):
+    def __init__(self, rect: pygame.Rect, player: Player):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
         self.myfont = pygame.freetype.Font(
@@ -3090,6 +3100,7 @@ class StatusWindow(Window):
         self.draw_status(10,70,"ATK")
         self.draw_status(100,70,"DEF")
 
+        self.draw_string(10, 90, f"現在地:　{self.player.func}", self.WHITE)
         Window.blit(self, screen)
 
 
@@ -3331,7 +3342,7 @@ class FuncInfoWindow(Window):
         surf, rect = self.font.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
 
-    def draw_arrow(surface, color, start, end, width=3, arrow_size=10):
+    def draw_arrow(self, surface, color, start, end, width=3, arrow_size=10):
         # 直線を描画
         pygame.draw.line(surface, color, start, end, width)
 
@@ -3982,7 +3993,6 @@ class StageButton:
         self.surface.blit(text_surf, text_rect)
         surface.blit(self.surface, self.rect)
 
-
 #        db                                                             88888888ba                                                   I8,        8        ,8I 88                      88                                 
 #       d88b                                                            88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
 #      d8'`8b                                                           88      ,8P               88      88                          "8,     ,8"8,     ,8"                          88                                 
@@ -4040,8 +4050,7 @@ class ArrowButtonWindow:
             return "action"
         else:
             return None
-
-                                                              
+                                                 
 # 88888888ba                                                      
 # 88      "8b               ,d      ,d                            
 # 88      ,8P               88      88                            
@@ -4149,9 +4158,7 @@ class CommandWindow(Window):
         result = self.read(screen, font)
         Window.blit(self, screen)
         return result
-
-
-                                                                                                                                                               
+                                                                                                                                                        
 # 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
 # 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
 # 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 
@@ -4391,7 +4398,6 @@ class EventSender:
                                 PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                             else:
                                 PLAYER.address_to_size.pop(memory_info["address"], None)
-
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg
