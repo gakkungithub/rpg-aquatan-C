@@ -591,112 +591,117 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             varsDeclLines_copy = varsDeclLines[:]
 
-            # やはり、変数は順番に取得させる
-            while len(varsDeclLines_copy) != 0:
-                var = varsDeclLines_copy.pop(0)
-                vars_event: list[str] = []
-                errorCnt = 0
-                line_number_track: list[int] = [self.line_number]
-                func_num = 0
-                # 変数が合致していればstepinを実行して次に進む
-                while True:
-                    # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
-                    if (event := self.event_reciever()) is None:
-                        return
-                    if (item := event.get('item', None)) is not None:
-                        if item != var:
-                            errorCnt += 1
-                            # 複数回入力を間違えたらヒントをあげる
-                            if errorCnt >= 3:
-                                self.event_sender({"message": f"ヒント: アイテム {var} を取得してください!!", "status": "ng"})
-                            else:
-                                self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
-                            continue
-
-                        fromTo = event['fromTo']
-                        funcWarp = event['funcWarp']
-                        if fromTo[:len(line_number_track)] == line_number_track:
-                            crntFromTo = fromTo[len(line_number_track):]
-                            if len(funcWarp) != 0:
-                                funcWarp = funcWarp[func_num:]
-
-                        # アイテムを正しく取得できたら次の変数に移る
-                        if not crntFromTo:
-                            self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "status": "ok"}, len(varsDeclLines_copy) == 0)
-                            self.vars_tracker.setVarsDeclared(var)
-                            break
-
-                        while crntFromTo:
-                            if self.next_frame_num > self.frame_num:
-                                line_number_track.append(self.next_line_number)
-                                if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
-                                    func_num += 1
-                                    self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True})
-                                    event = self.event_reciever()
-                                    if event.get('skip', False):
-                                        back_line_number = self.line_number
-                                        skipped_func_name = self.func_crnt_name
-                                        while 1:
-                                            self.step_conditionally()
-                                            if back_line_number == self.next_line_number:
-                                                retVal = thread.GetStopReturnValue().GetValue()
-                                                self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                            if back_line_number == self.line_number:
-                                                break
-                                    else:
-                                        items = {}
-                                        for argname, argtype in funcWarp[0]['args'].items():
-                                            items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
-                                        self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
-                                        back_line_number = self.line_number
-                                        while 1:
-                                            if self.analyze_frame():
-                                                continue
-                                            if back_line_number == self.line_number:
-                                                break
-                                    break
-                                # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
-                                else:
-                                    errorCnt += 1
-                                    self.event_sender({"message": f"異なる行動をしようとしています10!!", "status": "ng"})
-                                    break
-                            # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
-                            else:
-                                self.step_conditionally(var_check=False)
-                                if crntFromTo[0] != self.line_number:
-                                    self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng"})
-                                    break
-                                line_number_track.append(self.line_number)
-                                crntFromTo.pop(0)
-                    else:
-                        errorCnt += 1
-                        self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
-
-            # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
-            # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
-            common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
-            # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
-            values_changed = list(set(common) - set(varsDeclLines))
-            # その後、varsChangedをキーとしてvars_changedの変更値を取得する
-
-            # if, while True, while False, for In, for True, for False, switch Caseによる値の変化は無視できるようにする
-            if len(values_changed) != 0:
-                if self.line_number in self.line_data[self.func_name]["lines"]:
-                    self.vars_tracker.vars_changed = {var: self.vars_tracker.vars_changed[var] for var in values_changed}
-                else:
-                    vars_event = []
+            if len(varsDeclLines_copy):
+                # やはり、変数は順番に取得させる
+                while len(varsDeclLines_copy):
+                    var = varsDeclLines_copy.pop(0)
                     errorCnt = 0
-                    if (event := self.event_reciever()) is None:
-                        return
+                    line_number_track: list[int] = [self.line_number]
+                    func_num = 0
+                    # 変数が合致していればstepinを実行して次に進む
                     while True:
-                        if event.get('itemsetall', False):
-                            value_changed_dict = self.get_new_values(values_changed)
-                            print(value_changed_dict)
-                            self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
-                            break
-                        errorCnt += 1
-                        self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
-                        event = self.event_reciever()
+                        # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
+                        if (event := self.event_reciever()) is None:
+                            return
+                        if (item := event.get('item', None)) is not None:
+                            if item != var:
+                                errorCnt += 1
+                                # 複数回入力を間違えたらヒントをあげる
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": f"ヒント: アイテム {var} を取得してください!!", "status": "ng"})
+                                else:
+                                    self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                                continue
+
+                            fromTo = event['fromTo']
+                            funcWarp = event['funcWarp']
+                            if fromTo[:len(line_number_track)] == line_number_track:
+                                crntFromTo = fromTo[len(line_number_track):]
+                                if len(funcWarp) != 0:
+                                    funcWarp = funcWarp[func_num:]
+
+                            # アイテムを正しく取得できたら次の変数に移る
+                            if not crntFromTo:
+                                self.vars_tracker.setVarsDeclared(var)
+                                if len(varsDeclLines_copy):
+                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "status": "ok"}, False)
+                                else:
+                                    # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
+                                    # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
+                                    common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
+                                    # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
+                                    values_changed = list(set(common) - set(varsDeclLines))
+                                    # その後、varsChangedをキーとしてvars_changedの変更値を取得する
+                                    value_changed_dict = self.get_new_values(values_changed)
+                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "values": value_changed_dict, "status": "ok"})
+                                break
+
+                            while crntFromTo:
+                                if self.next_frame_num > self.frame_num:
+                                    line_number_track.append(self.next_line_number)
+                                    if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
+                                        func_num += 1
+                                        self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True})
+                                        event = self.event_reciever()
+                                        if event.get('skip', False):
+                                            back_line_number = self.line_number
+                                            skipped_func_name = self.func_crnt_name
+                                            while 1:
+                                                self.step_conditionally()
+                                                if back_line_number == self.next_line_number:
+                                                    retVal = thread.GetStopReturnValue().GetValue()
+                                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                                if back_line_number == self.line_number:
+                                                    break
+                                        else:
+                                            items = {}
+                                            for argname, argtype in funcWarp[0]['args'].items():
+                                                items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
+                                            self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
+                                            back_line_number = self.line_number
+                                            while 1:
+                                                if self.analyze_frame():
+                                                    continue
+                                                if back_line_number == self.line_number:
+                                                    break
+                                        break
+                                    # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                                    else:
+                                        errorCnt += 1
+                                        self.event_sender({"message": f"異なる行動をしようとしています10!!", "status": "ng"})
+                                        break
+                                # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
+                                else:
+                                    self.step_conditionally(var_check=False)
+                                    if crntFromTo[0] != self.line_number:
+                                        self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng"})
+                                        break
+                                    line_number_track.append(self.line_number)
+                                    crntFromTo.pop(0)
+                        else:
+                            errorCnt += 1
+                            self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+            else:
+                common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
+                values_changed = list(set(common) - set(varsDeclLines))
+
+                # if, while True, while False, for In, for True, for False, switch Caseによる値の変化は無視できるようにする
+                if len(values_changed) != 0:
+                    if self.line_number in self.line_data[self.func_name]["lines"]:
+                        self.vars_tracker.vars_changed = {var: self.vars_tracker.vars_changed[var] for var in values_changed}
+                    else:
+                        vars_event = []
+                        errorCnt = 0
+                        if (event := self.event_reciever()) is None:
+                            return
+                        while True:
+                            if event.get('itemsetall', False):
+                                value_changed_dict = self.get_new_values(values_changed)
+                                self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
+                                break
+                            errorCnt += 1
+                            self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
+                            event = self.event_reciever()
 
             # 変数が初期化されない時、スキップされるので、それも読み取る
             target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
