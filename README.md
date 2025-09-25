@@ -70,6 +70,7 @@ senderクラスでソケットによるTCP通信を管理しています.
 
 tips for developing this system
 =========================
+インストールが必要なライブラリは、clang, python-astar, graphviz, ephemです (後々、インストールされていない場合は自動インストールできるようにする)
 "region 〇〇" のコメントアウトは折り畳めます. 
 コードが見やすくなるのでなるべく使いたいです.
 

@@ -1335,13 +1335,14 @@ class Map:
         x = PLAYER.ccchara["avoiding_x"] if avoiding else int(data["x"]) 
         y = PLAYER.ccchara["avoiding_y"] if avoiding else int(data["y"]) 
         direction = PLAYER.ccchara["avoiding_dir"] if avoiding else int(data["dir"])
+        move_direction = int(data["moveDir"])
         movetype = int(data["movetype"])
         message = data["message"]
         type = data["condType"]
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
-        chara = CharaCheckCondition(name, (x, y), direction, movetype, message, type, fromTo, func, funcWarp, avoiding, self.name.lower())
+        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, avoiding, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -3100,7 +3101,7 @@ class StatusWindow(Window):
         self.draw_status(10,70,"ATK")
         self.draw_status(100,70,"DEF")
 
-        self.draw_string(10, 90, f"現在地:　{self.player.func}", self.WHITE)
+        self.draw_string(10, 90, f"現在地:　{self.player.func}", self.CYAN)
         Window.blit(self, screen)
 
 
@@ -3174,9 +3175,10 @@ class CharaReturn(Character):
                                                                                                                                                                                                                                                                                                                                                                                                            
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, movetype, message, type, fromTo, func, funcWarp, avoiding, mapname):
+    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, avoiding, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction = direction
+        self.move_direction = move_direction
         self.back_direction = None
         self.type = type
         self.fromTo = fromTo
@@ -3213,29 +3215,28 @@ class CharaCheckCondition(Character):
                                             4 + (self.frame // self.animcycle  % 4)]
         
     def set_checked(self):
-        p = random.random()
         self.avoiding = True
         self.moving = True
-        if self.initial_direction in (DOWN, UP):
-            if p < 0.5:
-                self.vx, self.vy = self.speed, 0
-                self.direction = RIGHT
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y, "avoiding_dir": LEFT}
-            else:
-                self.vx, self.vy = -self.speed, 0
-                self.direction = LEFT
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y, "avoiding_dir": RIGHT}
+        if self.move_direction == DOWN:
+            self.vx, self.vy = 0, self.speed
+            self.direction = DOWN
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1, "avoiding_dir": UP}
+        elif self.move_direction == LEFT:
+            self.vx, self.vy = -self.speed, 0
+            self.direction = LEFT
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y, "avoiding_dir": RIGHT}
+        elif self.move_direction == RIGHT:
+            self.vx, self.vy = self.speed, 0
+            self.direction = RIGHT
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y, "avoiding_dir": LEFT}
         else:
-            if p < 0.5:
-                self.vx, self.vy = 0, self.speed
-                self.direction = DOWN
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1, "avoiding_dir": UP}
-            else:
-                self.vx, self.vy = 0, -self.speed
-                self.direction = UP
-                return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1, "avoiding_dir": DOWN}
+            self.vx, self.vy = 0, -self.speed
+            self.direction = UP
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1, "avoiding_dir": DOWN}
 
     def back_to_init_pos(self):
+        self.avoiding = False
+        self.moving = True
         if self.direction == DOWN:
             self.vx, self.vy = 0, self.speed
         elif self.direction == LEFT:
@@ -3244,8 +3245,6 @@ class CharaCheckCondition(Character):
             self.vx, self.vy = self.speed, 0
         else:
             self.vx, self.vy = 0, -self.speed
-        self.avoiding = False
-        self.moving = True
                                                                                                                                                              
 #   ,ad8888ba,  88                                           88888888888                                                                   88                          
 #  d8"'    `"8b 88                                           88                                                                            ""                          

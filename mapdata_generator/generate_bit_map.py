@@ -356,7 +356,19 @@ class MapInfo:
         for chara_checkCondition in self.chara_checkConditions:
             color = random.choice(universal_colors) if isUniversal else random.randint(15102,15160)
             func_warp, converted_fromTo = self.line_track_transformer(chara_checkCondition.line_track, chara_checkCondition.func)
-            characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir,
+            # y, x 
+            # d, l, r, u = 0, 1, 2, 3
+            move_dir_list = []
+            if bitMap[chara_checkCondition.pos[0] + 1, chara_checkCondition.pos[1]] not in [390, 43, 402, 31]:
+                move_dir_list.append(0)
+            if bitMap[chara_checkCondition.pos[0], chara_checkCondition.pos[1] - 1] not in [390, 43, 402, 31]:
+                move_dir_list.append(1)
+            if bitMap[chara_checkCondition.pos[0], chara_checkCondition.pos[1] + 1] not in [390, 43, 402, 31]:
+                move_dir_list.append(2)
+            if bitMap[chara_checkCondition.pos[0] - 1, chara_checkCondition.pos[1]] not in [390, 43, 402, 31]:
+                move_dir_list.append(3)
+            move_dir = random.choice(move_dir_list)
+            characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, "funcWarp": func_warp, "exps": chara_checkCondition.exps})
 
         for chara_expression in self.chara_expressions.values():
