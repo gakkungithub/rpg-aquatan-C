@@ -843,8 +843,8 @@ class GenBitMap:
                                 indexNodeID, _ = indexNodeID_list[0]
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
-                    arrContExp_dict = self.setArrayTreasure(arrContNodeID_list)
-                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_dict, "indexes": index_comments}, var_type, self.func_name)
+                    arrContExp_values = self.setArrayTreasure(arrContNodeID_list) if len(arrContNodeID_list) else ['初期化されてません']
+                    self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_values, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
                     memberExp_dict = {}

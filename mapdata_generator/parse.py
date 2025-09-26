@@ -418,7 +418,6 @@ class ASTtoFlowChart:
 
         #配列
         if isArray:
-            print("check: ", cursor.spelling)
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None
@@ -513,7 +512,7 @@ class ASTtoFlowChart:
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
-                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], [], cursor.location.line)
+                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
                             # 構造体のメンバの型を取得する
                             self.varNode_info[f'"{memberNodeID}"'] = member[1]
@@ -546,7 +545,7 @@ class ASTtoFlowChart:
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], [], cursor.location.line)
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)

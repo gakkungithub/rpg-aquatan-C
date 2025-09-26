@@ -397,12 +397,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             inst = target.ReadInstructions(pc_addr, 1)[0]
             
             mnemonic = inst.GetMnemonic(target)
-
             # print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])
 
+            # 初期化がないのでステップがスキップされた変数を見る
             if len(self.skipped_lines) != 0:
                 # 変数が合致していればstepinを実行して次に進む
                 for line in self.skipped_lines:

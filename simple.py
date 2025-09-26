@@ -1783,6 +1783,9 @@ class Player(Character):
                         if itemResult.get('skip', False):
                             MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                         else:
+                            # 初期化値なしの変数でコメントを初期化する
+                            if 'values' not in itemResult:
+                                PLAYER.remove_itemvalue()
                             event.open(itemResult['item'], event.exps)
                             if (indexes := event.exps.get("indexes", None)):
                                 item_comments = "%".join(indexes)
