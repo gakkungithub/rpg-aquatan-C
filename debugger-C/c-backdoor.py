@@ -259,6 +259,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     class ProgramFinished(Exception):
         pass
 
+    class NoConnection(Exception):
+        pass
+
     class DebugManager():
         def __init__(self, process, thread):
             gvars = []
@@ -602,7 +605,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     while True:
                         # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
                         if (event := self.event_reciever()) is None:
-                            return
+                            raise NoConnection()
                         if (item := event.get('item', None)) is not None:
                             if item != var:
                                 errorCnt += 1
@@ -693,7 +696,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         vars_event = []
                         errorCnt = 0
                         if (event := self.event_reciever()) is None:
-                            return
+                            raise NoConnection()
                         while True:
                             if event.get('itemsetall', False):
                                 value_changed_dict = self.get_new_values(values_changed)

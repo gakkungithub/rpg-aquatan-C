@@ -641,6 +641,7 @@ def main():
                                 sender.send_event({"itemset": [itemname, value]})
                                 itemsetResult = sender.receive_json()
                                 if itemsetResult is not None:
+                                    PLAYER.remove_itemvalue()
                                     if itemsetResult['status'] == "ok":
                                         item.set_value(value)
                                     MSGWND.set(itemsetResult['message'])
@@ -674,6 +675,8 @@ def main():
                             sender.send_event({"stdin": f"{value}\n"})
                             stdinResult = sender.receive_json()
                             if stdinResult["status"] == "ok":
+                                # 今回更新した変数以外の計算コメントは全て消去する
+                                PLAYER.remove_itemvalue()
                                 for name, value in stdinResult["items"].items():
                                     item = PLAYER.commonItembag.find(name)
                                     if item is None:
@@ -1980,6 +1983,7 @@ class Player(Character):
                         self.move5History.pop(0)
                     move = self.moveHistory.pop()
                     self.itembag.items.pop()
+                    PLAYER.remove_itemvalue()
                     for name, value in returnResult["items"].items():
                         item = PLAYER.commonItembag.find(name)
                         if item is None:
@@ -2013,6 +2017,10 @@ class Player(Character):
                 return
         MSGWND.set(returnResult['message'])
     
+    def remove_itemvalue(self):
+        self.commonItembag.remove_item_exps()
+        self.itembag.remove_item_exps()
+
     def set_game_mode(self, type):
         if type == "item":
             self.itemNameShow = not self.itemNameShow
@@ -2440,6 +2448,7 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                        PLAYER.remove_itemvalue()
                         for name, value in skipResult["items"].items():
                             item = PLAYER.commonItembag.find(name)
                             if item is None:
@@ -2456,6 +2465,7 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                        PLAYER.remove_itemvalue()
                         for name, value in skipResult["items"].items():
                             item = PLAYER.commonItembag.find(name)
                             if item is None:
@@ -2518,6 +2528,7 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
+                        PLAYER.remove_itemvalue()
                         for name, value in skipResult["items"].items():
                             item = PLAYER.commonItembag.find(name)
                             if item is None:
@@ -3764,6 +3775,9 @@ class Item:
 
     def update_value(self, data: dict):
         self.itemvalue = ItemValue.from_dict(data)
+
+    def remove_itemvalue_exps(self):
+        self.itemvalue.remove_exps()
                                                                                   
 # 88                                   8b           d8          88                         
 # 88   ,d                              `8b         d8'          88                         
@@ -3787,6 +3801,11 @@ class ItemValue:
         children_dict: dict[str | int, dict] = data["children"]
         children = {index: cls.from_dict(v, exps=exps.get(f"\"{index}\"", None) if isinstance(exps, dict) else None) for index, v in children_dict.items()}
         return cls(value, itemvalue_exps, children)
+    
+    def remove_exps(self):
+        self.exps = None
+        for itemvalue in self.children.values():
+            itemvalue.remove_exps()
 
 #                                                                             
 # 88                                      88888888ba                          
@@ -3811,10 +3830,8 @@ class ItemBag:
         inbag = self.find(item.name)
         if inbag:
             inbag.value += 1
-            #print(f"append item {item.name} + 1")
         else:
             self.items[-1].append(item)
-            #print(f"append item {item.name}")
 
     def find(self,name) -> Item | None:
         """袋からアイテムを探す"""
@@ -3829,6 +3846,12 @@ class ItemBag:
             if n.name == name:
                 return self.items[-1].pop(i)
         return None
+    
+    def remove_item_exps(self):
+        for item in self.items[-1]:
+            item.remove_itemvalue_exps()
+
+    
     
                                                                                                                                                                                                      
 #  ad88888ba                                          88888888ba                                                   I8,        8        ,8I 88                      88                                 
@@ -4363,6 +4386,7 @@ class EventSender:
                         for item in msg["removed"]:
                             PLAYER.itembag.remove(item)
                     if "values" in msg:
+                        PLAYER.remove_itemvalue()
                         for itemvalues in msg["values"]:
                             item = PLAYER.commonItembag.find(itemvalues["item"])
                             if item is None:
