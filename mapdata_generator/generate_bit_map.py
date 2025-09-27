@@ -830,10 +830,13 @@ class GenBitMap:
                 # 配列
                 if self.getNodeShape(toNodeID) == 'box3d':
                     arrContNodeID_list: list[str] = []
+                    is_str = False
                     index_comments = []
                     for childNodeID, childEdgeLabel in self.getNextNodeInfo(toNodeID):
                         if childEdgeLabel == 'arrCont':
                             arrContNodeID_list.append(childNodeID)
+                        elif childEdgeLabel == 'strCont':
+                            is_str = True
                         else:
                             indexNodeID = childNodeID
                             # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
@@ -843,7 +846,13 @@ class GenBitMap:
                                 indexNodeID, _ = indexNodeID_list[0]
                                 exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(indexNodeID)
                                 index_comments += exp_comments
-                    arrContExp_values = self.setArrayTreasure(arrContNodeID_list) if len(arrContNodeID_list) else ['初期化されてません']
+                    
+                    if len(arrContNodeID_list):
+                        arrContExp_values = self.setArrayTreasure(arrContNodeID_list)
+                    elif is_str:
+                        arrContExp_values = index_comments
+                    else:
+                        arrContExp_values = index_comments + ['初期化されていません']
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_values, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':

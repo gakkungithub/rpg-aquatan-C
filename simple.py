@@ -2821,6 +2821,7 @@ class ItemWindow(Window):
         
         Window.draw(self)
         offset_y = 10
+        # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = False
             if item.itemvalue.exps is not None:
@@ -2830,6 +2831,17 @@ class ItemWindow(Window):
                         self.check_exps_line = (-1, False)
                     else:
                         MSGWND.set('%'.join(item.itemvalue.exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.items_changed.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+            if item.index_exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2859,6 +2871,7 @@ class ItemWindow(Window):
             if item.itemvalue.children:
                 offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'global')
 
+        # ローカル変数
         for item in PLAYER.itembag.items[-1]:
             is_item_changed = False
             if item.itemvalue.exps is not None:
@@ -2871,6 +2884,17 @@ class ItemWindow(Window):
                         for comment in item.itemvalue.exps:
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('%'.join(comments))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.items_changed.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+            if item.index_exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('%'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -3780,6 +3804,7 @@ class Item:
         self.itemvalue = ItemValue.from_dict(data)
 
     def remove_itemvalue_exps(self):
+        self.index_exps = None
         self.itemvalue.remove_exps()
                                                                                   
 # 88                                   8b           d8          88                         
@@ -3853,9 +3878,6 @@ class ItemBag:
     def remove_item_exps(self):
         for item in self.items[-1]:
             item.remove_itemvalue_exps()
-
-    
-    
                                                                                                                                                                                                      
 #  ad88888ba                                          88888888ba                                                   I8,        8        ,8I 88                      88                                 
 # d8"     "8b ,d                                      88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 

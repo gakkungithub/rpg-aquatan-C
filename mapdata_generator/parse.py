@@ -421,10 +421,13 @@ class ASTtoFlowChart:
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None
+            cr_string = None
 
             for cr in cursor.get_children():
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
                     cr_init_members = list(cr.get_children())
+                elif cr.kind == ci.CursorKind.STRING_LITERAL:
+                    cr_string = cr
                 else:
                     cr_index_list.append(cr)
 
@@ -436,14 +439,20 @@ class ASTtoFlowChart:
                 arrContNodeID_list = self.parse_arr_contents(cr_init_members, cr_index_list, arrCont_condition_move, cursor.location.line)
                 for arrContNodeID in arrContNodeID_list:
                     self.createEdge(arrTopNodeID, arrContNodeID, "arrCont")
-
+                # 一次元配列で添字がない場合
+                if len(cr_index_list) == 0:
+                    cr_index_list.append(len(arrContNodeID_list))
+            # 文字列を格納する配列の場合
+            if cr_string is not None:
+                cr_index_list.append(len(cr.spelling)-2)
+                self.createEdge(arrTopNodeID, self.createNode(cr.spelling, 'square'), "strCont")
             nodeID = arrTopNodeID
             index_condition_move = []
             # Mcircleノードに添字の計算式または推定値を取得する
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
                     indexNodeID = self.createNode("", 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (str(cr_index), [], [], [], cursor.location.line)
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(cr_index), [], [], [f"文字列 {cr_string.spelling} の文字が1つずつ添字の小さい順から配列に格納されます", f"添字は {cr_index} が自動的に設定されます"] if cr_string else [f"添字は {cr_index} が自動的に設定されます"], cursor.location.line)
                 else:
                     indexNodeID = self.get_exp(cr_index, "Mcircle")
                     index_condition_move += self.expNode_info[f'"{indexNodeID}"'][2]
@@ -555,7 +564,6 @@ class ASTtoFlowChart:
 
     # 配列(多次元も含む)の要素を取得する
     def parse_arr_contents(self, cr_iter: list[ci.Cursor], cr_index_list: list[ci.Cursor | int], arr_condition_move: list[int | str | None], line, depth=1):
-        # print(type(cr_iter), type(cr_index_list), type(arr_condition_move), type(line))
         not_init_list_expr = True
         arrContNodeID_list = []
         # 初期化の要素を取得する
