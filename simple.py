@@ -2603,6 +2603,20 @@ class MessageWindow(Window):
                                 newItems.append(item)
                                 arg_index += 1
                             PLAYER.itembag.items.append(newItems)
+                        elif isinstance(chara, CharaExpression):
+                            if (fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skipTo"]["name"], None))
+                            else:
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skipTo"]["name"], None)]
+                            newItems = []
+                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])]) - 1
+                            arg_index = 0
+                            for name, itemInfo in skipResult["skipTo"]["items"].items():
+                                # ここの計算式の設定は後々考える
+                                item = Item(name, itemInfo["value"], chara.exps[str(chara.linenum)]["exps"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                            PLAYER.itembag.items.append(newItems)
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -3795,8 +3809,10 @@ class Item:
     def set_value(self, vals: dict):
         """値をセット"""
         path: list[str] = vals["path"]
+        print(self.name)
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
+            print(temp_itemvalue.children)
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
 

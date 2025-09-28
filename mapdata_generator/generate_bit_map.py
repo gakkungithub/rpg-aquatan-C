@@ -422,6 +422,7 @@ class MapInfo:
                 "loops": line_info.loops, 
                 "start": line_info.start, 
                 "return": line_info.returns,
+                "voidreturn": line_info.void_returns,
                 "input": self.input_lines.get(funcname, {}), 
                 "file": self.file_lines.get(funcname, {}), 
                 "memory": self.memory_lines.get(funcname, {}), 
@@ -830,13 +831,14 @@ class GenBitMap:
                 # 配列
                 if self.getNodeShape(toNodeID) == 'box3d':
                     arrContNodeID_list: list[str] = []
-                    is_str = False
+                    string_comments = None
                     index_comments = []
                     for childNodeID, childEdgeLabel in self.getNextNodeInfo(toNodeID):
                         if childEdgeLabel == 'arrCont':
                             arrContNodeID_list.append(childNodeID)
                         elif childEdgeLabel == 'strCont':
-                            is_str = True
+                            exp_str, var_refs, func_refs, exp_comments, exp_line_num = self.getExpNodeInfo(childNodeID)
+                            string_comments = exp_comments
                         else:
                             indexNodeID = childNodeID
                             # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
@@ -849,8 +851,8 @@ class GenBitMap:
                     
                     if len(arrContNodeID_list):
                         arrContExp_values = self.setArrayTreasure(arrContNodeID_list)
-                    elif is_str:
-                        arrContExp_values = index_comments
+                    elif string_comments:
+                        arrContExp_values = string_comments
                     else:
                         arrContExp_values = index_comments + ['初期化されていません']
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_values, "indexes": index_comments}, var_type, self.func_name)

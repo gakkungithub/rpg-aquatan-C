@@ -53,6 +53,7 @@ class LineInfo:
         self.lines = set()
         self.loops = {}
         self.returns = {}
+        self.void_returns = []
         self.start = 0
 
     def setLine(self, line: int):
@@ -63,6 +64,9 @@ class LineInfo:
 
     def setReturn(self, line: int, funcs: list[str]):
         self.returns[line] = funcs
+
+    def setVoidReturn(self, line: int):
+        self.void_returns.append(line)
 
     def setStart(self, line: int, not_to_set: bool = False):
         if self.start or not_to_set:
@@ -199,14 +203,14 @@ class ASTtoFlowChart:
                     self.line_info_dict[self.scanning_func].setStart(cr.extent.end.line)
                     self.func_info_dict[self.scanning_func].setStart(cr.extent.end.line)
                     self.line_info_dict[self.scanning_func].setLine(cr.extent.end.line)
+                    self.line_info_dict[self.scanning_func].setVoidReturn(cr.extent.end.line)
                     returnNodeID = self.createNode(str(cr.extent.end.line), 'lpromoter')
                     self.createEdge(nodeID, returnNodeID)
 
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
-        cursor_stmt_list = list(cursor.get_children())
-        clen = len(cursor_stmt_list)
+        cursor_stmt_list: list[ci.Cursor] = list(cursor.get_children())
         for i, cr in enumerate(cursor_stmt_list):
             if (next_line := self.get_next_line(cursor_stmt_list[i+1:])) is None:
                 next_line = cursor.extent.end.line
@@ -382,6 +386,7 @@ class ASTtoFlowChart:
                 # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
                 self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
+                print(self.nextLines[-1])
                 self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
                 nodeID = expNodeID
         else:
@@ -421,18 +426,21 @@ class ASTtoFlowChart:
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None
-            cr_string = None
+
+            arrTopNodeID = self.createNode("", 'box3d')
+            self.createEdge(varNodeID, arrTopNodeID)
 
             for cr in cursor.get_children():
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
                     cr_init_members = list(cr.get_children())
                 elif cr.kind == ci.CursorKind.STRING_LITERAL:
-                    cr_string = cr
+                    # 文字列を格納する配列の場合
+                    indexNodeID = self.createNode(cr.spelling, 'Mcircle')
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(cr.spelling)-2), [], [], [f"文字列 {cr.spelling} の文字が1つずつ添字の小さい順から配列に格納されます", f"添字は {len(cr.spelling)-2} が自動的に設定されます"], cursor.location.line)
+                    self.createEdge(arrTopNodeID, indexNodeID, "strCont")
                 else:
                     cr_index_list.append(cr)
 
-            arrTopNodeID = self.createNode("", 'box3d')
-            self.createEdge(varNodeID, arrTopNodeID)
             arrCont_condition_move = []
             # 初期化する場合 (一番上の添字ノードはこのメソッドで作りくっつける)
             if cr_init_members is not None:
@@ -442,17 +450,14 @@ class ASTtoFlowChart:
                 # 一次元配列で添字がない場合
                 if len(cr_index_list) == 0:
                     cr_index_list.append(len(arrContNodeID_list))
-            # 文字列を格納する配列の場合
-            if cr_string is not None:
-                cr_index_list.append(len(cr.spelling)-2)
-                self.createEdge(arrTopNodeID, self.createNode(cr.spelling, 'square'), "strCont")
+
             nodeID = arrTopNodeID
             index_condition_move = []
             # Mcircleノードに添字の計算式または推定値を取得する
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
                     indexNodeID = self.createNode("", 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (str(cr_index), [], [], [f"文字列 {cr_string.spelling} の文字が1つずつ添字の小さい順から配列に格納されます", f"添字は {cr_index} が自動的に設定されます"] if cr_string else [f"添字は {cr_index} が自動的に設定されます"], cursor.location.line)
+                    self.expNode_info[f'"{indexNodeID}"'] = (str(cr_index), [], [], [f"添字は {cr_index} が自動的に設定されます"], cursor.location.line)
                 else:
                     indexNodeID = self.get_exp(cr_index, "Mcircle")
                     index_condition_move += self.expNode_info[f'"{indexNodeID}"'][2]

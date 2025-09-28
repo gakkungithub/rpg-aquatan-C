@@ -388,54 +388,52 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             self.thread = self.frame.GetThread()
             self.process = self.thread.GetProcess()
-            target = self.process.GetTarget()
-
+            # target = self.process.GetTarget()
             # 現在の命令アドレス
-            pc_addr = self.frame.GetPCAddress()
+            # pc_addr = self.frame.GetPCAddress()
 
             # 現在の命令を取得（必要な数だけ、ここでは1つ）
-            inst = target.ReadInstructions(pc_addr, 1)[0]
+            # inst = target.ReadInstructions(pc_addr, 1)[0]
             
-            mnemonic = inst.GetMnemonic(target)
+            # mnemonic = inst.GetMnemonic(target)
             # print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])
 
+            print('here4')
             # 初期化がないのでステップがスキップされた変数を見る
-            if len(self.skipped_lines) != 0:
-                # 変数が合致していればstepinを実行して次に進む
-                for line in self.skipped_lines:
-                    # skipped_varDecls = self.varsDeclLines_list.pop(line)
-                    skipped_varDecls = self.varsDeclLines_list[line]
-                    vars_event = []
-                    errorCnt = 0
-                    if (event := self.event_reciever()) is None:
-                        return
-                    while True:
-                        if (item := event.get('item', None)) is not None:
-                            if not item in skipped_varDecls:
-                                errorCnt += 1
-                                print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
-                                # 複数回入力を間違えたらヒントをあげる
-                                if errorCnt >= 3:
-                                    self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
-                                else:
-                                    self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
-                            else:
-                                vars_event.append(item)
-                                if Counter(vars_event) == Counter(skipped_varDecls):
-                                    print("you selected correct vars")
-                                    self.vars_tracker.setVarsDeclared(item)
-                                    self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
-                                    break
-                                self.vars_tracker.setVarsDeclared(item)
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
-                        else:
+            # 変数が合致していればstepinを実行して次に進む
+            for line in self.skipped_lines:
+                skipped_varDecls = self.varsDeclLines_list[line]
+                vars_event = []
+                errorCnt = 0
+                if (event := self.event_reciever()) is None:
+                    raise NoConnection()
+                while True:
+                    if (item := event.get('item', None)) is not None:
+                        if not item in skipped_varDecls:
                             errorCnt += 1
-                            self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
-                        event = self.event_reciever()
-                self.skipped_lines = []
+                            print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
+                            # 複数回入力を間違えたらヒントをあげる
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                        else:
+                            vars_event.append(item)
+                            if Counter(vars_event) == Counter(skipped_varDecls):
+                                print("you selected correct vars")
+                                self.vars_tracker.setVarsDeclared(item)
+                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
+                                break
+                            self.vars_tracker.setVarsDeclared(item)
+                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
+                    else:
+                        errorCnt += 1
+                        self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                    event = self.event_reciever()
+            self.skipped_lines = []
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["input"] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
                 self.input_check_num[(self.next_frame_num, self.next_line_number)] = (self.line_data[self.func_crnt_name]["input"][str(self.next_line_number)], -1)
@@ -636,7 +634,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     values_changed = list(set(common) - set(varsDeclLines))
                                     # その後、varsChangedをキーとしてvars_changedの変更値を取得する
                                     value_changed_dict = self.get_new_values(values_changed)
-                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "values": value_changed_dict, "status": "ok"})
+                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "values": value_changed_dict, "status": "ok"}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:
@@ -707,9 +705,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             event = self.event_reciever()
 
             # 変数が初期化されない時、スキップされるので、それも読み取る
-            target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
-
-            self.skipped_lines = target_lines
+            self.skipped_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
 
         def analyze_frame(self, backToLine: int = None):
             def check_condition(condition_type: str, fromTo: list[int], funcWarp):
@@ -771,8 +767,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         elif back_line_number == self.line_number:
                                             line_number_track.append(self.next_line_number)
                                             break
-                                        # たまにvoid型の関数限定で元の場所以上に戻ってくることがあるので、その場合に対応する
-                                        elif condition_type == "func" and back_frame_num == self.next_frame_num and back_line_number < self.next_line_number:
+                                        # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
+                                        elif condition_type == "func" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
                                             line_number_track = fromTo
                                             self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                             break
@@ -1044,6 +1040,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 self.vars_checker()
                             elif type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
+                        # void関数の戻り
+                        elif fromTo[0] == self.line_number and fromTo[0] in self.line_data[self.func_name]["voidreturn"]:
+                            self.event_sender({"message": f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
+                            self.skipped_lines = [l for l in self.skipped_lines if backToLine < int(l) < self.next_line_number]
                         else:
                             self.event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
                             return CONTINUE            
