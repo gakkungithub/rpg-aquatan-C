@@ -401,7 +401,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])
 
-            print('here4')
             # 初期化がないのでステップがスキップされた変数を見る
             # 変数が合致していればstepinを実行して次に進む
             for line in self.skipped_lines:
@@ -744,6 +743,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
+                        if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
+                            self.skipped_lines = [l for l in self.skipped_lines if fromTo[0] < int(l) < self.next_line_number]
+                            print(self.skipped_lines)
                         break
 
                     while crntFromTo:
@@ -768,9 +770,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             line_number_track.append(self.next_line_number)
                                             break
                                         # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
-                                        elif condition_type == "func" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
+                                        elif condition_type == "exp" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
                                             line_number_track = fromTo
-                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
                                             break
                                 # スキップしない
                                 else:
