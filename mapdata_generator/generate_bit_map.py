@@ -155,15 +155,6 @@ class MapInfo:
         exp_comments = expNodeInfo[3] if expNodeInfo else []
         self.chara_returns.append(CharaReturn(pos, func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
 
-    # gotoラベルによるワープゾーンの設定
-    def setGotoWarpZone(self, gotoRooms, func_name):
-        for gotoRoom in gotoRooms.values():
-            toNodeID = gotoRoom["toNodeID"]
-            fromNodeIDs = gotoRoom["fromNodeID"]
-            for fromNodeID in fromNodeIDs:
-                # pyramid mapchip = 105
-                self.setWarpZone(fromNodeID, toNodeID, func_name, 158)
-
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
     def setWarpZone(self, startNodeID: str, goalNodeID: str, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int] | None = None):
@@ -729,7 +720,12 @@ class GenBitMap:
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(nodeID, toNodeID)
         
-        self.mapInfo.setGotoWarpZone(self.gotoRoom_list[self.func_name], self.func_name)
+        for labelName, gotoRoom in self.gotoRoom_list[self.func_name].items():
+            toNodeID = gotoRoom["toNodeID"]
+            fromNodeIDs = gotoRoom["fromNodeID"]
+            for fromNodeID in fromNodeIDs:
+                print("ラベル名: ", labelName)
+                self.mapInfo.setWarpZone(fromNodeID, toNodeID, self.func_name, 158)
 
         self.mapInfo.setPlayerInitPos(nodeID)
 
@@ -753,8 +749,12 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
+                        if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                            print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が真")
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
+                        if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                            print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が偽")
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             else:
@@ -762,17 +762,27 @@ class GenBitMap:
                 for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
+                        if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                            print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が真")
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'invtriangle': # 条件文から派生するcase文なので、条件文の計算式を確かめる必要がある
+                        if (switch_exp := self.getExpNodeInfo(nodeID)) is not None:
+                            if (exp := self.getExpNodeInfo(toNodeID)) is not None:
+                                print(f"{exp[4]}行目の case {exp[0]} ({switch_exp[0]} == {exp[0]}) が真")
+                            else:
+                                print(f"{switch_exp[4]}行目の条件 {switch_exp[0]} がいずれの case にも該当しない (default)")
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
+                        if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                            print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が偽")
                         self.createPath(crntRoomID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'terminator':
+                        print("if文を終了します")
                         self.trackAST(crntRoomID, toNodeID, loopBackID)
                     else:
                         print("unknown node appeared")
@@ -792,14 +802,20 @@ class GenBitMap:
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
+                    if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                        print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が真")
                     self.createPath(nodeID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
+                    if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                        print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} が偽")
                     self.createPath(nodeID, toNodeID, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
             if nodeIDs:
-                #whileの領域に入る
+                if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                    print(f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の条件 {exp[0]} の真偽の確認に移ります!!")
+                # while or forの領域に入る (whileIn or forIn)
                 self.createPath(crntRoomID, nodeID)
                 # true
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
@@ -813,6 +829,8 @@ class GenBitMap:
         
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
+            if (exp := self.getExpNodeInfo(loopBackID)) is not None:
+                print(f"{exp[4]}行目の {self.getNodeLabel(loopBackID)}文の条件 {exp[0]} の真偽の確認に移ります!!")
             self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158)
             loopBackID = None
 
@@ -820,10 +838,10 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'terminator':
             toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
             self.createRoom(toNodeID)
+            print("if文を終了します")
             self.mapInfo.setWarpZone(crntRoomID, toNodeID, self.func_name, 158, warpNodeID=nodeID)
             nodeID = toNodeID
             crntRoomID = nodeID
-
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':
             var_type = self.varNode_info[nodeID]
@@ -890,10 +908,12 @@ class GenBitMap:
             if nodeID in self.mapInfo.condition_line_trackers.tracks:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
+                    print('continue')
                     self.mapInfo.setWarpZone(crntRoomID, loopBackID, self.func_name, 158, warpNodeID=nodeID)
                     loopBackID = None
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID)
+                    print('continue')
                     self.mapInfo.setWarpZone(crntRoomID, nextNodeID, self.func_name, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID)
@@ -909,23 +929,39 @@ class GenBitMap:
         # do while構文の最初の1回
         elif self.getNodeShape(nodeID) == 'invtrapezium':
             trueNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
+            do_info = self.getNodeLabel(nodeID).split(',')
+            print(f"{do_info[1]}行目の {do_info[0]}文の1回目の処理に入ります")
             self.createRoom(trueNodeID)
             self.mapInfo.setWarpZone(crntRoomID, trueNodeID, self.func_name, 158, warpNodeID=nodeID) # 条件文の計算式を確かめる
             nodeID = trueNodeID
             crntRoomID = trueNodeID
+        # switch構文の途中のcaseまたは末尾に接続する
+        elif self.getNodeShape(nodeID) == 'invtriangle' and crntRoomID != nodeID:
+            self.createRoom(nodeID)
+            if "end" == self.getNodeLabel(nodeID):
+                print("switch文を終了します")
+            else:
+                if (exp := self.getExpNodeInfo(nodeID)) is not None:
+                    print(f"{exp[4]}行目の case {exp[0]} に進入します")
+                else:
+                    print("defaultに進入します")
+            self.mapInfo.setWarpZone(crntRoomID, nodeID, self.func_name, 158)
+            crntRoomID = nodeID
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は line: 内容 という感じで追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
             self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)
-        else:
-            # switch構文の途中のcase(breakなしでまたがる), 終点をワープゾーンで繋げる
-            # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
-            if crntRoomID != nodeID:
-                if nodeID in self.roomSize_info[self.func_name]:
-                    self.createRoom(nodeID)
+        # else:
+        #     # switch構文の途中のcase(breakなしでまたがる)または終点をワープゾーンで繋げる
+        #     # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
+        #     if crntRoomID != nodeID:
+        #         if nodeID in self.roomSize_info[self.func_name]:
+        #             print("room", self.getNodeShape(nodeID))
+        #             self.createRoom(nodeID)
 
-                if nodeID in self.mapInfo.room_info:
-                    self.mapInfo.setWarpZone(crntRoomID, nodeID, self.func_name, 158)
-                    crntRoomID = nodeID
+        #         if nodeID in self.mapInfo.room_info:
+        #             print("connect", self.getNodeShape(nodeID))
+        #             self.mapInfo.setWarpZone(crntRoomID, nodeID, self.func_name, 158)
+        #             crntRoomID = nodeID
                     
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -950,7 +986,7 @@ class GenBitMap:
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
         return attrs['shape']
     
-    def getNodeLabel(self, nodeID):
+    def getNodeLabel(self, nodeID) -> str:
         #IDが重複する場合にも対応しているのでリストを得る。ゆえに、リストの最初の要素を取得する。
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
         return attrs['label']

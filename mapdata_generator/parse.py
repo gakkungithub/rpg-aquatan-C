@@ -1056,7 +1056,7 @@ class ASTtoFlowChart:
         # --- 条件式処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
-        condNodeID = self.get_exp(cond_cursor, 'diamond')
+        condNodeID = self.get_exp(cond_cursor, 'diamond', 'if')
         self.createEdge(nodeID, condNodeID, edgeName)
 
         line_track.append(cond_cursor.location.line)
@@ -1174,7 +1174,7 @@ class ASTtoFlowChart:
         self.createRoomSizeEstimate(endNodeID)
         self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], self.nextLines[-1]])
 
-        self.createEdgeForLoop(endNodeID, condNodeID, [cond_cursor.location.line])
+        self.createEdgeForLoop(endNodeID, loop_back_node, [cond_cursor.location.line])
 
         return endNodeID
 
@@ -1183,7 +1183,7 @@ class ASTtoFlowChart:
     #Doノードの子ノードはCOMPOUNDと条件部しかなく、条件部は2つ目に読まれる
     #そこで読み込まれたノードを先頭ノードと次ノードをくっつける
     def parse_do_stmt(self, cursor, nodeID, edgeName=""):
-        initNodeID = self.createNode("", 'invtrapezium')
+        initNodeID = self.createNode(f"do,{cursor.location.line}", 'invtrapezium')
         self.createEdge(nodeID, initNodeID)
 
         trueNodeID = self.createNode("", 'circle')
@@ -1313,7 +1313,7 @@ class ASTtoFlowChart:
         return endNodeID
 
     #switch文
-    def parse_switch_stmt(self, cursor, nodeID, edgeName=""):
+    def parse_switch_stmt(self, cursor: ci.Cursor, nodeID, edgeName=""):
         #caseはbreakだけ適応させる
         #levelが0ならbreakノードを追加する。levelは繰り返し文が入ると1上がる。
         #それ以外ならloopBreaker_listに追加する。
@@ -1333,13 +1333,14 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
 
         #switchの構造はswitch(A)のようにAは必ず必要
-        condNodeID = self.get_exp(cond_cursor, 'diamond')
+        condNodeID = self.get_exp(cond_cursor, 'diamond', 'switch')
         self.createEdge(nodeID, condNodeID, edgeName)
 
         createSwitchBreakerInfo()
 
+        endNodeID = self.createNode(f"end", 'invtriangle')
+
         #switch(A){ B }の場合
-        endNodeID = self.createNode("", 'doublecircle')
         last_line = None
         if comp_exec_cursor.kind == ci.CursorKind.COMPOUND_STMT:
             isNotBreak = False
@@ -1350,7 +1351,7 @@ class ASTtoFlowChart:
                         self.line_info_dict[self.scanning_func].setLine(last_line)
                     while cr.kind == ci.CursorKind.CASE_STMT:
                         caseValue_cursor, cr = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
-                        caseNodeID = self.get_exp(caseValue_cursor, 'invtriangle')
+                        caseNodeID = self.get_exp(caseValue_cursor, 'invtriangle', 'case')
                         self.createEdge(condNodeID, caseNodeID)
                         if isNotBreak:
                             self.createEdge(nodeID, caseNodeID)
