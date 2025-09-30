@@ -1095,7 +1095,7 @@ class ASTtoFlowChart:
                 in_else_cursor = list(else_cursor.get_children())
                 if len(in_else_cursor):
                     # 後々 condNodeID による演算内容を設定する
-                    falseNodeID = self.createNode("", 'circle')
+                    falseNodeID = self.createNode("", 'doublecircle')
                     self.createEdge(condNodeID, falseNodeID, "False")
                     self.createRoomSizeEstimate(falseNodeID)
                     nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track) 
@@ -1183,7 +1183,7 @@ class ASTtoFlowChart:
     #Doノードの子ノードはCOMPOUNDと条件部しかなく、条件部は2つ目に読まれる
     #そこで読み込まれたノードを先頭ノードと次ノードをくっつける
     def parse_do_stmt(self, cursor, nodeID, edgeName=""):
-        initNodeID = self.createNode(f"do,{cursor.location.line}", 'invtrapezium')
+        initNodeID = self.createNode(f"{cursor.location.line}", 'invtrapezium')
         self.createEdge(nodeID, initNodeID)
 
         trueNodeID = self.createNode("", 'circle')

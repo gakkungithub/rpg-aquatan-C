@@ -1345,7 +1345,8 @@ class Map:
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
-        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, avoiding, self.name.lower())
+        detail = data["detail"]
+        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1372,8 +1373,9 @@ class Map:
         dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
         func = data["func"]
         funcWarp = data["funcWarp"]
+        detail = data["detail"]
         # print(funcWarp)
-        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, funcWarp, self.name.lower())
+        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, funcWarp, detail, self.name.lower())
         self.events.append(move)
 
     def create_plpath_j(self, data):
@@ -1861,7 +1863,7 @@ class Player(Character):
                 if event.status == 0:
                     if event.direction == self.direction:
                         event.open()
-                        MSGWND.set(f"{event.doorname}を開けた！")
+                        MSGWND.set(f"「{event.doorname}」への扉を開けた！")
                         if self.door is not None:
                             door = mymap.get_event(self, self.door["x"], self.door["y"])
                             if isinstance(door, SmallDoor):
@@ -3227,7 +3229,7 @@ class CharaReturn(Character):
                                                                                                                                                                                                                                                                                                                                                                                                            
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, avoiding, mapname):
+    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction = direction
         self.move_direction = move_direction
@@ -3236,8 +3238,9 @@ class CharaCheckCondition(Character):
         self.fromTo = fromTo
         self.func = func
         self.funcWarp = funcWarp
+        self.detail: str = detail
         self.avoiding = avoiding
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
 
     def update(self, mymap: Map):
         """キャラクター状態を更新する。
@@ -3337,7 +3340,7 @@ class CharaExpression(Character):
 class MoveEvent():
     """移動イベント"""
 
-    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, funcWarp, mapname):
+    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, funcWarp, detail, mapname):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.dest_map = dest_map  # 移動先マップ名
@@ -3346,9 +3349,10 @@ class MoveEvent():
         self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
         self.func = func
         self.funcWarp = funcWarp
+        self.detail: str = detail
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -3379,13 +3383,15 @@ class FuncInfoWindow(Window):
     CHECKED_COLOR = (0, 255, 0)
     TEXT_COLOR = (255, 255, 255, 255)
     LINE_COLOR = (255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
 
-    def __init__(self, funcs, warpPos):
+    def __init__(self, funcs, warpPos, detail: str | None = None):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs: list[dict] = funcs
         self.warpPos = warpPos
+        self.detail = detail
         self.show()
 
     def draw_string(self, x, y, string, color):
@@ -3411,12 +3417,15 @@ class FuncInfoWindow(Window):
         pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
 
     def draw(self, screen):
-        if not (self.is_visible and len(self.funcs)):
+        if not (self.is_visible and (len(self.funcs) or self.detail)):
             return
         
         Window.draw(self)
         x_offset = 10
         y_offset = 10
+        if self.detail:
+            self.draw_string(x_offset, y_offset, self.detail, self.CYAN)
+            y_offset += self.FONT_SIZE + 10
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
         for i, func in enumerate(self.funcs):

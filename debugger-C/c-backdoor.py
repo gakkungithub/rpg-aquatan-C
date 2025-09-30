@@ -404,12 +404,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # 初期化がないのでステップがスキップされた変数を見る
             # 変数が合致していればstepinを実行して次に進む
             for line in self.skipped_lines:
-                skipped_varDecls = self.varsDeclLines_list[line]
+                skipped_varDecls = self.varsDeclLines_list[line] & self.vars_tracker.previous_values[self.frame_num-2].keys()
+                if len(skipped_varDecls) == 0:
+                    continue
                 vars_event = []
                 errorCnt = 0
-                if (event := self.event_reciever()) is None:
-                    raise NoConnection()
                 while True:
+                    if (event := self.event_reciever()) is None:
+                        raise NoConnection()
                     if (item := event.get('item', None)) is not None:
                         if not item in skipped_varDecls:
                             errorCnt += 1
@@ -431,7 +433,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         errorCnt += 1
                         self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
-                    event = self.event_reciever()
             self.skipped_lines = []
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["input"] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
@@ -745,7 +746,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.vars_checker(condition_type == 'forFalse')
                         if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
                             self.skipped_lines = [l for l in self.skipped_lines if fromTo[0] < int(l) < self.next_line_number]
-                            print(self.skipped_lines)
                         break
 
                     while crntFromTo:
@@ -807,8 +807,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     break
                             break
                         else:
+                            print(crntFromTo)
                             self.step_conditionally(var_check=False)
-
+                            print('here')
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
                                 self.event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
