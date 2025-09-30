@@ -697,7 +697,7 @@ def main():
                         cmd = "\0"
                         atxt = "\0"
                     elif cmd == "aquatan":
-                        MSGWND.set("Make aquatan/Grate Again!!!")
+                        MSGWND.set("Make aquatan\nGrate Again!!!")
                         atxt = "\0"
                         cmd = "\0"
                     elif cmd == "down" or cmd == "left" or cmd == "right" or cmd == "up":
@@ -1790,15 +1790,15 @@ class Player(Character):
                                 PLAYER.remove_itemvalue()
                             event.open(itemResult['item'], event.exps)
                             if (indexes := event.exps.get("indexes", None)):
-                                item_comments = "%".join(indexes)
+                                item_comments = "\f".join(indexes)
                             else:
                                 item_comments = None
                             if item_comments:
-                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！%" + item_comments
+                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + item_comments
                             else:
-                                item_get_message = f"宝箱を開けた！/「{event.item}」を手に入れた！"
+                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                             if itemResult.get("undefined", False):
-                                item_get_message += f"%ただし、アイテム 「{event.item}」 は/初期化されていないので注意してください!!"
+                                item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                             if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
                                 self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
                             mymap.remove_event(event)
@@ -2342,10 +2342,10 @@ class MessageWindow(Window):
                 self.selectMsgText, self.select_type = selectMessages
             message_list = []
             if len(self.new_std_messages):
-                message_list.append("/".join(["コンソール出力:"] + self.new_std_messages))
+                message_list.append("\n".join(["コンソール出力:"] + self.new_std_messages))
                 self.new_std_messages = []
             if len(self.str_messages):
-                message_list.append("/".join(self.str_messages))
+                message_list.append("\n".join(self.str_messages))
                 self.str_messages = []
             if len(base_message):
                 message_list.append(base_message)
@@ -2360,20 +2360,20 @@ class MessageWindow(Window):
             self.text = ""
             # メッセージをセット
             p = 0
-            message = "%".join(message_list)
-            for ch in enumerate(message):
-                if ch[1] == "/":  # /は改行文字
-                    self.text += "/"
+            message = "\f".join(message_list)
+            for ch in message:
+                if ch == "\n":  # \nは改行文字
+                    self.text += "\n"
                     self.text += "　" * (self.max_chars_per_line - (p+1) % self.max_chars_per_line)
                     p = int(p//self.max_chars_per_line+1)*self.max_chars_per_line
-                elif ch[1] == "%":  # \fは改ページ文字
-                    self.text += "%"
+                elif ch == "\f":  # \fは改ページ文字
+                    self.text += "\f"
                     self.text += "　" * (self.max_chars_per_page - (p+1) % self.max_chars_per_page)
                     p = int(p//self.max_chars_per_page+1)*self.max_chars_per_page
                 else:
-                    self.text += ch[1]
+                    self.text += ch
                     p += 1
-            self.text += "$"  # 終端文字
+            # self.text += "$"  # 終端文字
             self.show()
 
     def update(self):
@@ -2384,14 +2384,16 @@ class MessageWindow(Window):
                 self.cur_pos += 1  # 1文字流す
                 # テキスト全体から見た現在位置
                 p = self.cur_page * self.max_chars_per_page + self.cur_pos
-                if self.text[p] == "/":  # 改行文字
+                if len(self.text) == p:  # 終端文字
+                    self.hide_flag = True
+                elif self.text[p] == "\n":  # 改行文字
                     self.cur_pos += self.max_chars_per_line
                     self.cur_pos = self.cur_pos//self.max_chars_per_line * self.max_chars_per_line
-                elif self.text[p] == "%":  # 改ページ文字
+                elif self.text[p] == "\f":  # 改ページ文字
                     self.cur_pos += self.max_chars_per_page
                     self.cur_pos = self.cur_pos//self.max_chars_per_page * self.max_chars_per_page
-                elif self.text[p] == "$":  # 終端文字
-                    self.hide_flag = True
+                # elif self.text[p] == "$" and len(self.text) == p + 1:  # 終端文字
+                #     self.hide_flag = True
                 # 1ページの文字数に達したら▼を表示
                 if self.cur_pos % self.max_chars_per_page == 0:
                     self.next_flag = True
@@ -2407,7 +2409,8 @@ class MessageWindow(Window):
         # 現在表示しているページのcur_posまでの文字を描画
         for i in range(self.cur_pos):
             ch = self.text[self.cur_page*self.max_chars_per_page+i]
-            if ch == "/" or ch == "%" or ch == "$":
+            # if ch == "\n" or ch == "\f" or ch == "$":
+            if ch == "\n" or ch == "\f":
                 continue  # 制御文字は表示しない
             dx = self.text_rect[0] + MessageEngine.FONT_WIDTH * \
                 (i % self.max_chars_per_line)
@@ -2846,7 +2849,7 @@ class ItemWindow(Window):
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('%'.join(item.itemvalue.exps))
+                        MSGWND.set('\f'.join(item.itemvalue.exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2857,7 +2860,7 @@ class ItemWindow(Window):
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('%'.join(item.index_exps))
+                        MSGWND.set('\f'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2899,7 +2902,7 @@ class ItemWindow(Window):
                         comments = []
                         for comment in item.itemvalue.exps:
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
-                        MSGWND.set('%'.join(comments))
+                        MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2910,7 +2913,7 @@ class ItemWindow(Window):
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('%'.join(item.index_exps))
+                        MSGWND.set('\f'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2969,7 +2972,7 @@ class ItemWindow(Window):
                         comments = []
                         for comment in itemvalue.exps:
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
-                        MSGWND.set('%'.join(comments))
+                        MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.items_changed.add(offset_y // 24)
                 item_rect = pygame.Rect(

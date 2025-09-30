@@ -415,7 +415,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if (item := event.get('item', None)) is not None:
                         if not item in skipped_varDecls:
                             errorCnt += 1
-                            print(f'your variables were incorrect!!\ncorrect variables: {skipped_varDecls}')
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
                                 self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
@@ -424,7 +423,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             vars_event.append(item)
                             if Counter(vars_event) == Counter(skipped_varDecls):
-                                print("you selected correct vars")
                                 self.vars_tracker.setVarsDeclared(item)
                                 self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
                                 break
