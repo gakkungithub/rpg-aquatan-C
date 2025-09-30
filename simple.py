@@ -1790,11 +1790,11 @@ class Player(Character):
                                 PLAYER.remove_itemvalue()
                             event.open(itemResult['item'], event.exps)
                             if (indexes := event.exps.get("indexes", None)):
-                                item_comments = "\f".join(indexes)
+                                index_comments = "\f".join(indexes)
                             else:
-                                item_comments = None
-                            if item_comments:
-                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + item_comments
+                                index_comments = None
+                            if index_comments:
+                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + index_comments
                             else:
                                 item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                             if itemResult.get("undefined", False):
@@ -1923,6 +1923,12 @@ class Player(Character):
                                     PLAYER.funcInfoWindow_chara = chara.funcInfoWindow_dict[str(chara.linenum)]
                                     MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
                                 else:
+                                    for var_path in exps["vars"]:
+                                        item = PLAYER.commonItembag.find(var_path[0])
+                                        if item is None:
+                                            item = PLAYER.itembag.find(var_path[0])
+                                        if item is not None:
+                                            item.set_exps(var_path[1:], exps["exps"])
                                     if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                                         self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
                                     chara.linenum = None
@@ -2818,7 +2824,7 @@ class ItemWindow(Window):
         self.player = player
         self.image = Map.images[self.mapchip]
         self.itemChips = ItemChips()
-        self.items_changed: set[int] = set()
+        self.item_changed_lines: set[int] = set()
         self.check_exps_line: tuple[int, bool] = (-1, False)
         self.file_buttons: dict[str, pygame.Rect] = {}
         self.file_window = FileWindow()
@@ -2851,7 +2857,7 @@ class ItemWindow(Window):
                     else:
                         MSGWND.set('\f'.join(item.itemvalue.exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 24)
+                self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
             if item.index_exps is not None:
@@ -2862,7 +2868,7 @@ class ItemWindow(Window):
                     else:
                         MSGWND.set('\f'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 24)
+                self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
 
@@ -2904,7 +2910,7 @@ class ItemWindow(Window):
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 24)
+                self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
             if item.index_exps is not None:
@@ -2915,7 +2921,7 @@ class ItemWindow(Window):
                     else:
                         MSGWND.set('\f'.join(item.index_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 24)
+                self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
 
@@ -2974,7 +2980,7 @@ class ItemWindow(Window):
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
-                self.items_changed.add(offset_y // 24)
+                self.item_changed_lines.add(offset_y // 24)
                 item_rect = pygame.Rect(
                     0,
                     offset_y,
@@ -3024,7 +3030,7 @@ class ItemWindow(Window):
                 self.file_window.toggle_is_visible(filename)
                 return True
             
-        if self.x <= pos[0] <= self.rect[2] and y_line in self.items_changed:
+        if self.x <= pos[0] <= self.rect[2] and y_line in self.item_changed_lines:
             if not MSGWND.is_visible:
                 self.check_exps_line = (y_line, False)
             return True
@@ -3821,12 +3827,17 @@ class Item:
     def set_value(self, vals: dict):
         """値をセット"""
         path: list[str] = vals["path"]
-        print(self.name)
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
-            print(temp_itemvalue.children)
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
+
+    def set_exps(self, path: list[str], comments: list[str]):
+        """計算コメントをセット"""
+        temp_itemvalue = self.itemvalue
+        while len(path) != 0:
+            temp_itemvalue = temp_itemvalue.children[path.pop(0)]
+        temp_itemvalue.exps = comments
 
     def update_value(self, data: dict):
         self.itemvalue = ItemValue.from_dict(data)

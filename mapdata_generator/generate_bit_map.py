@@ -103,7 +103,7 @@ class CharaExpression:
         self.exps_dict: dict[int, dict] = {}
     
     def addExp(self, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int]):
-        self.exps_dict[line_track[0]] = {"comments": expNodeInfo[3], "line_track": line_track}
+        self.exps_dict[line_track[0]] = {"comments": expNodeInfo[3], "var_references": expNodeInfo[1], "line_track": line_track}
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -369,7 +369,7 @@ class MapInfo:
             exps_dict = {}
             for firstLine, exps in chara_expression.exps_dict.items():
                 func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
-                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp}
+                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["var_references"]}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             
@@ -941,19 +941,7 @@ class GenBitMap:
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
             self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)
-        # else:
-        #     # switch構文の途中のcase(breakなしでまたがる)または終点をワープゾーンで繋げる
-        #     # ゆえに、条件関係なしに遷移できるワープゾーンなので条件文の計算式は確かめない
-        #     if crntRoomID != nodeID:
-        #         if nodeID in self.roomSize_info[self.func_name]:
-        #             print("room", self.getNodeShape(nodeID))
-        #             self.createRoom(nodeID)
 
-        #         if nodeID in self.mapInfo.room_info:
-        #             print("connect", self.getNodeShape(nodeID))
-        #             self.mapInfo.setWarpZone(crntRoomID, nodeID, self.func_name, 158)
-        #             crntRoomID = nodeID
-                    
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
 
