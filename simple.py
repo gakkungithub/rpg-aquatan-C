@@ -2849,13 +2849,13 @@ class ItemWindow(Window):
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = False
-            if item.itemvalue.exps is not None:
+            if item.itemvalue.declared_exps is not None:
                 is_item_changed = True
                 if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
-                        MSGWND.set('\f'.join(item.itemvalue.exps))
+                        MSGWND.set('\f'.join(item.itemvalue.declared_exps))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
@@ -2871,7 +2871,18 @@ class ItemWindow(Window):
                 self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
-
+            if item.itemvalue.changed_exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('\f'.join(item.itemvalue.changed_exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.item_changed_lines.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+                
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
             icon_x = 10
@@ -2899,14 +2910,14 @@ class ItemWindow(Window):
         # ローカル変数
         for item in PLAYER.itembag.items[-1]:
             is_item_changed = False
-            if item.itemvalue.exps is not None:
+            if item.itemvalue.declared_exps is not None:
                 is_item_changed = True
                 if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
                         comments = []
-                        for comment in item.itemvalue.exps:
+                        for comment in item.itemvalue.declared_exps:
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
@@ -2923,6 +2934,17 @@ class ItemWindow(Window):
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+            if item.itemvalue.changed_exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('\f'.join(item.itemvalue.changed_exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.item_changed_lines.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
 
             # 型に応じたアイコンを blit（描画）
@@ -2969,25 +2991,31 @@ class ItemWindow(Window):
         text_x = offset_x
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = False
-            if itemvalue.exps is not None:
+            if itemvalue.declared_exps is not None:
                 is_item_changed = True
                 if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 24:
                     if self.check_exps_line[1]:
                         self.check_exps_line = (-1, False)
                     else:
                         comments = []
-                        for comment in itemvalue.exps:
+                        for comment in itemvalue.declared_exps:
                             comments.append(comment["comment"] if isinstance(comment, dict) else comment)
                         MSGWND.set('\f'.join(comments))
                         self.check_exps_line = (self.check_exps_line[0], True)
                 self.item_changed_lines.add(offset_y // 24)
-                item_rect = pygame.Rect(
-                    0,
-                    offset_y,
-                    self.rect.width,
-                    24
-                )
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, item_rect)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE,
+                                pygame.Rect(0, offset_y, self.rect.width, 24))
+            if itemvalue.changed_exps is not None:
+                is_item_changed = True
+                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+                    if self.check_exps_line[1]:
+                        self.check_exps_line = (-1, False)
+                    else:
+                        MSGWND.set('\f'.join(itemvalue.changed_exps))
+                        self.check_exps_line = (self.check_exps_line[0], True)
+                self.item_changed_lines.add(offset_y // 24)
+                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
+                                 pygame.Rect(0, offset_y, self.rect.width, 24))
             # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
             # icon, constLock = self.itemChips.getChip(item.vartype)
             # icon_x = 10
@@ -3010,7 +3038,7 @@ class ItemWindow(Window):
             if itemvalue.value is not None:
                 self.draw_string(text_x + name_offset, offset_y+4, f"({itemvalue.value})", color)
                 
-            # if itemvalue.exps is not None:
+            # if itemvalue.declared_exps is not None:
             #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
             #     change_icon = load_image('./', 'change.png')
             #     self.surface.blit(change_icon, (text_x + name_offset + value_offset, offset_y))
@@ -3837,7 +3865,7 @@ class Item:
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
-        temp_itemvalue.exps = comments
+        temp_itemvalue.changed_exps = comments
 
     def update_value(self, data: dict):
         self.itemvalue = ItemValue.from_dict(data)
@@ -3858,7 +3886,8 @@ class Item:
 class ItemValue:
     def __init__(self, value: str | None, exps: list[str] | None, children: dict[str | int, "ItemValue"]):
         self.value = value
-        self.exps = exps
+        self.declared_exps = exps
+        self.changed_exps = None
         self.children = children
 
     @classmethod
@@ -3870,7 +3899,8 @@ class ItemValue:
         return cls(value, itemvalue_exps, children)
     
     def remove_exps(self):
-        self.exps = None
+        self.declared_exps = None
+        self.changed_exps = None
         for itemvalue in self.children.values():
             itemvalue.remove_exps()
 
