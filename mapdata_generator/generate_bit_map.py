@@ -412,7 +412,8 @@ class MapInfo:
 
         line_info_json = {funcname: 
             {
-                "lines": sorted(list(line_info.lines)), 
+                "lines": sorted(list(line_info.lines)),
+                "onelines": sorted(list(line_info.one_lines)),
                 "loops": line_info.loops, 
                 "start": line_info.start, 
                 "return": line_info.returns,

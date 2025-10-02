@@ -80,6 +80,8 @@ class VarsTracker:
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
             address = var.GetLoadAddress()
+            if depth == 0:
+                print("name: ", var.GetName(), "line: ", var.GetDeclaration().GetLine())
 
             var_previous_value = var_previous_values[name].value if name in var_previous_values else None
 
@@ -289,6 +291,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.str_check_num = {}
             self.str_info_to_send = []
             self.skipped_lines = []
+            self.crnt_oneline = None
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -381,7 +384,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         continue
                     if event.get('return', None) is not None:
                         self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
-                        print("プログラムは正常に終了しました")
                         raise ProgramFinished()
                     else:
                         self.event_sender({"message": "NG行動をしました1!!", "status": "ng"})
@@ -583,7 +585,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if self.isEnd:
                 return
             
-            # varsDeclLines = list(set(self.varsDeclLines_list.pop(str(self.line_number), [])) - set(self.vars_tracker.vars_declared[-1]))
             # これだとスコープ外の変数を拾ってしまうことがある
             # for文の条件文内の宣言だとfalseの時にself.varsDeclLines_list.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
             varsDeclLines = [] if isForFalse else [var for var in self.varsDeclLines_list.get(str(self.line_number), []) if var not in self.vars_tracker.vars_declared[-1]]
@@ -723,7 +724,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         while True:
                             if (event := self.event_reciever()) is None:
                                 break
-                            if (type := event.get('type', '')) != condition_type:
+                            if event.get('type', '') != condition_type:
                                 errorCnt += 1
                                 self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (fromTo := event.get('fromTo', None)) is None:
@@ -805,9 +806,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     break
                             break
                         else:
-                            print(crntFromTo)
                             self.step_conditionally(var_check=False)
-                            print('here')
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
                                 self.event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
@@ -947,7 +946,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
                     if len(fromTo) >= 2:
                         if fromTo[:2] == [self.line_number, self.next_line_number]:
-                            if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'exp']:
+                            if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
+                                if type == "exp" and self.line_number in self.line_data[self.func_name]["onelines"]:
+                                    if self.crnt_oneline == self.line_number:
+                                        self.event_sender({"message": "異なる行動をしようとしています12!!", "status": "ng"})
+                                        return CONTINUE
+                                    self.crnt_oneline = self.line_number
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse', 'forFalse', 'doWhileFalse']:
@@ -955,35 +959,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     skipStart = None
                                     skipEnd = None
                             elif type == 'ifEnd':
+                                if self.line_number in self.line_data[self.func_name]["onelines"]:
+                                    if self.line_number == self.crnt_oneline:
+                                        self.crnt_oneline = None
+                                    else:
+                                        self.event_sender({"message": "異なる行動をしようとしています11!!", "status": "ng"})
+                                        return CONTINUE
                                 self.event_sender({"message": "", "status": "ok"})
-                            elif type == 'switchCase':
-                                if (funcWarps := event.get('funcWarp', None)) is not None:
-                                    for funcWarp in funcWarps:
-                                        if funcWarp["name"] == self.func_crnt_name and funcWarp["line"] == self.next_line_number:
-                                            self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skip": True})
-                                            event = self.event_reciever()
-                                            if event.get('skip', False):
-                                                back_line_number = self.line_number
-                                                while 1:
-                                                    self.step_conditionally()
-                                                    if back_line_number == self.line_number:
-                                                        break
-                                                self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
-                                            else:
-                                                items = {}
-                                                for argname, argtype in funcWarp["args"].items():
-                                                    items[argname] = {"item": self.vars_tracker.getValueByVar(argname), "type": argtype}
-                                                self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "fromLine": self.line_number, "skipTo": {"name": funcWarp["name"], "x": funcWarp["x"], "y": funcWarp["y"], "items": items}})
-                                                back_line_number = self.line_number
-                                                while 1:
-                                                    if self.analyze_frame():
-                                                        continue
-                                                    if back_line_number == self.line_number:
-                                                        break
-                                else:
-                                    self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
-                                    self.vars_tracker.trackStart(self.frame)
-                                    self.vars_checker()
                             elif type == 'continue':
                                 # type == while or forの場合
                                 if self.line_number >= self.next_line_number:
@@ -1115,10 +1097,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.event_sender({"message": "NG行動をしました6!!", "status": "ng"})
                     return CONTINUE
 
-            self.step_conditionally()
+            if self.crnt_oneline is None:
+                self.step_conditionally()
 
-            # 変数は前回の処理で変更されていたら見る
-            self.vars_checker()
+                # 変数は前回の処理で変更されていたら見る
+                self.vars_checker()
 
             return PROGRESS
 

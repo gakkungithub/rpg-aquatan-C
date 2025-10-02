@@ -1222,8 +1222,13 @@ class Map:
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
                 # 一度取得したアイテムの宝箱は現れないようにする
-                if PLAYER.commonItembag.find(event["item"]) is None and PLAYER.itembag.find(event["item"]) is None:
-                    self.create_treasure_j(event)
+                item = PLAYER.commonItembag.find(event["item"])
+                if item is not None and item.pos == (self.name, event["x"], event["y"]):
+                    continue
+                item = PLAYER.itembag.find(event["item"])
+                if item is not None and item.pos == (self.name, event["x"], event["y"]):
+                    continue
+                self.create_treasure_j(event)
             elif event_type == "DOOR":  # ドア
                 self.create_door_j(event)
             elif event_type == "SDOOR":  #  小さいドア
@@ -1609,7 +1614,7 @@ class Player(Character):
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
         self.itemNameShow = False
-        self.door : SmallDoor = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
+        self.door: SmallDoor | None = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
         self.ccchara: CharaCheckCondition = None
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
@@ -1637,9 +1642,9 @@ class Player(Character):
                 self.y = self.rect.top // GS
 
                 if (self.door is not None and 
-                    ((self.door["direction"] == DOWN and (self.door["x"], self.door["y"]-1) == (self.x, self.y)) or (self.door["direction"] == UP and (self.door["x"], self.door["y"]+1) == (self.x, self.y)) or
-                     (self.door["direction"] == LEFT and (self.door["x"]+1, self.door["y"]) == (self.x, self.y)) or (self.door["direction"] == RIGHT and (self.door["x"]-1, self.door["y"]) == (self.x, self.y)))):
-                    door = mymap.get_event(self.door["x"], self.door["y"])
+                    ((self.door.direction == DOWN and (self.door.x, self.door.y-1) == (self.x, self.y)) or (self.door.direction == UP and (self.door.x, self.door.y+1) == (self.x, self.y)) or
+                     (self.door.direction == LEFT and (self.door.x+1, self.door.y) == (self.x, self.y)) or (self.door.direction == RIGHT and (self.door.x-1, self.door.y) == (self.x, self.y)))):
+                    door = mymap.get_event(self.door.x, self.door.y)
                     if isinstance(door, SmallDoor):
                         door.close()
                         self.door = None
@@ -1651,8 +1656,6 @@ class Player(Character):
                 elif isinstance(event, AutoEvent):  # AutoEvent
                     self.append_automove(event.sequence)
                     return
-                elif isinstance(event, SmallDoor):
-                    self.door = {"y": event.y, "x": event.x, "direction": event.direction}
 
         elif self.waitingMove is not None:
 #           print(f"waitingMove:{self.waitingMove}")
@@ -1748,7 +1751,7 @@ class Player(Character):
                         if chara.initial_direction != self.direction:
                             chara.back_to_init_pos()
                             self.ccchara = None
-                            door = mymap.get_event(self.door["x"], self.door["y"])
+                            door = mymap.get_event(self.door.x, self.door.y)
                             if isinstance(door, SmallDoor):
                                 door.close()
                                 self.door = None
@@ -1788,7 +1791,7 @@ class Player(Character):
                             # 初期化値なしの変数でコメントを初期化する
                             if 'values' not in itemResult:
                                 PLAYER.remove_itemvalue()
-                            event.open(itemResult['item'], event.exps)
+                            event.open(itemResult['item'], event.exps, (mymap.name, event.x, event.y))
                             if (indexes := event.exps.get("indexes", None)):
                                 index_comments = "\f".join(indexes)
                             else:
@@ -1865,10 +1868,11 @@ class Player(Character):
                         event.open()
                         MSGWND.set(f"「{event.doorname}」への扉を開けた！")
                         if self.door is not None:
-                            door = mymap.get_event(self, self.door["x"], self.door["y"])
+                            door = mymap.get_event(self.door.x, self.door.y)
                             if isinstance(door, SmallDoor):
                                 door.close()
                                 self.door = None
+                        self.door = event
                     else:
                         MSGWND.set('この方向から扉は開けられません!!')
                 else:
@@ -3562,11 +3566,11 @@ class Treasure():
         self.funcWarp = funcWarp # 関数による遷移
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
-    def open(self, data: dict, exps: list[str]):
+    def open(self, data: dict, exps: list[str], pos: tuple[str, int, int]):
         """宝箱をあける"""
         # sounds["treasure"].play()
         # アイテムを追加する処理
-        item = Item(self.item, data, exps, self.vartype)
+        item = Item(self.item, data, exps, self.vartype, pos)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3842,11 +3846,12 @@ class Object:
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
-    def __init__(self, name: str, data, exps: dict, vartype: str):
+    def __init__(self, name: str, data, exps: dict, vartype: str, pos: tuple[str, int, int]):
         self.name = str(name)
         self.index_exps = exps.get('indexes', None)
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: str = vartype
+        self.pos = pos
 
     def get_value(self):
         """値を返す"""
