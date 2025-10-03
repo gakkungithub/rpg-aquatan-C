@@ -36,7 +36,7 @@ class VarsTracker:
         # 編集済み
         self.vars_declared: list[list[tuple[str, int]]] = []
         # 編集済み
-        self.vars_removed: list[tuple[str, int]] = []
+        self.vars_removed: set[tuple[str, int]] = set()
         self.frames = ['start']
         self.track_var(gvars, self.global_previous_values, isLocal=False)
     
@@ -180,9 +180,13 @@ class VarsTracker:
                 self.track(children, var_previous_values[(name, line)].children, line, [name], 1, full_name)
     
         if isLocal and len(self.vars_declared) != 0:
-            self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
-            if len(self.vars_removed) != 0:
-                self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
+            vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
+            self.vars_removed.update(vars_removed)
+            if vars_removed:
+                self.vars_declared[-1] = list(set(self.vars_declared[-1]) - vars_removed)
+                for var_removed in vars_removed:
+                    var_previous_values.pop(var_removed)
+                
 
     def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], depth=0, prefix="") -> list[str]:
         indent = "    " * depth
@@ -503,7 +507,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])
 
-            # 初期化がないのでステップがスキップされた変数を見る
+            # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             # 変数が合致していればstepinを実行して次に進む
             for line in self.skipped_lines:
                 skipped_varDecls = list([(var, int(line)) for var in self.varsDeclLines_list[line]] & self.vars_tracker.previous_values[self.frame_num-2].keys())
@@ -520,7 +524,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             errorCnt += 1
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
-                                self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
+                                items = list(set(skipped_varDecls) - set(vars_event))
+                                self.event_sender({"message": f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!", "status": "ng"})
                             else:
                                 self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
                         else:
@@ -652,7 +657,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             func_name = frame.GetFunctionName()
 
             if func_name is None or file_name is None:
-                # state_checker(state)
                 return None
             
             frame_num = thread.GetNumFrames()
@@ -732,11 +736,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
                                     values_changed = []
                                     for varname in self.vars_tracker.vars_changed.keys():
-                                        if isinstance(varname, str):
+                                        if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines:
                                             values_changed.append(varname)
-                                        else:
-                                            if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines:
-                                                values_changed.append(varname)
                                     # その後、varsChangedをキーとしてvars_changedの変更値を取得する
                                     value_changed_dict = self.get_new_values(values_changed)
                                     self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok"}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
@@ -1235,15 +1236,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.str_info_to_send = []
                 if getLine:
                     target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
-                    skipped_vars = []
+                    vars_skipped = False
                     for target_line in target_lines:
-                        skipped_vars += list(set(self.varsDeclLines_list[target_line]) - set(self.vars_tracker.vars_declared[-1]))
+                        if list(set([(var, int(target_line)) for var in self.varsDeclLines_list[target_line]]) - set(self.vars_tracker.vars_declared[-1])):
+                            vars_skipped = True
+                            break
                     # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
-                    if len(skipped_vars) != 0 and self.line_number not in self.line_data[self.func_name]["lines"]:
+                    if vars_skipped and self.line_number not in self.line_data[self.func_name]["lines"]:
                         msgJson["line"] = int(target_lines[0])
                     else:
                         msgJson["line"] = self.next_line_number
+                        # スコープから外れて除外された変数を取り除く
                         msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
+                        self.vars_tracker.vars_removed = set()
             send_data = json.dumps(msgJson)
             conn.sendall(send_data.encode('utf-8'))
 
