@@ -1080,7 +1080,7 @@ class ASTtoFlowChart:
         # 後々 condNodeID による演算内容を設定する
         then_end = parse_if_branch_start(then_cursor, trueNodeID, line_track)
 
-        # --- trueの後の処理の終点を作る (後でif構文の終点をまとめる) ---
+        # trueの後の処理の終点を作る (後でif構文の終点をまとめる)
         trueEndNodeID = self.createNode("", 'terminator')
         end_line = then_cursor.extent.end.line
         self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd', [end_line, self.nextLines[-1]])
@@ -1116,7 +1116,8 @@ class ASTtoFlowChart:
         else:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
-            self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [cond_cursor.location.line, self.nextLines[-1]])
+            # elseがない場合は仮ifとしてcondition_moveを取得する
+            self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [cond_cursor.location.line, self.nextLines[-1]])
             self.line_info_dict[self.scanning_func].setLine(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]

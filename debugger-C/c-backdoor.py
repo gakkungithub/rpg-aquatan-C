@@ -816,7 +816,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.skipped_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
 
         def analyze_frame(self, backToLine: int = None):
-            def check_condition(condition_type: str, fromTo: list[int], funcWarp):
+            def check_condition(condition_type: str, fromTo: list[int], funcWarp: list[dict]):
                 errorCnt = 0
                 line_number_track: list[int] = fromTo[:2]
                 func_num = 0
@@ -826,6 +826,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         crntFromTo = fromTo[len(line_number_track):]
                         if len(funcWarp) != 0:
                             funcWarp = funcWarp[func_num:]
+                    elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
+                        notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+                        funcWarp = funcWarp[func_num:]
+                        while notCheckedFromTo[0] != line_number_track[-1]:
+                            if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                                func_num += 1
+                                funcWarp.pop(0)
+                            line_number_track.insert(-1, notCheckedFromTo[0])
+                            notCheckedFromTo.pop(0)
+                        crntFromTo = notCheckedFromTo[1:]
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
