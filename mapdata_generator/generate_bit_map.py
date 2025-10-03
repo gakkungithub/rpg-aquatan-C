@@ -56,7 +56,7 @@ class Treasure:
         self.func_name = func_name
 
 class FuncWarp:
-    def __init__(self, to_pos: tuple[int, int], args: dict[str, str], line: int):
+    def __init__(self, to_pos: tuple[int, int], args: dict[str, dict], line: int):
         self.to_pos = to_pos
         self.args = args
         self.line = line
@@ -741,7 +741,8 @@ class GenBitMap:
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
             # クラスの属性に値を設定
-            self.mapInfo.func_warps[self.func_name].args[self.getNodeLabel(nodeID)] = self.varNode_info[nodeID]
+            argname, argline = self.getNodeLabel(nodeID)[1:-1].split(',')
+            self.mapInfo.func_warps[self.func_name].args[argname] = {"type": self.varNode_info[nodeID], "line": argline}
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []

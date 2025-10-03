@@ -19,7 +19,7 @@ PROGRESS = 0
 
 class VarPreviousValue:
     def __init__(self, value=None, address=None):
-        self.value = value
+        self.value: str | None = value
         self.address = address
         self.children: dict[str, VarPreviousValue] = {}  # 配列の添字や構造体のメンバ
 
@@ -27,20 +27,18 @@ class VarPreviousValue:
         """LLDBのSBValueから最新値を更新"""
         self.value = value
         self.address = address
-        # 必要なら children も更新
-
-    def __repr__(self):
-        return f"<{self.name}={self.value}>"
 
 class VarsTracker:
     def __init__(self, gvars):
-        self.previous_values: list[dict[str, VarPreviousValue]] = []
-        self.global_previous_values: dict[str, VarPreviousValue] = {}
-        self.vars_changed: dict[str, list[tuple[str, ...]]] = {}
-        self.vars_declared: list[list[str]] = []
-        self.vars_removed: list[str] = []
+        self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
+        self.global_previous_values: dict[tuple[str, int], VarPreviousValue] = {}
+        self.vars_changed: dict[tuple[str, int], list[tuple[str, ...]]] = {}
+        # 編集済み
+        self.vars_declared: list[list[tuple[str, int]]] = []
+        # 編集済み
+        self.vars_removed: list[tuple[str, int]] = []
         self.frames = ['start']
-        self.track(gvars, self.global_previous_values, [])
+        self.track_var(gvars, self.global_previous_values, isLocal=False)
     
     def trackStart(self, frame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
@@ -67,12 +65,126 @@ class VarsTracker:
                             gvars.append(var)
 
         self.vars_changed = {}
-        self.track(gvars, self.global_previous_values, [], isLocal=False)
-        self.track(frame.GetVariables(True, True, True, True), self.previous_values[-1], [])
+        self.track_var(gvars, self.global_previous_values, isLocal=False)
+        self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
 
-    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], vars_path: list[str], depth=0, prefix="", isLocal=True) -> list[str]:
-        crnt_vars: list[str] = []
-        
+    def track_var(self, vars, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal=True):
+        crnt_vars: list[tuple[str, int]] = []
+
+        for var in vars:
+            name = var.GetName()
+            line = int(var.GetDeclaration().GetLine())
+            full_name = name
+            value = var.GetValue()
+            address = var.GetLoadAddress()
+
+            var_previous_value = var_previous_values[(name, line)].value if (name, line) in var_previous_values else None
+
+            if value != var_previous_value:
+                print(f"{full_name} = {value}    ← changed")
+                self.vars_changed[(name,line)] = [()]
+            else:
+                print(f"{full_name} = {value}")
+
+            if isLocal:
+                crnt_vars.append((name, line))
+
+            if (name, line) in var_previous_values:
+                var_previous_values[(name, line)].update_value(value, address)
+            else:
+                var_previous_values[(name, line)] = VarPreviousValue(value, address)
+
+            num_children = var.GetNumChildren()
+            
+            if var.GetType().IsPointerType():
+                pointee_type = var.GetType().GetPointeeType()
+                type_name = pointee_type.GetName()
+
+                try:
+                    if not pointee_type.IsPointerType():
+                        addr = int(var.GetValue(), 16)
+                        target = var.GetTarget()
+                        process = target.GetProcess()
+                        error = lldb.SBError()
+                        if type_name == "char":
+                            cstr = process.ReadCStringFromMemory(addr, 100, error)
+                            if error.Success():
+                                print(f"→ {full_name} points to string: \"{cstr}\"")
+                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                if cstr != var_previous_value:
+                                    if name in self.vars_changed:
+                                        self.vars_changed[name].append(('[0]', ))
+                                    else:
+                                        self.vars_changed[name]= [('[0]', )]
+                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(cstr, addr)
+                            else:
+                                print(f"→ {full_name} points to unreadable char*")
+                        elif type_name == "int":
+                            data = process.ReadMemory(addr, 4, error)
+                            if error.Success():
+                                val = struct.unpack("i", data)[0]
+                                print(f"→ {full_name} points to int: {val}")
+                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                if val != var_previous_value:
+                                    if (name,line) in self.vars_changed:
+                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                    else:
+                                        self.vars_changed[(name,line)]= [('[0]', )]
+                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                            else:
+                                print(f"→ {full_name} points to unreadable int*")
+                        elif type_name == "float":
+                            data = process.ReadMemory(addr, 4, error)
+                            if error.Success():
+                                val = struct.unpack("f", data)[0]
+                                print(f"→ {full_name} points to float: {val}")
+                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                if val != var_previous_value:
+                                    if (name,line) in self.vars_changed:
+                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                    else:
+                                        self.vars_changed[(name,line)]= [('[0]', )]
+                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                            else:
+                                print(f"→ {full_name} points to unreadable float*")
+                        elif type_name == "double":
+                            data = process.ReadMemory(addr, 8, error)
+                            if error.Success():
+                                val = struct.unpack("d", data)[0]
+                                print(f"→ {full_name} points to double: {val}")
+                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                if val != var_previous_value:
+                                    if (name,line) in self.vars_changed:
+                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                    else:
+                                        self.vars_changed[(name,line)]= [('[0]', )]
+                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                            else:
+                                print(f"→ {full_name} points to unreadable double*")
+                        else:
+                            # 構造体などの場合
+                            deref = var.Dereference()
+                            if deref.IsValid() and deref.GetNumChildren() > 0:
+                                print(f"→ Deref {full_name}")
+                                children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
+                                self.track(children, var_previous_values[(name, line)].children, [name], line, 1, full_name)
+                    else:
+                        children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                        self.track(children, var_previous_values[(name, line)].children, [name], line, 1, full_name)
+
+                except Exception as e:
+                    print(f"→ {full_name} deref error: {e}")
+
+            elif num_children > 0:
+                children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                self.track(children, var_previous_values[(name, line)].children, line, [name], 1, full_name)
+    
+        if isLocal and len(self.vars_declared) != 0:
+            self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
+            if len(self.vars_removed) != 0:
+                self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
+
+    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], depth=0, prefix="") -> list[str]:
         indent = "    " * depth
 
         for var in vars:
@@ -80,26 +192,17 @@ class VarsTracker:
             full_name = f"{prefix}.{name}" if prefix else name
             value = var.GetValue()
             address = var.GetLoadAddress()
-            if depth == 0:
-                print("name: ", var.GetName(), "line: ", var.GetDeclaration().GetLine())
 
             var_previous_value = var_previous_values[name].value if name in var_previous_values else None
 
             if value != var_previous_value:
                 print(f"{indent}{full_name} = {value}    ← changed")
-                if len(vars_path) == 0:
-                    self.vars_changed[name] = [()]
+                if (vars_path[0], line) in self.vars_changed:
+                    self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name))
                 else:
-                    if vars_path[0] in self.vars_changed:
-                        self.vars_changed[vars_path[0]].append((*vars_path[1:], name))
-                    else:
-                        self.vars_changed[vars_path[0]] = [(*vars_path[1:], name)]
+                    self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name)]
             else:
                 print(f"{indent}{full_name} = {value}")
-                pass
-
-            if depth == 0 and isLocal:
-                crnt_vars.append(name)
 
             if name in var_previous_values:
                 var_previous_values[name].update_value(value, address)
@@ -125,15 +228,15 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if cstr != var_previous_value:
                                     if len(vars_path) == 0:
-                                        if name in self.vars_changed:
-                                            self.vars_changed[name].append(('[0]', ))
+                                        if (name, line) in self.vars_changed:
+                                            self.vars_changed[(name, line)].append(('[0]', ))
                                         else:
-                                            self.vars_changed[name]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('[0]', )]
                                     else:
-                                        if vars_path[0] in self.vars_changed:
-                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        if (vars_path[0], line) in self.vars_changed:
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
                                         else:
-                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable char*")
@@ -145,15 +248,15 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        if name in self.vars_changed:
-                                            self.vars_changed[name].append(('[0]', ))
+                                        if (name, line) in self.vars_changed:
+                                            self.vars_changed[(name, line)].append(('[0]', ))
                                         else:
-                                            self.vars_changed[name]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('[0]', )]
                                     else:
-                                        if vars_path[0] in self.vars_changed:
-                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        if (vars_path[0], line) in self.vars_changed:
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
                                         else:
-                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")
@@ -165,15 +268,15 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        if name in self.vars_changed:
-                                            self.vars_changed[name].append(('[0]', ))
+                                        if (name, line) in self.vars_changed:
+                                            self.vars_changed[(name, line)].append(('[0]', ))
                                         else:
-                                            self.vars_changed[name]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('[0]', )]
                                     else:
-                                        if vars_path[0] in self.vars_changed:
-                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        if (vars_path[0], line) in self.vars_changed:
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
                                         else:
-                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable float*")
@@ -185,49 +288,47 @@ class VarsTracker:
                                 var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
-                                        if name in self.vars_changed:
-                                            self.vars_changed[name].append(('[0]', ))
+                                        if (name, line) in self.vars_changed:
+                                            self.vars_changed[(name, line)].append(('[0]', ))
                                         else:
-                                            self.vars_changed[name]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('[0]', )]
                                     else:
-                                        if vars_path[0] in self.vars_changed:
-                                            self.vars_changed[vars_path[0]].append((*vars_path[1:], name, '[0]'))
+                                        if (vars_path[0], line) in self.vars_changed:
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
                                         else:
-                                            self.vars_changed[vars_path[0]] = [(*vars_path[1:], name, '[0]')]
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
                                 var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable double*")
-
                         else:
                             # 構造体などの場合
                             deref = var.Dereference()
                             if deref.IsValid() and deref.GetNumChildren() > 0:
                                 print(f"{indent}→ Deref {full_name}")
                                 children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
+                                self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
                     else:
                         children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
+                        self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
 
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[name].children, vars_path + [name], depth + 1, full_name, isLocal)
-    
-        if depth == 0 and isLocal:
-            if len(self.vars_declared) != 0:
-                self.vars_removed = list(set(self.vars_declared[-1]) - set(crnt_vars))
-                if len(self.vars_removed) != 0:
-                    self.vars_declared[-1] = list(set(self.vars_declared[-1]) - set(self.vars_removed))
+                self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
 
     def getValueAll(self):
-        filtered_previous_values = {var: self.previous_values[-1][var] for var in self.vars_declared[-1] if var in self.previous_values[-1]}
-        return self.getValuesDict(filtered_previous_values)
+        return {var_key[0]: 
+                {var_key[1]: {"value": self.previous_values[-1][var_key].value, "children": self.getValuesDict(self.previous_values[-1][var_key].children)}} 
+                for var_key in self.vars_declared[-1] if var_key in self.previous_values[-1]
+                }
     
     def getGlobalValueAll(self):
-        return self.getValuesDict(self.global_previous_values) 
+        return {var_key[0]: 
+                {var_key[1]: {"value": global_previous_value.value, "children": self.getValuesDict(global_previous_value.children)}} 
+                for var_key, global_previous_value in self.global_previous_values.items()
+                }
 
     def getValuesDict(self, previous_values: dict[str, VarPreviousValue]):
         values_dict = {}
@@ -235,16 +336,15 @@ class VarsTracker:
             values_dict[varname] = {"value": previous_value.value, "children": self.getValuesDict(previous_value.children)}
         return values_dict
     
-    def getValuePartly(self, value_path: list[str]):
-        temp_previous_values_dict = self.previous_values[-1]
-        while 1:
-            varname = value_path.pop(0)
-            if len(value_path) == 0:
-                return temp_previous_values_dict[varname].value
-            temp_previous_values_dict = temp_previous_values_dict[varname].children
+    def getValuePartly(self, var_name: tuple[str, int], value_path: list[str]):
+        temp_previous_value = self.previous_values[-1][var_name]
+        while len(value_path):
+            children_name = value_path.pop(0)
+            temp_previous_value = temp_previous_value.children[children_name]
+        return temp_previous_value.value
 
     # "item": {"value": aaa, "children": {}}
-    def getValueByVar(self, varname: str, back=0):
+    def getValueByVar(self, varname: tuple[str, int], back=0):
         return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
         
     # {"value": bbb, "children": {0: {...}}...}
@@ -254,8 +354,8 @@ class VarsTracker:
             value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
         return value_var_declared_dict
     
-    def setVarsDeclared(self, var):
-        return self.vars_declared[-1].append(var)
+    def setVarsDeclared(self, name: tuple[str, int]):
+        return self.vars_declared[-1].append(name)
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]):
     class ProgramFinished(Exception):
@@ -301,7 +401,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.frame_num = 1
                     self.get_std_outputs()
                     self.event_sender({"line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
-                    self.line_number = self.line_data[self.func_name]["start"] - 1
+                    self.line_number: int = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
                     self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
             else:
@@ -406,30 +506,31 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # 初期化がないのでステップがスキップされた変数を見る
             # 変数が合致していればstepinを実行して次に進む
             for line in self.skipped_lines:
-                skipped_varDecls = self.varsDeclLines_list[line] & self.vars_tracker.previous_values[self.frame_num-2].keys()
+                skipped_varDecls = list([(var, int(line)) for var in self.varsDeclLines_list[line]] & self.vars_tracker.previous_values[self.frame_num-2].keys())
                 if len(skipped_varDecls) == 0:
                     continue
-                vars_event = []
+                vars_event: list[tuple[str, int]] = []
                 errorCnt = 0
                 while True:
                     if (event := self.event_reciever()) is None:
                         raise NoConnection()
                     if (item := event.get('item', None)) is not None:
-                        if not item in skipped_varDecls:
+                        itemname = (item["name"], item["line"])
+                        if not itemname in skipped_varDecls or itemname[1] != int(line):
                             errorCnt += 1
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
                                 self.event_sender({"message": f"ヒント: アイテム {', '.join(list(set(skipped_varDecls) - set(vars_event)))} を取得してください!!", "status": "ng"})
                             else:
-                                self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                                self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
                         else:
-                            vars_event.append(item)
+                            vars_event.append(itemname)
                             if Counter(vars_event) == Counter(skipped_varDecls):
-                                self.vars_tracker.setVarsDeclared(item)
-                                self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"})
+                                self.vars_tracker.setVarsDeclared(itemname)
+                                self.event_sender({"message": f"アイテム {itemname[0]} を正確に取得できました!!", "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"})
                                 break
-                            self.vars_tracker.setVarsDeclared(item)
-                            self.event_sender({"message": f"アイテム {item} を正確に取得できました!!", "undefined": True, "item": self.vars_tracker.getValueByVar(item), "status": "ok"}, False)
+                            self.vars_tracker.setVarsDeclared(itemname)
+                            self.event_sender({"message": f"アイテム {itemname[0]} を正確に取得できました!!", "undefined": True, "item": {"value": self.vars_tracker.getValueByVar((itemname)), "line": itemname[1]}, "status": "ok"}, False)
                     else:
                         errorCnt += 1
                         self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
@@ -540,7 +641,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             self.get_std_outputs()
 
-        def get_next_state(self):
+        def get_next_state(self) -> None | tuple[int, lldb.SBFrame, str, int, str, int]:
             state = self.process.GetState()
 
             frame = thread.GetFrameAtIndex(0)
@@ -572,13 +673,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 err_chunk = "/".join(err_chunk.rstrip("\n").split("\n"))
                 self.std_messages.append(f". [stderr]: {err_chunk}")
 
-        def get_new_values(self, values_changed):
+        def get_new_values(self, values_changed: list[tuple[str, int]]):
             value_changed_dict = []
             for value_changed in values_changed:
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
-                    value = self.vars_tracker.getValuePartly([value_changed, *value_path])
-                    value_changed_dict.append({"item": value_changed, "path": value_path, "value": value})
+                    value = self.vars_tracker.getValuePartly(value_changed, value_path)
+                    value_changed_dict.append({"item": {"name": value_changed[0], "line": value_changed[1]}, "path": value_path, "value": value})
             return value_changed_dict
         
         def vars_checker(self, isForFalse=False):
@@ -587,7 +688,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             
             # これだとスコープ外の変数を拾ってしまうことがある
             # for文の条件文内の宣言だとfalseの時にself.varsDeclLines_list.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
-            varsDeclLines = [] if isForFalse else [var for var in self.varsDeclLines_list.get(str(self.line_number), []) if var not in self.vars_tracker.vars_declared[-1]]
+            varsDeclLines = [] if isForFalse else [(var, self.line_number) for var in self.varsDeclLines_list.get(str(self.line_number), []) if (var, self.line_number) not in self.vars_tracker.vars_declared[-1]]
 
             varsDeclLines_copy = varsDeclLines[:]
 
@@ -604,13 +705,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if (event := self.event_reciever()) is None:
                             raise NoConnection()
                         if (item := event.get('item', None)) is not None:
-                            if item != var:
+                            itemname = (item["name"], item["line"])
+                            if itemname != var:
                                 errorCnt += 1
                                 # 複数回入力を間違えたらヒントをあげる
                                 if errorCnt >= 3:
-                                    self.event_sender({"message": f"ヒント: アイテム {var} を取得してください!!", "status": "ng"})
+                                    self.event_sender({"message": f"ヒント: アイテム {var[0]} を取得してください!!", "status": "ng"})
                                 else:
-                                    self.event_sender({"message": f"異なるアイテム {item} を取得しようとしています!!", "status": "ng"})
+                                    self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
                                 continue
 
                             fromTo = event['fromTo']
@@ -624,16 +726,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             if not crntFromTo:
                                 self.vars_tracker.setVarsDeclared(var)
                                 if len(varsDeclLines_copy):
-                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "status": "ok"}, False)
+                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok"}, False)
                                 else:
                                     # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
                                     # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
-                                    common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
-                                    # そして今回宣言された変数以外で値が変わった変数(の一番上の名前)を取得できる
-                                    values_changed = list(set(common) - set(varsDeclLines))
+                                    values_changed = []
+                                    for varname in self.vars_tracker.vars_changed.keys():
+                                        if isinstance(varname, str):
+                                            values_changed.append(varname)
+                                        else:
+                                            if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines:
+                                                values_changed.append(varname)
                                     # その後、varsChangedをキーとしてvars_changedの変更値を取得する
                                     value_changed_dict = self.get_new_values(values_changed)
-                                    self.event_sender({"message": f"アイテム {var} を正確に取得できました!!", "item": self.vars_tracker.getValueByVar(var), "values": value_changed_dict, "status": "ok"}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
+                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok"}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:
@@ -655,8 +761,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                                     break
                                         else:
                                             items = {}
-                                            for argname, argtype in funcWarp[0]['args'].items():
-                                                items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
+                                            for argname, arg_info in funcWarp[0]['args'].items():
+                                                items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                             self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
                                             back_line_number = self.line_number
                                             while 1:
@@ -682,8 +788,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             errorCnt += 1
                             self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
             else:
-                common = list(set(self.vars_tracker.vars_changed.keys()) & set(self.vars_tracker.vars_declared[-1]))
-                values_changed = list(set(common) - set(varsDeclLines))
+                values_changed = []
+                for varname in self.vars_tracker.vars_changed.keys():
+                    if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines:
+                        values_changed.append(varname)
 
                 # if, while True, while False, for In, for True, for False, switch Caseによる値の変化は無視できるようにする
                 if len(values_changed) != 0:
@@ -740,7 +848,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         # 条件文での値の変化はここで一括で取得する (allではなくpartlyにするかどうかは考える)
-                        self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
+                        self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
                         if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
@@ -777,8 +885,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 else:
                                     items = {}
                                     func = funcWarp.pop(0)
-                                    for argname, argtype in func["args"].items():
-                                        items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
+                                    for argname, arg_info in func["args"].items():
+                                        items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     self.step_conditionally()
@@ -813,7 +921,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
-                                    if (type := event.get('type', '')) != condition_type:
+                                    if event.get('type', '') != condition_type:
                                         errorCnt += 1
                                         self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     elif (fromTo := event.get('fromTo', None)) is None:
@@ -882,8 +990,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 else:
                                     items = {}
                                     func = funcWarp.pop(0)
-                                    for argname, argtype in func["args"].items():
-                                        items[argname] = {"value": self.vars_tracker.getValueByVar(argname), "type": argtype}
+                                    for argname, arg_info in func["args"].items():
+                                        items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     self.step_conditionally()
@@ -1135,7 +1243,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         msgJson["line"] = int(target_lines[0])
                     else:
                         msgJson["line"] = self.next_line_number
-                        msgJson["removed"] = self.vars_tracker.vars_removed
+                        msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
             send_data = json.dumps(msgJson)
             conn.sendall(send_data.encode('utf-8'))
 

@@ -173,13 +173,13 @@ class ASTtoFlowChart:
         #引数とCOMPは同じ階層にある
 
         #現在のカーソルからこの関数の戻り値と引数の型を取得するかどうかは後で考える
-        arg_list: list[tuple[str, str]] = []
+        arg_list: list[tuple[str, str, int]] = []
         #ノードがなければreturnのノードはつけないようにするため、Noneを設定しておく
 
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.PARM_DECL:
-                arg_list.append((cr.spelling, cr.type.spelling))
+                arg_list.append((cr.spelling, cr.type.spelling, cr.location.line))
             elif cr.kind == ci.CursorKind.COMPOUND_STMT:
                 func_name = cursor.spelling
                 #関数名を最初のノードの名前とする
@@ -195,8 +195,8 @@ class ASTtoFlowChart:
                 self.createRoomSizeEstimate(nodeID)
                 #引数のノードを作る
                 for arg in arg_list:
-                    argname, argtype = arg
-                    argNodeID = self.createNode(argname, 'cylinder')
+                    argname, argtype, argline = arg
+                    argNodeID = self.createNode(f"{argname},{argline}", 'cylinder')
                     self.varNode_info[f'"{argNodeID}"'] = argtype
                     self.createEdge(nodeID, argNodeID)
                     nodeID = argNodeID

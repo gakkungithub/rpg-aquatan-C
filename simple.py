@@ -340,8 +340,9 @@ def main():
         
         PLAYER.func = initialResult["firstFunc"]
 
-        for gvar_name, values in initialResult["items"].items():
-            PLAYER.commonItembag.add(Item(gvar_name, values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
+        for gvar_name, item_info in initialResult["items"].items():
+            for line, values in item_info.items():
+                PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
 
         BTNWND = ArrowButtonWindow()
         BTNWND.show()
@@ -599,58 +600,58 @@ def main():
                         MSGWND.set(atxt)
                         atxt = "\0"
                         cmd = "\0"
-                    elif cmd == "itemget":
-                        try:
-                            itemname = atxt.strip()
-                            if not itemname:
-                                raise ValueError("No item name provided.")
-                            item = PLAYER.commonItembag.find(itemname)
-                            if item is None:
-                                item = PLAYER.itembag.find(itemname)
-                            if item:
-                                if(item.get_value() != None):
-                                    MSGWND.set(f"アイテム {itemname} の値は {str(item.get_value())} です")
-                            else:
-                                MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                        except Exception:
-                            MSGWND.set("ERROR...")
-                        cmd = "\0"
-                        atxt = "\0"
-                    elif cmd == "itemset":
-                        ## suit for integer item
-                        ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
-                        try:
-                            parts = atxt.split(' ', 1)
-                            itemname = parts[0]
-                            value = parts[1]
-                            item = PLAYER.commonItembag.find(itemname)
-                            if item is None:
-                                item = PLAYER.itembag.find(itemname)
-                            if item:
-                                current_value = item.get_value()
-                                if value == "++":
-                                    value = str(int(current_value) + 1)
-                                elif value == "--":
-                                    value = str(int(current_value) - 1)
-                                # この下の計算式コマンドは j = -5 と被るので今は無視
-                                # elif value.startswith("+"):
-                                #     value = str(int(current_value) + int(value[1:]))
-                                # elif value.startswith("-"):
-                                #     value = str(int(current_value) - int(value[1:]))
+                    # elif cmd == "itemget":
+                    #     try:
+                    #         itemname = atxt.strip()
+                    #         if not itemname:
+                    #             raise ValueError("No item name provided.")
+                    #         item = PLAYER.commonItembag.find(itemname)
+                    #         if item is None:
+                    #             item = PLAYER.itembag.find(itemname)
+                    #         if item:
+                    #             if(item.get_value() != None):
+                    #                 MSGWND.set(f"アイテム {itemname} の値は {str(item.get_value())} です")
+                    #         else:
+                    #             MSGWND.set(f"アイテム {itemname} は持っていません!!")
+                    #     except Exception:
+                    #         MSGWND.set("ERROR...")
+                    #     cmd = "\0"
+                    #     atxt = "\0"
+                    # elif cmd == "itemset":
+                    #     ## suit for integer item
+                    #     ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
+                    #     try:
+                    #         parts = atxt.split(' ', 1)
+                    #         itemname = parts[0]
+                    #         value = parts[1]
+                    #         item = PLAYER.commonItembag.find(itemname)
+                    #         if item is None:
+                    #             item = PLAYER.itembag.find(itemname)
+                    #         if item:
+                    #             current_value = item.get_value()
+                    #             if value == "++":
+                    #                 value = str(int(current_value) + 1)
+                    #             elif value == "--":
+                    #                 value = str(int(current_value) - 1)
+                    #             # この下の計算式コマンドは j = -5 と被るので今は無視
+                    #             # elif value.startswith("+"):
+                    #             #     value = str(int(current_value) + int(value[1:]))
+                    #             # elif value.startswith("-"):
+                    #             #     value = str(int(current_value) - int(value[1:]))
 
-                                sender.send_event({"itemset": [itemname, value]})
-                                itemsetResult = sender.receive_json()
-                                if itemsetResult is not None:
-                                    PLAYER.remove_itemvalue()
-                                    if itemsetResult['status'] == "ok":
-                                        item.set_value(value)
-                                    MSGWND.set(itemsetResult['message'])
-                            else:
-                                MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                        except (IndexError, ValueError):
-                            MSGWND.set("ERROR...")
-                        cmd = "\0"
-                        atxt = "\0"
+                    #             sender.send_event({"itemset": [itemname, value]})
+                    #             itemsetResult = sender.receive_json()
+                    #             if itemsetResult is not None:
+                    #                 PLAYER.remove_itemvalue()
+                    #                 if itemsetResult['status'] == "ok":
+                    #                     item.set_value(value)
+                    #                 MSGWND.set(itemsetResult['message'])
+                    #         else:
+                    #             MSGWND.set(f"アイテム {itemname} は持っていません!!")
+                    #     except (IndexError, ValueError):
+                    #         MSGWND.set("ERROR...")
+                    #     cmd = "\0"
+                    #     atxt = "\0"
                     elif cmd == "itemsetall":
                         sender.send_event({"itemsetall": True})
                         itemsetAllResult = sender.receive_json()
@@ -677,12 +678,13 @@ def main():
                             if stdinResult["status"] == "ok":
                                 # 今回更新した変数以外の計算コメントは全て消去する
                                 PLAYER.remove_itemvalue()
-                                for name, value in stdinResult["items"].items():
-                                    item = PLAYER.commonItembag.find(name)
-                                    if item is None:
-                                        item = PLAYER.itembag.find(name)
-                                    if item is not None:
-                                        item.update_value(value)
+                                for name, item_info in stdinResult["items"].items():
+                                    for line, value in item_info.items():
+                                        item = PLAYER.commonItembag.find(name, int(line))
+                                        if item is None:
+                                            item = PLAYER.itembag.find(name, int(line))
+                                        if item is not None:
+                                            item.update_value(value)
                             MSGWND.set(stdinResult['message'])
                         except (IndexError, ValueError):
                             MSGWND.set("ERROR...")
@@ -1222,10 +1224,10 @@ class Map:
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
                 # 一度取得したアイテムの宝箱は現れないようにする
-                item = PLAYER.commonItembag.find(event["item"])
+                item = PLAYER.commonItembag.find(event["item"], event["fromTo"][0])
                 if item is not None and item.pos == (self.name, event["x"], event["y"]):
                     continue
-                item = PLAYER.itembag.find(event["item"])
+                item = PLAYER.itembag.find(event["item"], event["fromTo"][0])
                 if item is not None and item.pos == (self.name, event["x"], event["y"]):
                     continue
                 self.create_treasure_j(event)
@@ -1781,7 +1783,7 @@ class Player(Character):
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
             if isinstance(event, Treasure):
                 ### 宝箱を開けることの情報を送信する
-                self.sender.send_event({"item": event.item, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
+                self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 itemResult = self.sender.receive_json()
                 if itemResult is not None:
                     if itemResult['status'] == "ok":
@@ -1791,7 +1793,7 @@ class Player(Character):
                             # 初期化値なしの変数でコメントを初期化する
                             if 'values' not in itemResult:
                                 PLAYER.remove_itemvalue()
-                            event.open(itemResult['item'], event.exps, (mymap.name, event.x, event.y))
+                            event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps, (mymap.name, event.x, event.y))
                             if (indexes := event.exps.get("indexes", None)):
                                 index_comments = "\f".join(indexes)
                             else:
@@ -1927,10 +1929,16 @@ class Player(Character):
                                     PLAYER.funcInfoWindow_chara = chara.funcInfoWindow_dict[str(chara.linenum)]
                                     MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
                                 else:
+                                    item_line_info = {}
+                                    for item_value_changed in charaExpressionResult["values"]:
+                                        item_line_info[item_value_changed["item"]["name"]] = item_value_changed["item"]["line"]
+
                                     for var_path in exps["vars"]:
-                                        item = PLAYER.commonItembag.find(var_path[0])
+                                        if (line := item_line_info.get(var_path[0], None)):
+                                            continue
+                                        item = PLAYER.commonItembag.find(var_path[0], line)
                                         if item is None:
-                                            item = PLAYER.itembag.find(var_path[0])
+                                            item = PLAYER.itembag.find(var_path[0], line)
                                         if item is not None:
                                             item.set_exps(var_path[1:], exps["exps"])
                                     if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
@@ -1999,12 +2007,13 @@ class Player(Character):
                     move = self.moveHistory.pop()
                     self.itembag.items.pop()
                     PLAYER.remove_itemvalue()
-                    for name, value in returnResult["items"].items():
-                        item = PLAYER.commonItembag.find(name)
-                        if item is None:
-                            item = PLAYER.itembag.find(name)
-                        if item is not None:
-                            item.update_value(value)
+                    for name, item_info in returnResult["items"].items():
+                        for line, value in item_info.items():
+                            item = PLAYER.commonItembag.find(name, int(line))
+                            if item is None:
+                                item = PLAYER.itembag.find(name, int(line))
+                            if item is not None:
+                                item.update_value(value)
                     if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
                         # ここは辞書を使うかどうかを考える
                         checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
@@ -2467,12 +2476,13 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         PLAYER.remove_itemvalue()
-                        for name, value in skipResult["items"].items():
-                            item = PLAYER.commonItembag.find(name)
-                            if item is None:
-                                item = PLAYER.itembag.find(name)
-                            if item is not None:
-                                item.update_value(value)
+                        for name, item_info in skipResult["items"].items():
+                            for line, value in item_info.items():
+                                item = PLAYER.commonItembag.find(name, int(line))
+                                if item is None:
+                                    item = PLAYER.itembag.find(name, int(line))
+                                if item is not None:
+                                    item.update_value(value)
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
@@ -2484,12 +2494,13 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         PLAYER.remove_itemvalue()
-                        for name, value in skipResult["items"].items():
-                            item = PLAYER.commonItembag.find(name)
-                            if item is None:
-                                item = PLAYER.itembag.find(name)
-                            if item is not None:
-                                item.update_value(value)
+                        for name, item_info in skipResult["items"].items():
+                            for line, value in item_info.items():
+                                item = PLAYER.commonItembag.find(name, int(line))
+                                if item is None:
+                                    item = PLAYER.itembag.find(name, int(line))
+                                if item is not None:
+                                    item.update_value(value)
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, Treasure) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
@@ -2528,10 +2539,11 @@ class MessageWindow(Window):
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
                             arg_index = 0
-                            for name, itemInfo in skipResult["skipTo"]["items"].items():
-                                item = Item(name, itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
+                            for name, argInfo in skipResult["skipTo"]["items"].items():
+                                for line, itemInfo in argInfo.items():
+                                    item = Item(name, int(line), itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    newItems.append(item)
+                                    arg_index += 1
                             PLAYER.itembag.items.append(newItems)
                         # 暗転
                         DIMWND.setdf(200)
@@ -2547,12 +2559,13 @@ class MessageWindow(Window):
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         PLAYER.remove_itemvalue()
-                        for name, value in skipResult["items"].items():
-                            item = PLAYER.commonItembag.find(name)
-                            if item is None:
-                                item = PLAYER.itembag.find(name)
-                            if item is not None:
-                                item.update_value(value)
+                        for name, item_info in skipResult["items"].items():
+                            for line, value in item_info.items():
+                                item = PLAYER.commonItembag.find(name, int(line))
+                                if item is None:
+                                    item = PLAYER.itembag.find(name, int(line))
+                                if item is not None:
+                                    item.update_value(value)
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
@@ -2612,11 +2625,11 @@ class MessageWindow(Window):
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])]) - 1
                             arg_index = 0
-                            for name, itemInfo in skipResult["skipTo"]["items"].items():
-                                # ここの計算式の設定は後々考える
-                                item = Item(name, itemInfo["value"], chara.exps[func_num_checked]["args"][arg_index], itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
+                            for name, argInfo in skipResult["skipTo"]["items"].items():
+                                for line, itemInfo in argInfo.items():
+                                    item = Item(name, int(line), itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    newItems.append(item)
+                                    arg_index += 1
                             PLAYER.itembag.items.append(newItems)
                         elif isinstance(chara, CharaExpression):
                             if (fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
@@ -2626,11 +2639,11 @@ class MessageWindow(Window):
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])]) - 1
                             arg_index = 0
-                            for name, itemInfo in skipResult["skipTo"]["items"].items():
-                                # ここの計算式の設定は後々考える
-                                item = Item(name, itemInfo["value"], chara.exps[str(chara.linenum)]["exps"][func_num_checked]["args"][arg_index], itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
+                            for name, argInfo in skipResult["skipTo"]["items"].items():
+                                for line, itemInfo in argInfo.items():
+                                    item = Item(name, int(line), itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    newItems.append(item)
+                                    arg_index += 1
                             PLAYER.itembag.items.append(newItems)
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
@@ -3566,11 +3579,11 @@ class Treasure():
         self.funcWarp = funcWarp # 関数による遷移
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
-    def open(self, data: dict, exps: list[str], pos: tuple[str, int, int]):
+    def open(self, data: dict, line: int, exps: list[str], pos: tuple[str, int, int]):
         """宝箱をあける"""
         # sounds["treasure"].play()
         # アイテムを追加する処理
-        item = Item(self.item, data, exps, self.vartype, pos)
+        item = Item(self.item, line, data, exps, self.vartype, pos)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3846,8 +3859,9 @@ class Object:
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
-    def __init__(self, name: str, data, exps: dict, vartype: str, pos: tuple[str, int, int]):
+    def __init__(self, name: str, line: int, data: dict, exps: dict, vartype: str, pos: tuple[str, int, int]):
         self.name = str(name)
+        self.line = line
         self.index_exps = exps.get('indexes', None)
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: str = vartype
@@ -3927,25 +3941,21 @@ class ItemBag:
     def __init__(self):
         self.items: list[list[Item]] = [[]]
 
-    def add(self,item):
+    def add(self, item: Item):
         """袋にアイテムを追加"""
-        inbag = self.find(item.name)
-        if inbag:
-            inbag.value += 1
-        else:
-            self.items[-1].append(item)
+        self.items[-1].append(item)
 
-    def find(self,name) -> Item | None:
+    def find(self, name: str, line: int) -> Item | None:
         """袋からアイテムを探す"""
         for i,n in enumerate(self.items[-1]):
-            if n.name == name:
+            if n.name == name and n.line == line:
                 return n
         return None
 
-    def remove(self,name):
+    def remove(self, name: str, line: int):
         """袋からアイテムを取り除く"""
         for i,n in enumerate(self.items[-1]):
-            if n.name == name:
+            if n.name == name and n.line == line:
                 return self.items[-1].pop(i)
         return None
     
@@ -4483,13 +4493,13 @@ class EventSender:
                         self.code_window.update_code_line(msg["line"])
                     if "removed" in msg:
                         for item in msg["removed"]:
-                            PLAYER.itembag.remove(item)
+                            PLAYER.itembag.remove(item["name"], item["line"])
                     if "values" in msg:
                         PLAYER.remove_itemvalue()
                         for itemvalues in msg["values"]:
-                            item = PLAYER.commonItembag.find(itemvalues["item"])
+                            item = PLAYER.commonItembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                             if item is None:
-                                item = PLAYER.itembag.find(itemvalues["item"])
+                                item = PLAYER.itembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                             if item:
                                 item.set_value(itemvalues)
                     if "str" in msg:
