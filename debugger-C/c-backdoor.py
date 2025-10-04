@@ -719,18 +719,37 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
                                 continue
 
-                            fromTo = event['fromTo']
-                            funcWarp = event['funcWarp']
+                            fromTo: list[int] = event['fromTo']
+                            funcWarp: list[dict] = event['funcWarp']
+                            skipped_func = []
                             if fromTo[:len(line_number_track)] == line_number_track:
                                 crntFromTo = fromTo[len(line_number_track):]
                                 if len(funcWarp) != 0:
                                     funcWarp = funcWarp[func_num:]
-
+                            # orやandで確認されない関数がある場合
+                            elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
+                                notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+                                funcWarp = funcWarp[func_num:]
+                                while notCheckedFromTo[0] != line_number_track[-1]:
+                                    if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                                        skipped_func.append(funcWarp[0]["name"])
+                                        func_num += 1
+                                        funcWarp.pop(0)
+                                    line_number_track.insert(-1, notCheckedFromTo[0])
+                                    notCheckedFromTo.pop(0)
+                                crntFromTo = notCheckedFromTo[1:]
+                                # この、orやand条件文で途中の関数から確認されない場合、その確認されない関数についての情報をゲーム側に渡すことを考える
+                            # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                            else:
+                                errorCnt += 1
+                                self.event_sender({"message": f"異なる行動をしようとしています!!20", "status": "ng", "skippedFunc": skipped_func})
+                                continue
+                
                             # アイテムを正しく取得できたら次の変数に移る
                             if not crntFromTo:
                                 self.vars_tracker.setVarsDeclared(var)
                                 if len(varsDeclLines_copy):
-                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok"}, False)
+                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func}, False)
                                 else:
                                     # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
                                     # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
@@ -740,7 +759,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             values_changed.append(varname)
                                     # その後、varsChangedをキーとしてvars_changedの変更値を取得する
                                     value_changed_dict = self.get_new_values(values_changed)
-                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok"}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
+                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:
@@ -748,7 +767,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     line_number_track.append(self.next_line_number)
                                     if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
                                         func_num += 1
-                                        self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True})
+                                        self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True, "skippedFunc": skipped_func})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             back_line_number = self.line_number
@@ -775,13 +794,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                                     else:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"異なる行動をしようとしています10!!", "status": "ng"})
+                                        self.event_sender({"message": f"異なる行動をしようとしています10!!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                 # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
                                 else:
                                     self.step_conditionally(var_check=False)
                                     if crntFromTo[0] != self.line_number:
-                                        self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng"})
+                                        self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                     line_number_track.append(self.line_number)
                                     crntFromTo.pop(0)
@@ -821,25 +840,29 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 line_number_track: list[int] = fromTo[:2]
                 func_num = 0
                 while True:
+                    skipped_func = []
                     # まず、if文でどの行まで辿ったかを確かめる
                     if fromTo[:len(line_number_track)] == line_number_track:
                         crntFromTo = fromTo[len(line_number_track):]
                         if len(funcWarp) != 0:
                             funcWarp = funcWarp[func_num:]
+                    # orやandで確認されない関数がある場合
                     elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
                         notCheckedFromTo = fromTo[(len(line_number_track)-1):]
                         funcWarp = funcWarp[func_num:]
                         while notCheckedFromTo[0] != line_number_track[-1]:
                             if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                                skipped_func.append(funcWarp[0]["name"])
                                 func_num += 1
                                 funcWarp.pop(0)
                             line_number_track.insert(-1, notCheckedFromTo[0])
                             notCheckedFromTo.pop(0)
                         crntFromTo = notCheckedFromTo[1:]
+                        # この、orやand条件文で途中の関数から確認されない場合、その確認されない関数についての情報をゲーム側に渡すことを考える
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        self.event_sender({"message": f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 break
@@ -859,7 +882,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         # 条件文での値の変化はここで一括で取得する (allではなくpartlyにするかどうかは考える)
-                        self.event_sender({"message": "", "status": "ok", "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
                         if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
@@ -871,7 +894,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True})
+                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
@@ -908,11 +931,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             break
                                     line_number_track.append(self.next_line_number)
                             else:
-                                self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
+                                self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng", "skippedFunc": skipped_func})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
-                                if (type := event.get('type', '')) != condition_type:
+                                if event.get('type', '') != condition_type:
                                     errorCnt += 1
                                     self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (fromTo := event.get('fromTo', None)) is None:
@@ -928,7 +951,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             self.step_conditionally(var_check=False)
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
@@ -944,20 +967,33 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 break
                             line_number_track.append(crntFromTo.pop(0))
 
-            def check_return(fromTo: list[int], funcWarp):
+            def check_return(fromTo: list[int], funcWarp: list[dict]):
                 errorCnt = 0
                 line_number_track: list[int] = fromTo[:2]
                 func_num = 0
                 while True:
+                    skipped_func = []
                     # まず、if文でどの行まで辿ったかを確かめる
                     if fromTo[:len(line_number_track)] == line_number_track:
                         crntFromTo = fromTo[len(line_number_track):]
                         if len(funcWarp) != 0:
                             funcWarp = funcWarp[func_num:]
+                    # orやandで確認されない関数がある場合
+                    elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
+                        notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+                        funcWarp = funcWarp[func_num:]
+                        while notCheckedFromTo[0] != line_number_track[-1]:
+                            if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                                skipped_func.append(funcWarp[0]["name"])
+                                func_num += 1
+                                funcWarp.pop(0)
+                            line_number_track.insert(-1, notCheckedFromTo[0])
+                            notCheckedFromTo.pop(0)
+                        crntFromTo = notCheckedFromTo[1:]
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"ここから先は進入できません2!!", "status": "ng"})
+                        self.event_sender({"message": f"ここから先は進入できません2!!", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 break
@@ -975,7 +1011,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if not crntFromTo:
                         retVal = thread.GetStopReturnValue().GetValue()
                         self.step_conditionally()
-                        self.event_sender({"message": f"関数 {self.func_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_name, "backToLine": backToLine, "retVal": retVal})
+                        self.event_sender({"message": f"関数 {self.func_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
                         break
                     
                     while crntFromTo:
@@ -983,7 +1019,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True})
+                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
@@ -1028,10 +1064,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             break
                         else:
                             self.step_conditionally(var_check=False)
-
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": f"ここから先は進入できません3!!", "status": "ng"})
+                                self.event_sender({"message": f"ここから先は進入できません3!!", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue

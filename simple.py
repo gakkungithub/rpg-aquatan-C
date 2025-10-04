@@ -1618,7 +1618,7 @@ class Player(Character):
         self.itemNameShow = False
         self.door: SmallDoor | None = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
         self.ccchara: CharaCheckCondition = None
-        self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
+        self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
         self.std_messages = []
@@ -1785,38 +1785,45 @@ class Player(Character):
                 ### 宝箱を開けることの情報を送信する
                 self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 itemResult = self.sender.receive_json()
-                if itemResult is not None:
-                    if itemResult['status'] == "ok":
-                        if itemResult.get('skip', False):
-                            MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
-                        else:
-                            # 初期化値なしの変数でコメントを初期化する
-                            if 'values' not in itemResult:
-                                PLAYER.remove_itemvalue()
-                            event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps, (mymap.name, event.x, event.y))
-                            if (indexes := event.exps.get("indexes", None)):
-                                index_comments = "\f".join(indexes)
-                            else:
-                                index_comments = None
-                            if index_comments:
-                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + index_comments
-                            else:
-                                item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
-                            if itemResult.get("undefined", False):
-                                item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
-                            if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
-                                self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
-                            mymap.remove_event(event)
-                            MSGWND.set(item_get_message)
-                        PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
+                if itemResult is None:
+                    return False
+                if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                    for skippedFunc in itemResult["skippedFunc"]:
+                        self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
+                if itemResult['status'] == "ok":
+                    if itemResult.get('skip', False):
+                        MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                     else:
-                        MSGWND.set(itemResult['message'])
+                        # 初期化値なしの変数でコメントを初期化する
+                        if 'values' not in itemResult:
+                            PLAYER.remove_itemvalue()
+                        event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps, (mymap.name, event.x, event.y))
+                        if (indexes := event.exps.get("indexes", None)):
+                            index_comments = "\f".join(indexes)
+                        else:
+                            index_comments = None
+                        if index_comments:
+                            item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + index_comments
+                        else:
+                            item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
+                        if itemResult.get("undefined", False):
+                            item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                        if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                            self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
+                        mymap.remove_event(event)
+                        MSGWND.set(item_get_message)
+                    PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
+                else:
+                    MSGWND.set(itemResult['message'])
             elif isinstance(event, MoveEvent):
                 ### ワープゾーンに入ろうとしていることの情報を送信する (もしfuncWarpが空でなければ戻ってきた時に関数の繰り返しの処理を行うフラグを立てる)
                 self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                 moveResult = self.sender.receive_json()
                 if moveResult is None:
                     return False
+                if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                    for skippedFunc in moveResult["skippedFunc"]:
+                        self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
                 if moveResult['status'] == "ok":
                     # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
                     if moveResult.get('skipCond', False):
@@ -1921,6 +1928,9 @@ class Player(Character):
                     if (exps := chara.exps.get(str(chara.linenum), None)):
                         self.sender.send_event({"type": "exp", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
                         charaExpressionResult = self.sender.receive_json()
+                        if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
+                            for skippedFunc in charaExpressionResult["skippedFunc"]:
+                                self.checkedFuncs[(mymap.name, chara.func, exps["fromTo"][0])].append((skippedFunc, None, False))
                         if charaExpressionResult is not None:
                             if charaExpressionResult['status'] == "ng":
                                 MSGWND.set(charaExpressionResult['message'])
@@ -1963,6 +1973,9 @@ class Player(Character):
                                 self.sender.send_event({"type": chara.type, "fromTo": chara.fromTo, "funcWarp": chara.funcWarp})
                                 CCCharacterResult = self.sender.receive_json()
                                 if CCCharacterResult is not None:
+                                    if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                                        for skippedFunc in CCCharacterResult["skippedFunc"]:
+                                            self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                                     if CCCharacterResult['status'] == "ng":
                                         MSGWND.set(CCCharacterResult['message'])
                                     else:
@@ -1996,11 +2009,16 @@ class Player(Character):
         if self.moveHistory != []:
             self.sender.send_event({"type": 'return', "fromTo": fromTo + [self.moveHistory[-1]['line']], "funcWarp": chara.funcWarp})
             returnResult = self.sender.receive_json()
+            if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                for skippedFunc in returnResult["skippedFunc"]:
+                    self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
                     PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 else:
+                    if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                        self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
                     self.move5History.append({'mapname': mapname, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':True})
                     if len(self.move5History) > 5:
                         self.move5History.pop(0)
@@ -2017,7 +2035,7 @@ class Player(Character):
                     if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
                         # ここは辞書を使うかどうかを考える
                         checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
-                        PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1] = (checkedFunc[0], returnResult["retVal"])
+                        PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1] = (checkedFunc[0], returnResult["retVal"], checkedFunc[2])
                     PLAYER.func = returnResult["backToFunc"]
                     self.waitingMove = chara
                     self.waitingMove.dest_map = move['mapname']
@@ -2030,6 +2048,9 @@ class Player(Character):
         else:
             self.sender.send_event({"return": fromTo})
             returnResult = self.sender.receive_json()
+            if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                for skippedFunc in returnResult["skippedFunc"]:
+                    self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
                     PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
@@ -2504,9 +2525,9 @@ class MessageWindow(Window):
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, Treasure) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
                         # 暗転
                         DIMWND.setdf(200)
                         DIMWND.show()
@@ -2533,9 +2554,9 @@ class MessageWindow(Window):
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, Treasure) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None))
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
                             arg_index = 0
@@ -2569,9 +2590,9 @@ class MessageWindow(Window):
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
                         if PLAYER.direction == DOWN:
                             x = PLAYER.x
                             y = PLAYER.y+1
@@ -2587,23 +2608,23 @@ class MessageWindow(Window):
                         chara = fieldmap.get_chara(x, y)
                         if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
                             if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
                         elif isinstance(chara, CharaExpression):
                             if (fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skippedFunc"], skipResult["retVal"]))
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skippedFunc"], skipResult["retVal"])]
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                         if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
                             if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None))
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
+                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
                         if PLAYER.direction == DOWN:
                             x = PLAYER.x
                             y = PLAYER.y+1
@@ -2619,9 +2640,9 @@ class MessageWindow(Window):
                         chara = fieldmap.get_chara(x, y)
                         if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
                             if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skipTo"]["name"], None))
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skipTo"]["name"], None)]
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])]) - 1
                             arg_index = 0
@@ -2633,9 +2654,9 @@ class MessageWindow(Window):
                             PLAYER.itembag.items.append(newItems)
                         elif isinstance(chara, CharaExpression):
                             if (fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skipTo"]["name"], None))
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])].append((skipResult["skipTo"]["name"], None, True))
                             else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skipTo"]["name"], None)]
+                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skipTo"]["name"], None, True)]
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.exps[str(chara.linenum)]["fromTo"][0])]) - 1
                             arg_index = 0
@@ -3434,6 +3455,7 @@ class FuncInfoWindow(Window):
     """関数の遷移歴を表示するウィンドウ"""
     FONT_SIZE = 20
     NOT_CHECKED_COLOR = (255, 0, 0)
+    SKIPPED_CHECK_COLOR = (0, 0, 255)
     CHECKED_COLOR = (0, 255, 0)
     TEXT_COLOR = (255, 255, 255, 255)
     LINE_COLOR = (255, 255, 255, 255)
@@ -3483,7 +3505,7 @@ class FuncInfoWindow(Window):
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
         for i, func in enumerate(self.funcs):
-            text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) else func["name"]
+            text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) and checkedFuncs[i][2] else func["name"]
             text_width = self.font.get_rect(text).width
             # 引数に関数が含まれる場合は段落をつけて関係を描画する
             x_pos_list = []
@@ -3501,8 +3523,14 @@ class FuncInfoWindow(Window):
                 self.draw_arrow(self.surface, self.LINE_COLOR, (x_pos_start+10, y_pos_list[x_pos_index]+(self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
 
             # 関数が遷移済みかどうかで背景色を変える
-            pygame.draw.rect(self.surface, self.CHECKED_COLOR if i < len(checkedFuncs) else self.NOT_CHECKED_COLOR, 
-                             pygame.Rect(x_pos, y_pos, text_width, self.FONT_SIZE + 4))
+            if i < len(checkedFuncs):
+                if checkedFuncs[i][2]:
+                    highlightColor = self.CHECKED_COLOR
+                else:
+                    highlightColor = self.SKIPPED_CHECK_COLOR
+            else:
+                highlightColor = self.NOT_CHECKED_COLOR
+            pygame.draw.rect(self.surface, highlightColor, pygame.Rect(x_pos, y_pos, text_width, self.FONT_SIZE + 4))
             
             # 関数名を描画する
             self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
