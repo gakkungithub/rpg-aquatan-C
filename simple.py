@@ -1225,10 +1225,10 @@ class Map:
             elif event_type == "TREASURE":  # 宝箱
                 # 一度取得したアイテムの宝箱は現れないようにする
                 item = PLAYER.commonItembag.find(event["item"], event["fromTo"][0])
-                if item is not None and item.pos == (self.name, event["x"], event["y"]):
+                if item is not None:
                     continue
                 item = PLAYER.itembag.find(event["item"], event["fromTo"][0])
-                if item is not None and item.pos == (self.name, event["x"], event["y"]):
+                if item is not None:
                     continue
                 self.create_treasure_j(event)
             elif event_type == "DOOR":  # ドア
@@ -1797,7 +1797,7 @@ class Player(Character):
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
-                        event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps, (mymap.name, event.x, event.y))
+                        event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps)
                         if (indexes := event.exps.get("indexes", None)):
                             index_comments = "\f".join(indexes)
                         else:
@@ -2537,6 +2537,7 @@ class MessageWindow(Window):
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
+                        print(skipResult)
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2648,7 +2649,7 @@ class MessageWindow(Window):
                             arg_index = 0
                             for name, argInfo in skipResult["skipTo"]["items"].items():
                                 for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    item = Item(name, int(line), itemInfo["value"], chara.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
                                     newItems.append(item)
                                     arg_index += 1
                             PLAYER.itembag.items.append(newItems)
@@ -2662,7 +2663,7 @@ class MessageWindow(Window):
                             arg_index = 0
                             for name, argInfo in skipResult["skipTo"]["items"].items():
                                 for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], event.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    item = Item(name, int(line), itemInfo["value"], chara.exps[str(chara.linenum)]["exps"][func_num_checked]["args"][arg_index], itemInfo["type"])
                                     newItems.append(item)
                                     arg_index += 1
                             PLAYER.itembag.items.append(newItems)
@@ -3607,11 +3608,11 @@ class Treasure():
         self.funcWarp = funcWarp # 関数による遷移
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
-    def open(self, data: dict, line: int, exps: list[str], pos: tuple[str, int, int]):
+    def open(self, data: dict, line: int, exps: list[str]):
         """宝箱をあける"""
         # sounds["treasure"].play()
         # アイテムを追加する処理
-        item = Item(self.item, line, data, exps, self.vartype, pos)
+        item = Item(self.item, line, data, exps, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
     def draw(self, screen, offset):
@@ -3887,13 +3888,12 @@ class Object:
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
-    def __init__(self, name: str, line: int, data: dict, exps: dict, vartype: str, pos: tuple[str, int, int]):
+    def __init__(self, name: str, line: int, data: dict, exps: dict, vartype: str):
         self.name = str(name)
         self.line = line
         self.index_exps = exps.get('indexes', None)
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: str = vartype
-        self.pos = pos
 
     def get_value(self):
         """値を返す"""

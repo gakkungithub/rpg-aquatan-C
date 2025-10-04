@@ -742,7 +742,7 @@ class GenBitMap:
         if self.getNodeShape(nodeID) == 'cylinder':
             # クラスの属性に値を設定
             argname, argline = self.getNodeLabel(nodeID)[1:-1].split(',')
-            self.mapInfo.func_warps[self.func_name].args[argname] = {"type": self.varNode_info[nodeID], "line": argline}
+            self.mapInfo.func_warps[self.func_name].args[argname] = {"type": self.varNode_info[nodeID], "line": int(argline)}
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
             nodeIDs = []
