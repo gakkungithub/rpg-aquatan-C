@@ -1135,7 +1135,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                         return CONTINUE
                                     else:
                                         self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
@@ -1154,7 +1154,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             while skipStart <= self.next_line_number <= skipEnd:
                                                 # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                                 self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                         else:
                                             self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                     else:
@@ -1194,55 +1194,55 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll()})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                     else:
                                         self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                 else:
                                     self.event_sender({"message": "", "status": "ok"})
                             else:
-                                self.event_sender({"message": "", "status": "ok"})
+                                self.event_sender({"message": "", "status": "ok"}, False)
                                 self.line_loop.append(self.line_number)
                         elif type == 'doWhileIn':
                             if len(self.line_loop) and self.line_loop[-1] == self.next_line_number:
                                 # ここでスキップするかどうを確認する
                                 skipStart = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 skipEnd = self.line_number
-                                self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True}, False)
                                 event = self.event_reciever()
                                 if event.get('skip', False):
                                     while skipStart <= self.next_line_number <= skipEnd:
                                         # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                         self.step_conditionally()
-                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll()})
+                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                 else:
                                     self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                             else:
-                                self.event_sender({"message": "", "status": "ok"})
+                                self.event_sender({"message": "", "status": "ok"}, False)
                         elif type == 'forIn':
                             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
                                 skipStart = self.line_number
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True, "values": self.get_new_values(self.vars_tracker.vars_changed.keys())})
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True, "values": self.get_new_values(self.vars_tracker.vars_changed.keys()), "line": self.line_number}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll()})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                     else:
                                         self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
                                 else:
                                     self.event_sender({"message": "", "status": "ok"})
                             else:
-                                self.event_sender({"message": "", "status": "ok"})
+                                self.event_sender({"message": "", "status": "ok"}, False)
                                 self.line_loop.append(self.line_number)
                         else:
                             self.event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})

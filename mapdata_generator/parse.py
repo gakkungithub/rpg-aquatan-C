@@ -121,11 +121,9 @@ class ASTtoFlowChart:
             return True
 
         for diag in self.diag_list:
-            if diag.location.file is None:
-                continue  # 位置情報のない診断はスキップ
-
             # 同じファイルかつ、カーソルの位置が診断より後ろ（または近接）
-            if (cursor.location.file.name == diag.location.file.name and
+            if (diag.location.file is not None and
+                cursor.location.file.name == diag.location.file.name and
                 cursor.location.offset >= diag.location.offset - 1): 
                 print(f"{diag.spelling}")
                 sys.exit(-1)
@@ -202,6 +200,7 @@ class ASTtoFlowChart:
                     nodeID = argNodeID
                 nodeID = self.parse_comp_stmt(cr, nodeID)
                 self.createRoomSizeEstimate(None)
+                # void型関数
                 if nodeID:
                     # 最初行番を変更
                     self.line_info_dict[self.scanning_func].setStart(cr.extent.end.line)
@@ -241,7 +240,7 @@ class ASTtoFlowChart:
                     
                     if isArray:
                         for cr in vcr.get_children():
-                            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                            if cr.kind == ci.CursorKind.INIT_LIST_EXPR or cr.kind == ci.CursorKind.STRING_LITERAL:
                                 return cursor_stmt.location.line
                     elif len(list(vcr.get_children())):
                         return cursor_stmt.location.line
@@ -746,6 +745,7 @@ class ASTtoFlowChart:
         }
 
         cursor = self.unwrap_unexposed(cursor)
+        # 現在の計算式がマクロならその情報を返す
         if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
             return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
         exp_terms = ""
@@ -795,7 +795,7 @@ class ASTtoFlowChart:
                     sys.exit(-1)
                 cursor = array_children[0]
             exp_terms = ''.join([name_spell, *list(reversed(index_exp_terms_list))])
-            if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
+            if any(func in exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
@@ -815,104 +815,107 @@ class ASTtoFlowChart:
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
             exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments)
-        # 一項条件式
+        # 一項式
         elif cursor.kind == ci.CursorKind.UNARY_OPERATOR:
-            #(++aでいうaのカーソル)
-            idf_cursor = next(cursor.get_children())
-            self.check_cursor_error(idf_cursor)
+            # ++aでいうaのカーソル
+            operand_cursor = next(cursor.get_children())
+            self.check_cursor_error(operand_cursor)
+            # ++といった演算子
             operator = next(cursor.get_tokens())
-            term = self.parse_exp_term(idf_cursor, var_references, func_references, calc_order_comments)
-            if "malloc" in term or "realloc" in term or "fopen" in term:
+            operand_term = self.parse_exp_term(operand_cursor, var_references, func_references, calc_order_comments)
+            if any(func in operand_term for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
             # 前置(++a)
-            if operator.location.offset < idf_cursor.location.offset:
-                exp_terms = ''.join([operator.spelling, term])
+            if operator.location.offset < operand_cursor.location.offset:
+                exp_terms = ''.join([operator.spelling, operand_term])
                 comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
             # 後置(a++)
             else:
                 operator = next(reversed(list(cursor.get_tokens())))
-                exp_terms = ''.join([term, operator.spelling])
+                exp_terms = ''.join([operand_term, operator.spelling])
                 comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(expr=term)}")
-        # c言語特有の一項条件式
+            calc_order_comments.append(f"{exp_terms} : {comment.format(expr=operand_term)}")
+        # c言語特有の一項条件式 (現在はsizeofのみに対応)
         elif cursor.kind == ci.CursorKind.CXX_UNARY_EXPR:
             exp_terms = ' '.join([t.spelling for t in list(cursor.get_tokens())])
             if 'sizeof' in exp_terms:
-                children = list(cursor.get_children())
-                if children:
-                    type_str = self.unwrap_unexposed(children[0]).type.spelling
+                child_cursor_list = list(cursor.get_children())
+                # sizeof内の計算式を示すカーソルがあるならそのカーソルからsizeofの型を取得する
+                if child_cursor_list:
+                    type_str = self.unwrap_unexposed(child_cursor_list[0]).type.spelling
                 else:
                     type_str = exp_terms.removeprefix("sizeof(").removesuffix(")")
                 calc_order_comments.append(f"{exp_terms} : {get_sizeof_operator_comments(type_str)}")
         # 二項条件式(a + b)
         elif cursor.kind == ci.CursorKind.BINARY_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            first_end = exps[0].extent.end.offset
+            front_exp_terms_end = exps[0].extent.end.offset
             operator_spell = ""
             for token in cursor.get_tokens():
-                if first_end <= token.location.offset:
+                # 前項の位置を最初に超えたtokenが演算子になる
+                if front_exp_terms_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            back = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            front_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
+            back_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             # 初期化式以外の計算式では代入文だけmalloc, realloc, fopenの内容を見る
-            if operator_spell == "=" and back in ["malloc", "realloc", "fopen"]:
-                if back in ["malloc", "realloc"]:
-                    func_references[-1]["varname"] = front
+            if operator_spell == "=" and back_exp_terms in ["malloc", "realloc", "fopen"]:
+                if back_exp_terms in ["malloc", "realloc"]:
+                    func_references[-1]["varname"] = front_exp_terms
                     if "vartype" not in func_references[-1]:
                         func_references[-1]["vartype"] = self.unwrap_unexposed(exps[0]).type.spelling[:-1]
                 else:
-                    func_references[-1]["varname"] = front
-                exp_terms = back
+                    func_references[-1]["varname"] = front_exp_terms
+                exp_terms = back_exp_terms
             else:
-                exp_terms = ''.join([front, operator_spell, back])
+                exp_terms = ''.join([front_exp_terms, operator_spell, back_exp_terms])
                 comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
-                calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
+                calc_order_comments.append(f"{exp_terms} : {comment.format(left=front_exp_terms, right=back_exp_terms)}")
         # 複合代入演算子(a += b)
         elif cursor.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            first_end = exps[0].extent.end.offset
+            front_exp_terms_end = exps[0].extent.end.offset
             operator_spell = ""
             for token in cursor.get_tokens():
-                if first_end <= token.location.offset:
+                if front_exp_terms_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            front = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            back =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            exp_terms = ''.join([front, operator_spell, back])
-            if "malloc" in exp_terms or "realloc" in exp_terms or "fopen" in exp_terms:
+            front_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
+            back_exp_terms =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            exp_terms = ''.join([front_exp_terms, operator_spell, back_exp_terms])
+            if any(func in exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
             comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front, right=back)}")
+            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front_exp_terms, right=back_exp_terms)}")
         # 三項条件式(c? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
             condition = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            trueExp = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            falseExp = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
-            exp_terms = ''.join([condition, " ? ", trueExp, " : ", falseExp])
+            true_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
+            false_exp_terms = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
+            exp_terms = ''.join([condition, " ? ", true_exp_terms, " : ", false_exp_terms])
             # 対応できない関数はここでカットする
-            if ("malloc" in trueExp or "malloc" in falseExp) or ("realloc" in trueExp or "realloc" in falseExp) or ("fopen" in trueExp or "fopen" in falseExp):
+            if any(func in true_exp_terms or func in false_exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
-            calc_order_comments.append(f"{exp_terms} : {condition} が真なら {trueExp}、偽なら {falseExp} を計算します")
+            calc_order_comments.append(f"{exp_terms} : {condition} が真なら {true_exp_terms}、偽なら {false_exp_terms} を計算します")
         # キャスト型
         elif cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
             self.check_cursor_error(cr)
-            castedExp = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
-            if castedExp in ["malloc", "realloc"]:
+            casted_exp_terms = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
+            if casted_exp_terms in ["malloc", "realloc"]:
                 func_references[-1]["vartype"] = cursor.type.spelling[:-1]
-                exp_terms = castedExp
-            elif "malloc" in castedExp or "realloc" in castedExp or "fopen" in castedExp:
+                exp_terms = casted_exp_terms
+            elif any(func in casted_exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
             else:
-                exp_terms = ''.join(["(", cursor.type.spelling, ") ", castedExp])
-                castedExpType = self.unwrap_unexposed(cr).type.spelling
-                if castedExpType:
-                    calc_order_comments.append(f"{exp_terms} : {castedExp} の型 ({castedExpType}) を {cursor.type.spelling} に変換します")
+                exp_terms = ''.join(["(", cursor.type.spelling, ") ", casted_exp_terms])
+                casted_exp_type = self.unwrap_unexposed(cr).type.spelling
+                if casted_exp_type:
+                    calc_order_comments.append(f"{exp_terms} : {casted_exp_terms} の型 ({casted_exp_type}) を {cursor.type.spelling} に変換します")
                 else:
-                    calc_order_comments.append(f"{exp_terms} : {castedExp} の型を {cursor.type.spelling} に変換します")
+                    calc_order_comments.append(f"{exp_terms} : {casted_exp_terms} の型を {cursor.type.spelling} に変換します")
         return exp_terms
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
@@ -921,8 +924,7 @@ class ASTtoFlowChart:
     # そして、コメントを表示するときに既に
 
     def parse_call_expr(self, cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
-        if not (children := list(cursor.get_children())):
-            raise ValueError("CALL_EXPR に子ノードがありません")
+        children = list(cursor.get_children())
 
         # --- 関数名ノードの処理 ---
         func_cursor = self.unwrap_unexposed(children[0])
@@ -1054,8 +1056,7 @@ class ASTtoFlowChart:
                 return self.parse_stmt(cursor, parentNodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
-        if not (children := list(cursor.get_children())):
-            sys.exit(-1)
+        children = list(cursor.get_children())
 
         # --- 条件式処理 ---
         cond_cursor = children[0]
@@ -1129,8 +1130,7 @@ class ASTtoFlowChart:
     #その戻り値を現在ノードに付ける
     #現在のノードは次のノードに付ける
     def parse_while_stmt(self, cursor: ci.Cursor, nodeID, edgeName=""):
-        if not (children := list(cursor.get_children())):
-            return nodeID
+        children = list(cursor.get_children())
         
         self.line_info_dict[self.scanning_func].setLoop(cursor.extent.start.line, cursor.extent.end.line)
 

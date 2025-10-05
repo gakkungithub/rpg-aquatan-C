@@ -2498,8 +2498,21 @@ class MessageWindow(Window):
             if self.selectMsgText and self.hide_flag:
                 if self.select_type == 'loop_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
+                        startLine = self.sender.code_window.linenum
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
+                        self.sender.code_window.linenum = skipResult["finalLine"]
+                        if startLine != skipResult["finalLine"]:
+                            for event in fieldmap.events:
+                                if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
+                                    # 暗転
+                                    DIMWND.setdf(200)
+                                    DIMWND.show()
+                                    fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                                    PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
+                                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                                    skipResult['message'] += f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
+                                    break
                         self.set(skipResult['message'])
                         PLAYER.remove_itemvalue()
                         for name, item_info in skipResult["items"].items():
