@@ -390,7 +390,6 @@ class ASTtoFlowChart:
                 # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
                 self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-                print(self.nextLines[-1])
                 self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
                 nodeID = expNodeID
         else:
@@ -401,7 +400,7 @@ class ASTtoFlowChart:
             expNodeID = self.get_exp(cr, 'rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1]])
+            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1]])
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID
         return nodeID
@@ -1167,6 +1166,10 @@ class ASTtoFlowChart:
             self.line_info_dict[self.scanning_func].setOneLine(content_cursor.location.line)
             self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], content_cursor.location.line])
             body_end = self.parse_stmt(content_cursor, trueNodeID)
+
+        # 最後の行が計算式の場合、最初の行に戻るようにcondition_moveを設定し直す必要がある
+        if f'"{body_end}"' in self.condition_move and self.condition_move[f'"{body_end}"'][0] == 'exp':
+            self.condition_move[f'"{body_end}"'] = ('exp', self.condition_move[f'"{body_end}"'][1][:-1] + [cond_cursor.location.line])
 
         # --- ループを閉じる処理 ---
         loop_back_node = self.createNode("", 'parallelogram')  # 再評価への中継点
