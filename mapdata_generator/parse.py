@@ -975,7 +975,7 @@ class ASTtoFlowChart:
             return ref_spell
         # 標準関数以外なら自作関数として登録する
         else:
-            calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for arg_exp_term in arg_exp_term_list]) + 
+            calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for i, arg_exp_term in enumerate(arg_exp_term_list)]) + 
                                         "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
                                         "args": arg_calc_order_comments_list})
             # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
@@ -1117,7 +1117,7 @@ class ASTtoFlowChart:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
             # elseがない場合は仮ifとしてcondition_moveを取得する
-            self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [cond_cursor.location.line, self.nextLines[-1]])
+            self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [cond_cursor.location.line, self.nextLines[-1]] if isinstance(line_track[-1], tuple) else line_track + [self.nextLines[-1]])
             self.line_info_dict[self.scanning_func].setLine(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]

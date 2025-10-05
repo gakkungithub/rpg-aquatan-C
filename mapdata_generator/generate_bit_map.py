@@ -127,6 +127,7 @@ class MapInfo:
         self.file_lines: dict[str, dict[int, list[dict]]] = {}
         self.memory_lines: dict[str, dict[int, list[dict]]] = {}
         self.str_lines: dict[str, dict[int, list[dict]]] = {}
+        self.condition_exps: dict[int, list[dict]] = {}
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -178,6 +179,12 @@ class MapInfo:
         if warpNodeID is not None:
             c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
         exp_comments = expNodeInfo[3] if expNodeInfo else []
+        for exp_comment in exp_comments:
+            if isinstance(exp_comment, dict):
+                if c_move_fromTo[0] in self.condition_exps:
+                    self.condition_exps[c_move_fromTo[0]].append(exp_comment)
+                else:
+                    self.condition_exps[c_move_fromTo[0]] = [exp_comment]
         self.move_events.append(MoveEvent(warpFrom, warpTo, warpComment, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
@@ -205,6 +212,12 @@ class MapInfo:
 
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], detail: str, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
         exp_comments = expNodeInfo[3] if expNodeInfo else []
+        for exp_comment in exp_comments:
+            if isinstance(exp_comment, dict):
+                if condition_line_tracker[1][0] in self.condition_exps:
+                    self.condition_exps[condition_line_tracker[1][0]].append(exp_comment)
+                else:
+                    self.condition_exps[condition_line_tracker[1][0]] = [exp_comment]
         self.chara_checkConditions.append(CharaCheckCondition(func_name, pos, dir, condition_line_tracker[0], condition_line_tracker[1], detail, exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
@@ -326,7 +339,7 @@ class MapInfo:
         for move_event in self.move_events:
             func_warp, converted_fromTo = self.line_track_transformer(move_event.line_track, move_event.func_name)
             events.append({"type": "MOVE", "x": move_event.from_pos[1], "y": move_event.from_pos[0], "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
-                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": func_warp, "exps": move_event.exps, "detail": move_event.detail})
+                        "dest_map": pname, "dest_x": move_event.to_pos[1], "dest_y": move_event.to_pos[0], "func": move_event.func_name, "funcWarp": func_warp, "exps": move_event.exps, "funcExps": self.condition_exps.get(converted_fromTo[0], []), "detail": move_event.detail})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -363,7 +376,7 @@ class MapInfo:
             move_dir = random.choice(move_dir_list)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": chara_checkCondition.pos[1], "y": chara_checkCondition.pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, 
-                               "funcWarp": func_warp, "exps": chara_checkCondition.exps, "detail": chara_checkCondition.detail})
+                               "funcWarp": func_warp, "exps": chara_checkCondition.exps, "funcExps": self.condition_exps.get(converted_fromTo[0], []), "detail": chara_checkCondition.detail})
 
         for chara_expression in self.chara_expressions.values():
             exps_dict = {}

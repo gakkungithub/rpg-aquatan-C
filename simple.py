@@ -1352,8 +1352,9 @@ class Map:
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
+        funcExps = data["funcExps"]
         detail = data["detail"]
-        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, self.name.lower())
+        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, funcExps, detail, avoiding, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1379,10 +1380,12 @@ class Map:
         fromTo = data.get("fromTo", [0,0])
         dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
         func = data["func"]
+        exps = data["exps"]
         funcWarp = data["funcWarp"]
+        funcExps = data["funcExps"]
         detail = data["detail"]
         # print(funcWarp)
-        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, funcWarp, detail, self.name.lower())
+        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, exps, funcWarp, funcExps, detail, self.name.lower())
         self.events.append(move)
 
     def create_plpath_j(self, data):
@@ -2032,6 +2035,8 @@ class Player(Character):
                                 item = PLAYER.itembag.find(name, int(line))
                             if item is not None:
                                 item.update_value(value)
+                    print((move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]))
+                    print(PLAYER.checkedFuncs)
                     if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
                         # ここは辞書を使うかどうかを考える
                         checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
@@ -2537,7 +2542,6 @@ class MessageWindow(Window):
                     else:
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
-                        print(skipResult)
                         self.set(skipResult['message'])
                         # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                         dest_map = fieldmap.name
@@ -2626,6 +2630,16 @@ class MessageWindow(Window):
                                 PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
                             else:
                                 PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
+                            newItems = []
+                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
+                            arg_index = 0
+                            print(func_num_checked, event.funcExps)
+                            for name, argInfo in skipResult["skipTo"]["items"].items():
+                                for line, itemInfo in argInfo.items():
+                                    item = Item(name, int(line), itemInfo["value"], event.funcExps[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    newItems.append(item)
+                                    arg_index += 1
+                            PLAYER.itembag.items.append(newItems)
                         if PLAYER.direction == DOWN:
                             x = PLAYER.x
                             y = PLAYER.y+1
@@ -2649,7 +2663,7 @@ class MessageWindow(Window):
                             arg_index = 0
                             for name, argInfo in skipResult["skipTo"]["items"].items():
                                 for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], chara.exps["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                    item = Item(name, int(line), itemInfo["value"], chara.funcExps[func_num_checked]["args"][arg_index] if isinstance(chara, CharaCheckCondition) else chara.exps[func_num_checked]["args"][arg_index], itemInfo["type"])
                                     newItems.append(item)
                                     arg_index += 1
                             PLAYER.itembag.items.append(newItems)
@@ -3305,7 +3319,7 @@ class CharaReturn(Character):
                                                                                                                                                                                                                                                                                                                                                                                                            
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, mapname):
+    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, funcExps, detail, avoiding, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction = direction
         self.move_direction = move_direction
@@ -3314,6 +3328,7 @@ class CharaCheckCondition(Character):
         self.fromTo = fromTo
         self.func = func
         self.funcWarp = funcWarp
+        self.funcExps = funcExps
         self.detail: str = detail
         self.avoiding = avoiding
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
@@ -3415,8 +3430,7 @@ class CharaExpression(Character):
 
 class MoveEvent():
     """移動イベント"""
-
-    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, funcWarp, detail, mapname):
+    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, exps, funcWarp, funcExps, detail, mapname):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.dest_map = dest_map  # 移動先マップ名
@@ -3424,7 +3438,9 @@ class MoveEvent():
         self.fromTo: list[int | None] = fromTo
         self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
         self.func = func
+        self.exps = exps
         self.funcWarp = funcWarp
+        self.funcExps = funcExps
         self.detail: str = detail
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
