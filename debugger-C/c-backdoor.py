@@ -501,7 +501,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
-                self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)])
+                self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)].copy())
 
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             # 変数が合致していればstepinを実行して次に進む
@@ -576,7 +576,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.func_checked[-1].pop(0)
                     self.thread.StepInto()
                 else:
-                    self.func_checked.pop()
+                    self.func_checked.pop(-1)
                     self.thread.StepOut()
 
             if (next_state := self.get_next_state()):
@@ -767,26 +767,32 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             back_line_number = self.line_number
+                                            back_frame_num = self.frame_num
                                             skipped_func_name = self.func_crnt_name
+                                            self.func_checked.append([skipped_func_name])
                                             while 1:
                                                 self.step_conditionally()
-                                                if back_line_number == self.next_line_number:
+                                                if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                                     retVal = thread.GetStopReturnValue().GetValue()
                                                     self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                                if back_line_number == self.line_number:
+                                                if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                                     break
+                                            self.func_checked.pop(-1)
                                         else:
                                             items = {}
                                             for argname, arg_info in funcWarp[0]['args'].items():
                                                 items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                             self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
+                                            self.func_checked.append([self.func_crnt_name])
                                             back_line_number = self.line_number
+                                            back_frame_num = self.frame_num
                                             self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                             while 1:
                                                 if self.analyze_frame(back_line_number):
                                                     continue
-                                                if back_line_number == self.line_number:
+                                                if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                                     break
+                                            self.func_checked.pop(-1)
                                         break
                                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                                     else:
@@ -899,12 +905,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     back_line_number = self.line_number
                                     back_frame_num = self.frame_num
                                     skipped_func_name = self.func_crnt_name
+                                    self.func_checked.append([skipped_func_name])
                                     while 1:
                                         self.step_conditionally()
-                                        if back_line_number == self.next_line_number:
+                                        if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                             retVal = thread.GetStopReturnValue().GetValue()
                                             self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                        elif back_line_number == self.line_number:
+                                        elif back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             line_number_track.append(self.next_line_number)
                                             break
                                         # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
@@ -912,6 +919,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                             line_number_track = fromTo
                                             self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
                                             break
+                                    self.func_checked.pop(-1)
                                 # スキップしない
                                 else:
                                     items = {}
@@ -919,14 +927,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     for argname, arg_info in func["args"].items():
                                         items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                    self.func_checked.append([self.func_crnt_name])
                                     back_line_number = self.line_number
+                                    back_frame_num = self.frame_num
                                     self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                     self.step_conditionally()
                                     while 1:
                                         if self.analyze_frame(fromTo[0]):
                                             continue
-                                        if back_line_number == self.line_number:
+                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
+                                    self.func_checked.pop(-1)
                                     line_number_track.append(self.next_line_number)
                             else:
                                 self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng", "skippedFunc": skipped_func})
@@ -1026,13 +1037,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 if event.get('skip', False):
                                     retVal = None
                                     back_line_number = self.line_number
+                                    back_frame_num = self.frame_num
                                     skipped_func_name = self.func_crnt_name
                                     while 1:
                                         self.step_conditionally()
-                                        if back_line_number == self.next_line_number:
+                                        if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                             retVal = thread.GetStopReturnValue().GetValue()
                                             self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                        if back_line_number == self.line_number:
+                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
                                 # スキップしない
                                 else:
@@ -1042,13 +1054,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                         items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
+                                    back_frame_num = self.frame_num
                                     self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                     self.step_conditionally()
                                     while 1:
                                         if self.analyze_frame(fromTo[0]):
                                             continue
-                                        if back_line_number == self.line_number:
+                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
+                                    
                                 line_number_track.append(self.next_line_number)
                             else:
                                 self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
