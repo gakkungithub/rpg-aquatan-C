@@ -868,7 +868,7 @@ class ASTtoFlowChart:
                     func_references[-1]["varname"] = front_exp_terms
                 exp_terms = back_exp_terms
             else:
-                exp_terms = ''.join([front_exp_terms, operator_spell, back_exp_terms])
+                exp_terms = ' '.join([front_exp_terms, operator_spell, back_exp_terms])
                 comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
                 calc_order_comments.append(f"{exp_terms} : {comment.format(left=front_exp_terms, right=back_exp_terms)}")
         # 複合代入演算子(a += b)
@@ -882,7 +882,7 @@ class ASTtoFlowChart:
                     break
             front_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back_exp_terms =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            exp_terms = ''.join([front_exp_terms, operator_spell, back_exp_terms])
+            exp_terms = ' '.join([front_exp_terms, operator_spell, back_exp_terms])
             if any(func in exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
             comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")

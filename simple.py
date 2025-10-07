@@ -745,8 +745,11 @@ def main():
                                     #     PAUSEWND.draw(screen)
                                     #     pygame.display.update()      
 
-                if MSGWND.selectMsgText is not None and (event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]):
-                    MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+                if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
+                    if MSGWND.selectMsgText is not None:
+                        MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+                    # else:
+                    #     PLAYER.select_funcInfoWindow(-1 if event.key == K_LEFT else 1)
 
                 if event.type == KEYDOWN and event.key == K_f:
                     # 足元にあるのが宝箱かワープゾーンかを調べる
@@ -1087,6 +1090,11 @@ class Map:
         self.charas: list[Character] = []  # マップにいるキャラクターリスト
         self.events = []  # マップにあるイベントリスト
         self.lights = []  # マップにある光源リスト
+        font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 40)
+        self.left_arrow, _ = font.render("◀", (255, 255, 255, 255))
+        self.right_arrow, _ = font.render("▶", (255, 255, 255, 255))
+        self.left_rect = self.left_arrow.get_rect(center=(20, 140))
+        self.right_rect = self.right_arrow.get_rect(center=(476, 140))
         self.load_json()
 
     def create(self, dest_map):
@@ -1107,7 +1115,7 @@ class Map:
         for chara in self.charas:
             chara.update(self)  # mapを渡す
 
-    def draw(self, screen, offset):
+    def draw(self, screen: pygame.Surface, offset):
         """マップを描画する"""
         offsetx, offsety = offset
         # マップの描画範囲を計算
@@ -1116,6 +1124,8 @@ class Map:
         starty = offsety // GS
         endy = starty + SCR_RECT.height//GS + 1
         # マップの描画
+        screen.blit(self.left_arrow, self.left_rect)
+        screen.blit(self.right_arrow, self.right_rect)
         for y in range(starty, endy):
             for x in range(startx, endx):
                 # マップの範囲外はデフォルトイメージで描画
@@ -1126,8 +1136,15 @@ class Map:
                 else:
                     screen.blit(self.images[self.map[y][x]],
                                 (x*GS-offsetx, y*GS-offsety))
-        if PLAYER.funcInfoWindow_chara:
-            PLAYER.funcInfoWindow_chara.draw(screen)
+        if PLAYER.funcInfoWindow_dict["event"] and PLAYER.funcInfoWindow_dict["chara"]:
+            if PLAYER.funcInfoWindowIndex == 0:
+                PLAYER.funcInfoWindow_dict["event"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
+            else:
+                PLAYER.funcInfoWindow_dict["chara"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
+        elif PLAYER.funcInfoWindow_dict["event"]:
+            PLAYER.funcInfoWindow_dict["event"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
+        elif PLAYER.funcInfoWindow_dict["chara"]:
+            PLAYER.funcInfoWindow_dict["chara"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
         # このマップにあるイベントを描画
         for event in self.events:
             event.draw(screen, offset)
@@ -1623,7 +1640,8 @@ class Player(Character):
         self.ccchara: CharaCheckCondition = None
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
-        self.funcInfoWindow_chara: "FuncInfoWindow" | None = None
+        self.funcInfoWindow_dict: dict[str: "FuncInfoWindow"] = {"event": None, "chara": None}
+        self.funcInfoWindowIndex = 0
         self.std_messages = []
         self.address_to_fname = {}
         self.address_to_size = {}
@@ -1636,6 +1654,7 @@ class Player(Character):
     def update(self, mymap: Map):
         """プレイヤー状態を更新する。
         mapは移動可能かの判定に必要。"""
+        self.funcInfoWindow_dict = {"event": None, "chara": None}
         # プレイヤーの移動処理
         if self.moving:
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
@@ -1653,17 +1672,7 @@ class Player(Character):
                     if isinstance(door, SmallDoor):
                         door.close()
                         self.door = None
-
-                # 接触イベントチェック
-                event = mymap.get_event(self.x, self.y)
-                if isinstance(event, PlacesetEvent):  # PlacesetEventなら
-                    self.place_label = event.place_label
-                elif isinstance(event, AutoEvent):  # AutoEvent
-                    self.append_automove(event.sequence)
-                    return
-
         elif self.waitingMove is not None:
-#           print(f"waitingMove:{self.waitingMove}")
             dest_map = self.waitingMove.dest_map
             dest_x = self.waitingMove.dest_x
             dest_y = self.waitingMove.dest_y
@@ -1748,7 +1757,28 @@ class Player(Character):
                     self.vx, self.vy = 0, -self.speed
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
-            
+            elif direction is None and MSGWND.selectMsgText is None:
+                # 接触イベントチェック
+                event = mymap.get_event(self.x, self.y)
+                if isinstance(event, MoveEvent):
+                    self.funcInfoWindow_dict["event"] = event.funcInfoWindow
+                else:
+                    self.funcInfoWindow_dict["event"] = None
+                nextx, nexty = self.x, self.y
+                if self.direction == DOWN:
+                    nexty = self.y + 1
+                elif self.direction == LEFT:
+                    nextx = self.x - 1
+                elif self.direction == RIGHT:
+                    nextx = self.x + 1
+                elif self.direction == UP:
+                    nexty = self.y - 1
+                chara = mymap.get_chara(nextx, nexty)
+                if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
+                    self.funcInfoWindow_dict["chara"] = chara.funcInfoWindow
+                else:
+                    self.funcInfoWindow_dict["chara"] = None
+
             if self.moving and self.ccchara is not None:
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
                     chara = mymap.get_chara(self.ccchara["avoiding_x"], self.ccchara["avoiding_y"])
@@ -1790,6 +1820,7 @@ class Player(Character):
                 itemResult = self.sender.receive_json()
                 if itemResult is None:
                     return False
+                
                 if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
                     for skippedFunc in itemResult["skippedFunc"]:
                         self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
@@ -1801,14 +1832,9 @@ class Player(Character):
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
                         event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps)
+                        item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                         if (indexes := event.exps.get("indexes", None)):
-                            index_comments = "\f".join(indexes)
-                        else:
-                            index_comments = None
-                        if index_comments:
-                            item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！\f" + index_comments
-                        else:
-                            item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
+                            item_get_message += "\f" + "\f".join(indexes)
                         if itemResult.get("undefined", False):
                             item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                         if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
@@ -1928,39 +1954,38 @@ class Player(Character):
                     linenum = self.sender.code_window.linenum
                     if chara.linenum is None:
                         chara.linenum = linenum
+
                     if (exps := chara.exps.get(str(chara.linenum), None)):
                         self.sender.send_event({"type": "exp", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
                         charaExpressionResult = self.sender.receive_json()
                         if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                             for skippedFunc in charaExpressionResult["skippedFunc"]:
                                 self.checkedFuncs[(mymap.name, chara.func, exps["fromTo"][0])].append((skippedFunc, None, False))
-                        if charaExpressionResult is not None:
-                            if charaExpressionResult['status'] == "ng":
-                                MSGWND.set(charaExpressionResult['message'])
-                            else:
-                                if charaExpressionResult.get('skipCond', False):
-                                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow_dict[str(chara.linenum)]
-                                    MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
-                                else:
-                                    item_line_info = {}
-                                    for item_value_changed in charaExpressionResult["values"]:
-                                        item_line_info[item_value_changed["item"]["name"]] = item_value_changed["item"]["line"]
-
-                                    for var_path in exps["vars"]:
-                                        if (line := item_line_info.get(var_path[0], None)):
-                                            continue
-                                        item = PLAYER.commonItembag.find(var_path[0], line)
-                                        if item is None:
-                                            item = PLAYER.itembag.find(var_path[0], line)
-                                        if item is not None:
-                                            item.set_exps(var_path[1:], exps["exps"])
-                                    if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
-                                        self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
-                                    chara.linenum = None
-                                    # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
-                                    MSGWND.set(chara.message)
-                        else:
+                        if charaExpressionResult is None:
                             return False
+                        
+                        if charaExpressionResult['status'] == "ng":
+                            MSGWND.set(charaExpressionResult['message'])
+                        else:
+                            if charaExpressionResult.get('skipCond', False):
+                                MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
+                            else:
+                                item_line_info = {}
+                                for item_value_changed in charaExpressionResult["values"]:
+                                    item_line_info[item_value_changed["item"]["name"]] = item_value_changed["item"]["line"]
+
+                                for var_path in exps["vars"]:
+                                    if (line := item_line_info.get(var_path[0], None)) is None:
+                                        continue
+                                    if (item := PLAYER.commonItembag.find(var_path[0], line)) is None:
+                                        item = PLAYER.itembag.find(var_path[0], line)
+                                    if item is not None:
+                                        item.set_exps(var_path[1:], exps["exps"])
+                                if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
+                                    self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
+                                chara.linenum = None
+                                # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
+                                MSGWND.set(chara.message)         
                     else:
                         self.sender.send_event({"itemsetall": True})
                         itemsetAllResult = self.sender.receive_json()
@@ -1983,13 +2008,13 @@ class Player(Character):
                                         MSGWND.set(CCCharacterResult['message'])
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
-                                            PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
                                         else:
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                                                 self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
                                             self.ccchara = chara.set_checked()
                                 else:
+                                    MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
                                     return False
                             else:
                                 MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
@@ -2009,7 +2034,7 @@ class Player(Character):
         # main以外のreturnキャラ
         mapname = mymap.name
         fromTo = chara.fromTo
-        if self.moveHistory != []:
+        if self.moveHistory:
             self.sender.send_event({"type": 'return', "fromTo": fromTo + [self.moveHistory[-1]['line']], "funcWarp": chara.funcWarp})
             returnResult = self.sender.receive_json()
             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
@@ -2017,7 +2042,6 @@ class Player(Character):
                     self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
-                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 else:
                     if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
@@ -2035,8 +2059,6 @@ class Player(Character):
                                 item = PLAYER.itembag.find(name, int(line))
                             if item is not None:
                                 item.update_value(value)
-                    print((move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]))
-                    print(PLAYER.checkedFuncs)
                     if (move['mapname'], returnResult["backToFunc"], returnResult["backToLine"]) in PLAYER.checkedFuncs:
                         # ここは辞書を使うかどうかを考える
                         checkedFunc = PLAYER.checkedFuncs[(move['mapname'], returnResult["backToFunc"], returnResult["backToLine"])][-1]
@@ -2058,7 +2080,6 @@ class Player(Character):
                     self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
-                    PLAYER.funcInfoWindow_chara = chara.funcInfoWindow
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
                     MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
@@ -2075,8 +2096,8 @@ class Player(Character):
         if type == "item":
             self.itemNameShow = not self.itemNameShow
 
-
-
+    def select_funcInfoWindow(self, i):
+        self.funcInfoWindowIndex = (self.funcInfoWindowIndex + i) % 2
 #                                                                                                                                                   
 # 88b           d88                                                                  88888888888                         88                         
 # 888b         d888                                                                  88                                  ""                         
@@ -2384,6 +2405,7 @@ class MessageWindow(Window):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages):
             if selectMessages is not None:
+                PLAYER.funcInfoWindow_dict = {"event": None, "chara": None}
                 self.selectMsgText, self.select_type = selectMessages
             message_list = []
             if len(self.new_std_messages):
@@ -2526,7 +2548,6 @@ class MessageWindow(Window):
                         self.sender.send_event({"skip": False})
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
-                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type == 'func_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
@@ -2591,7 +2612,6 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
@@ -2713,7 +2733,6 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    PLAYER.funcInfoWindow_chara = None
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None
@@ -3261,7 +3280,6 @@ class StatusWindow(Window):
         self.draw_string(10, 90, f"現在地:　{self.player.func}", self.CYAN)
         Window.blit(self, screen)
 
-
 #                                                                                                   
 #        db                                      88888888888                                        
 #       d88b                    ,d               88                                          ,d     
@@ -3466,12 +3484,11 @@ class MoveEvent():
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
 
-        if PLAYER.x == self.x and PLAYER.y == self.y and PLAYER.funcInfoWindow_chara is None:
-            self.funcInfoWindow.draw(screen)
-
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
-                                                                                                                                                    
+    
+
+
 # 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
 # 88                                         88              d8"            `8b       d8b       d8' ""                      88                                 
 # 88                                         88              88              "8,     ,8"8,     ,8"                          88                                 
@@ -3491,13 +3508,35 @@ class FuncInfoWindow(Window):
     LINE_COLOR = (255, 255, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
-    def __init__(self, funcs, warpPos, detail: str | None = None):
+    class Detail:
+        CYAN = Color(100, 248, 248, 255)
+        RED = Color(255, 0, 0, 255)
+
+        def __init__(self, detail: dict, font: pygame.freetype.Font):
+            self.hoverLink_rect_list: list[pygame.Rect] = []
+            self.baseComment_rect_list: list[pygame.Rect] = []
+            self.hoverComment_list = detail["hover"]
+
+            x, y = 10, 10
+            split_detail: list[str] = detail["detail"].split('?')
+            for i, detail in enumerate(split_detail):
+                baseComment_surf, _ = font.render(detail, self.CYAN)
+                baseComment_rect = baseComment_surf.get_rect(topleft=(x, y))
+                self.baseComment_rect_list.append(baseComment_rect)
+                if i != len(split_detail):
+                    x = baseComment_rect.right
+                    hoverLink_surf, _ = font.render(detail, self.CYAN)
+                    hoverLink_rect = hoverLink_surf.get_rect(topleft=(x, y))
+                    self.hoverLink_rect_list.append(hoverLink_rect)
+                    x = hoverLink_rect.right + 5
+
+    def __init__(self, funcs, warpPos, detail: dict | None = None):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs: list[dict] = funcs
         self.warpPos = warpPos
-        self.detail = detail
+        self.detail = self.Detail(detail, self.font) if detail else None
         self.show()
 
     def draw_string(self, x, y, string, color):
@@ -3522,16 +3561,17 @@ class FuncInfoWindow(Window):
 
         pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
 
-    def draw(self, screen):
+    def draw(self, screen, left_arrow_info: tuple[pygame.Surface, pygame.Rect], right_arrow_info: tuple[pygame.Surface, pygame.Rect]):
         if not (self.is_visible and (len(self.funcs) or self.detail)):
             return
         
         Window.draw(self)
-        x_offset = 10
+        x_offset = 50
         y_offset = 10
         if self.detail:
-            self.draw_string(x_offset, y_offset, self.detail, self.CYAN)
-            y_offset += self.FONT_SIZE + 10
+            pass
+            # self.draw_string(x_offset, y_offset, self.detail, self.CYAN)
+            # y_offset += self.FONT_SIZE + 10
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
         for i, func in enumerate(self.funcs):
@@ -3569,6 +3609,9 @@ class FuncInfoWindow(Window):
             # 引数に関数がない時は現在の関数の下に次の関数を描画する
             if len(y_pos_list) == 0:
                 y_offset += self.FONT_SIZE + 10
+
+        self.surface.blit(left_arrow_info[0], left_arrow_info[1])
+        self.surface.blit(right_arrow_info[0], right_arrow_info[1])
 
         Window.blit(self, screen)
 
@@ -3681,9 +3724,6 @@ class Treasure():
 
             # テキストを描画
             screen.blit(text_surface, text_rect)
-
-        if PLAYER.x == self.x and PLAYER.y == self.y and PLAYER.funcInfoWindow_chara is None:
-            self.funcInfoWindow.draw(screen)
 
     def __str__(self):
         return f"TREASURE,{self.x},{self.y},{self.item}"
