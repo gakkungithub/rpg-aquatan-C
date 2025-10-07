@@ -206,8 +206,13 @@ class MapInfo:
             self.auto_events.append(AutoEvent(pos, 7, "r" if dx == 1 else "l"))
 
     # 出口のドア生成
-    def setDoor(self, pos: tuple[int, int], dir: int, pathComment: str):
-        self.doors.append(Door(pos, dir, pathComment))
+    def setDoor(self, pos: tuple[int, int], dir: int, pathComment: dict):
+        doorname = ""
+        for i, split_comment in enumerate(pathComment["detail"].split('?')):
+            doorname += split_comment
+            if i != len(pathComment["hover"]):
+                doorname += f'条件 {pathComment["hover"][i]}'
+        self.doors.append(Door(pos, dir, doorname))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], detail: str, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):

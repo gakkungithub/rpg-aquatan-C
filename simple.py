@@ -1776,6 +1776,8 @@ class Player(Character):
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
                     self.funcInfoWindow_dict["chara"] = chara.funcInfoWindow
+                elif isinstance(chara, CharaExpression) and str(self.sender.code_window.linenum) in chara.funcInfoWindow_dict:
+                    self.funcInfoWindow_dict["chara"] = chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)]
                 else:
                     self.funcInfoWindow_dict["chara"] = None
 
@@ -3440,7 +3442,7 @@ class CharaExpression(Character):
         self.func = func
         self.exps = exps_dict
         self.linenum = None
-        self.funcInfoWindow_dict = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line))) for line, exp in exps_dict.items()}
+        self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line))) for line, exp in exps_dict.items()}
 
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
