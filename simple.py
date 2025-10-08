@@ -2825,7 +2825,7 @@ class PauseWindow(Window):
 
         y = self.rect.height // 2 + 50
         x = self.rect.width // 2 - 150
-        for line in ["space:　前方に対するアクション", "f:　足元に対するアクション", "c:　コマンドラインを開く",
+        for line in ["矢印キー:　移動", "shift押しながら移動:　ダッシュ", "space:　前方に対するアクション", "f:　足元に対するアクション", "c:　コマンドラインを開く",
                         "b:　アイテムウィンドウを開く/閉じる", "i:　アイテム名を表示する/消す", "m:　マップ→コード→非表示を切り替える", 
                         "p:　ポーズ画面を開く", "esc:　ゲームを辞める/コマンドラインを閉じる"]:
             surf, rect = self.font.render(line, self.TEXT_COLOR)
