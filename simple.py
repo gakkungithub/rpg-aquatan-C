@@ -460,6 +460,8 @@ def main():
                             last_mouse_pos = event.pos
                         elif ITEMWND.isCursorInWindow(event.pos):
                             pass
+                    if len(PLAYER.funcInfoWindow_list):
+                        PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
 
                     cmd = BTNWND.is_clicked(event.pos)
                     
@@ -748,8 +750,6 @@ def main():
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
                     if MSGWND.selectMsgText is not None:
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
-                    # else:
-                    #     PLAYER.select_funcInfoWindow(-1 if event.key == K_LEFT else 1)
 
                 if event.type == KEYDOWN and event.key == K_f:
                     # 足元にあるのが宝箱かワープゾーンかを調べる
@@ -1090,11 +1090,6 @@ class Map:
         self.charas: list[Character] = []  # マップにいるキャラクターリスト
         self.events = []  # マップにあるイベントリスト
         self.lights = []  # マップにある光源リスト
-        font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 40)
-        self.left_arrow, _ = font.render("◀", (255, 255, 255, 255))
-        self.right_arrow, _ = font.render("▶", (255, 255, 255, 255))
-        self.left_rect = self.left_arrow.get_rect(center=(20, 140))
-        self.right_rect = self.right_arrow.get_rect(center=(476, 140))
         self.load_json()
 
     def create(self, dest_map):
@@ -1124,8 +1119,6 @@ class Map:
         starty = offsety // GS
         endy = starty + SCR_RECT.height//GS + 1
         # マップの描画
-        screen.blit(self.left_arrow, self.left_rect)
-        screen.blit(self.right_arrow, self.right_rect)
         for y in range(starty, endy):
             for x in range(startx, endx):
                 # マップの範囲外はデフォルトイメージで描画
@@ -1136,15 +1129,12 @@ class Map:
                 else:
                     screen.blit(self.images[self.map[y][x]],
                                 (x*GS-offsetx, y*GS-offsety))
-        if PLAYER.funcInfoWindow_dict["event"] and PLAYER.funcInfoWindow_dict["chara"]:
-            if PLAYER.funcInfoWindowIndex == 0:
-                PLAYER.funcInfoWindow_dict["event"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
+        if len(PLAYER.funcInfoWindow_list):
+            if PLAYER.funcInfoWindowIndex >= len(PLAYER.funcInfoWindow_list):
+                PLAYER.funcInfoWindowIndex = len(PLAYER.funcInfoWindow_list) - 1
             else:
-                PLAYER.funcInfoWindow_dict["chara"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
-        elif PLAYER.funcInfoWindow_dict["event"]:
-            PLAYER.funcInfoWindow_dict["event"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
-        elif PLAYER.funcInfoWindow_dict["chara"]:
-            PLAYER.funcInfoWindow_dict["chara"].draw(screen, (self.left_arrow, self.left_rect), (self.right_arrow, self.right_rect))
+                PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
+
         # このマップにあるイベントを描画
         for event in self.events:
             event.draw(screen, offset)
@@ -1428,7 +1418,6 @@ class Map:
         auto = AutoEvent((x, y), mapchip, sequence)
         self.events.append(auto)
 
-
 #                                                                                                     
 #   ,ad8888ba,  88                                                                                    
 #  d8"'    `"8b 88                                                        ,d                          
@@ -1640,7 +1629,7 @@ class Player(Character):
         self.ccchara: CharaCheckCondition = None
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
-        self.funcInfoWindow_dict: dict[str: "FuncInfoWindow"] = {"event": None, "chara": None}
+        self.funcInfoWindow_list: list[FuncInfoWindow] = []
         self.funcInfoWindowIndex = 0
         self.std_messages = []
         self.address_to_fname = {}
@@ -1654,7 +1643,7 @@ class Player(Character):
     def update(self, mymap: Map):
         """プレイヤー状態を更新する。
         mapは移動可能かの判定に必要。"""
-        self.funcInfoWindow_dict = {"event": None, "chara": None}
+        self.funcInfoWindow_list = []
         # プレイヤーの移動処理
         if self.moving:
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
@@ -1761,9 +1750,7 @@ class Player(Character):
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent):
-                    self.funcInfoWindow_dict["event"] = event.funcInfoWindow
-                else:
-                    self.funcInfoWindow_dict["event"] = None
+                    self.funcInfoWindow_list.append(event.funcInfoWindow)
                 nextx, nexty = self.x, self.y
                 if self.direction == DOWN:
                     nexty = self.y + 1
@@ -1775,11 +1762,9 @@ class Player(Character):
                     nexty = self.y - 1
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
-                    self.funcInfoWindow_dict["chara"] = chara.funcInfoWindow
+                    self.funcInfoWindow_list.append(chara.funcInfoWindow)
                 elif isinstance(chara, CharaExpression) and str(self.sender.code_window.linenum) in chara.funcInfoWindow_dict:
-                    self.funcInfoWindow_dict["chara"] = chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)]
-                else:
-                    self.funcInfoWindow_dict["chara"] = None
+                    self.funcInfoWindow_list.append(chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)])
 
             if self.moving and self.ccchara is not None:
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
@@ -2098,8 +2083,6 @@ class Player(Character):
         if type == "item":
             self.itemNameShow = not self.itemNameShow
 
-    def select_funcInfoWindow(self, i):
-        self.funcInfoWindowIndex = (self.funcInfoWindowIndex + i) % 2
 #                                                                                                                                                   
 # 88b           d88                                                                  88888888888                         88                         
 # 888b         d888                                                                  88                                  ""                         
@@ -2407,7 +2390,7 @@ class MessageWindow(Window):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages):
             if selectMessages is not None:
-                PLAYER.funcInfoWindow_dict = {"event": None, "chara": None}
+                PLAYER.funcInfoWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
             message_list = []
             if len(self.new_std_messages):
@@ -3515,22 +3498,28 @@ class FuncInfoWindow(Window):
         RED = Color(255, 0, 0, 255)
 
         def __init__(self, detail: dict, font: pygame.freetype.Font):
-            self.hoverLink_rect_list: list[pygame.Rect] = []
-            self.baseComment_rect_list: list[pygame.Rect] = []
+            self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
+            self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
             self.hoverComment_list = detail["hover"]
 
-            x, y = 10, 10
+            x, y = 50, 10
             split_detail: list[str] = detail["detail"].split('?')
             for i, detail in enumerate(split_detail):
                 baseComment_surf, _ = font.render(detail, self.CYAN)
                 baseComment_rect = baseComment_surf.get_rect(topleft=(x, y))
-                self.baseComment_rect_list.append(baseComment_rect)
-                if i != len(split_detail):
+                self.baseComment_info_list.append((baseComment_surf, baseComment_rect))
+                if i + 1 != len(split_detail):
                     x = baseComment_rect.right
-                    hoverLink_surf, _ = font.render(detail, self.CYAN)
+                    hoverLink_surf, _ = font.render("条件", self.RED)
                     hoverLink_rect = hoverLink_surf.get_rect(topleft=(x, y))
-                    self.hoverLink_rect_list.append(hoverLink_rect)
+                    self.hoverLink_info_list.append((hoverLink_surf, hoverLink_rect))
                     x = hoverLink_rect.right + 5
+
+        def draw(self, surface: pygame.Surface):
+            for baseComment_info in self.baseComment_info_list:
+                surface.blit(baseComment_info[0], baseComment_info[1])
+            for hoverLink_info in self.hoverLink_info_list:
+                surface.blit(hoverLink_info[0], hoverLink_info[1])
 
     def __init__(self, funcs, warpPos, detail: dict | None = None):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
@@ -3539,6 +3528,10 @@ class FuncInfoWindow(Window):
         self.funcs: list[dict] = funcs
         self.warpPos = warpPos
         self.detail = self.Detail(detail, self.font) if detail else None
+        self.left_arrow, _ = self.font.render("◀", (255, 255, 255, 255))
+        self.right_arrow, _ = self.font.render("▶", (255, 255, 255, 255))
+        self.left_rect = self.left_arrow.get_rect(center=(20, 140))
+        self.right_rect = self.right_arrow.get_rect(center=(476, 140))
         self.show()
 
     def draw_string(self, x, y, string, color):
@@ -3563,7 +3556,7 @@ class FuncInfoWindow(Window):
 
         pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
 
-    def draw(self, screen, left_arrow_info: tuple[pygame.Surface, pygame.Rect], right_arrow_info: tuple[pygame.Surface, pygame.Rect]):
+    def draw(self, screen):
         if not (self.is_visible and (len(self.funcs) or self.detail)):
             return
         
@@ -3571,9 +3564,8 @@ class FuncInfoWindow(Window):
         x_offset = 50
         y_offset = 10
         if self.detail:
-            pass
-            # self.draw_string(x_offset, y_offset, self.detail, self.CYAN)
-            # y_offset += self.FONT_SIZE + 10
+            self.detail.draw(self.surface)
+            y_offset += self.FONT_SIZE + 10
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
         for i, func in enumerate(self.funcs):
@@ -3612,10 +3604,34 @@ class FuncInfoWindow(Window):
             if len(y_pos_list) == 0:
                 y_offset += self.FONT_SIZE + 10
 
-        self.surface.blit(left_arrow_info[0], left_arrow_info[1])
-        self.surface.blit(right_arrow_info[0], right_arrow_info[1])
+        self.surface.blit(self.left_arrow, self.left_rect)
+        self.surface.blit(self.right_arrow, self.right_rect)
 
         Window.blit(self, screen)
+
+    def isCursorInWindow(self, pos: tuple[int, int]):
+        if MSGWND.is_visible:
+            return False
+            
+        local_pos = (pos[0] - self.x, pos[1] - self.y)
+        if self.left_rect.collidepoint(local_pos):
+            shift = -1
+        elif self.right_rect.collidepoint(local_pos):
+            shift = 1
+        elif self.detail:
+            for i, hoverLink_info in enumerate(self.detail.hoverLink_info_list):
+                if hoverLink_info[1].collidepoint(local_pos):
+                    MSGWND.set(self.detail.hoverComment_list[i])
+                    return True
+        else:
+            return False
+
+        if len(PLAYER.funcInfoWindow_list) != 1:
+            self.funcInfoWindowIndex = (self.funcInfoWindowIndex + shift) % len(PLAYER.funcInfoWindow_list)
+        else:
+            self.funcInfoWindowIndex = 0
+
+        return True
 
 #                                                                                                                                 
 # 88888888ba  88                                                               88888888888                                        

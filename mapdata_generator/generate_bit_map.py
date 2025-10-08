@@ -767,16 +767,16 @@ class GenBitMap:
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID)
                 exp = self.getExpNodeInfo(nodeID)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の do-while文の?の真偽の確認に移る", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目のdo-while文の?の真偽の確認に移る", "hover": [exp[0]]})
                 crntRoomID = nodeID
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の do-while文の?が真", "hover": [exp[0]]}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が真", "hover": [exp[0]]}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の do-while文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
@@ -784,7 +784,7 @@ class GenBitMap:
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         nodeIDs.append(toNodeID)
@@ -793,12 +793,12 @@ class GenBitMap:
                         if (exp := self.getExpNodeInfo(toNodeID)) is not None:
                             warp_comment = {"detail": f"{exp[4]}行目の?が真", "hover": [f"case {exp[0]} ({switch_exp[0]} == {exp[0]})"]}
                         else:
-                            warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcase にも該当しない (default)", "hover": [switch_exp[0]]}
+                            warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない(default)", "hover": [switch_exp[0]]}
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeIDs.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeIDs.append(toNodeID)
                     elif self.getNodeShape(toNodeID) == 'terminator':
                         self.trackAST(crntRoomID, toNodeID, loopBackID)
@@ -821,17 +821,17 @@ class GenBitMap:
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
                     exp = self.getExpNodeInfo(nodeID)
-                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
                     exp = self.getExpNodeInfo(nodeID)
-                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeIDs.append(toNodeID)
             # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
             if nodeIDs:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(nodeID)}文の?の真偽の確認に移る", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認に移る", "hover": [exp[0]]})
                 # true
                 self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
                 # false
@@ -845,7 +845,7 @@ class GenBitMap:
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
             exp = self.getExpNodeInfo(loopBackID)
-            self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": f"{exp[4]}行目の {self.getNodeLabel(loopBackID)}文の?の真偽の確認に移ります!!", "hover": [exp[0]]}, self.func_name, 158)
+            self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認に移ります!!", "hover": [exp[0]]}, self.func_name, 158)
             loopBackID = None
 
         # if文の終点でワープゾーンを作る
@@ -927,13 +927,13 @@ class GenBitMap:
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID)
                     exp = self.getExpNodeInfo(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": f"continueにより、{exp[4]}行目の do-while文の?の真偽の確認に移ります", "hover": [exp[0]]}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": f"continueにより、{exp[4]}行目のdo-while文の?の真偽の確認に移ります", "hover": [exp[0]]}, self.func_name, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
-                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目の do-while文の?が偽", "hover": [exp[0]]}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]]}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
-                            self.createPath(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目の do-while文の?が偽", "hover": [exp[0]]}, expNodeID=nextNodeID) # 条件文の計算式を確かめる
+                            self.createPath(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]]}, expNodeID=nextNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
                 # breakのノードの場合
                 else:
