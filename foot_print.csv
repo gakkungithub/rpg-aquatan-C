@@ -1,2 +1,4 @@
-start,01_int_variables,12, 30
-end, 01_int_variables,15, 20
+start,07_function_in_condition,10, 5
+itemget, 07_function_in_condition,13, 6,num
+itemget, 07_function_in_condition,9, 7,threshold
+end, 07_function_in_condition,9, 7

@@ -38,7 +38,7 @@ class VarsTracker:
         self.frames = ['start']
         self.track(gvars, self.global_previous_values, [])
     
-    def trackStart(self, frame):
+    def trackStart(self, frame: lldb.SBFrame):
         current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
                       for i in range(thread.GetNumFrames())]
         # 何かしらの関数に遷移したとき
