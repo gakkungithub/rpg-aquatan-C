@@ -1620,7 +1620,7 @@ class Player(Character):
         self.waitingMove = None
         self.moveHistory = []
         self.move5History = []
-        self.status = {"LV":1, "HP":100, "MP":20, "ATK":10, "DEF":10}
+        self.status = {"LV":1, "HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
         self.itembag = ItemBag()
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
@@ -1722,28 +1722,51 @@ class Player(Character):
             #         self.wait = 0
             #         self.pop_automove()
 
+            if pressed_keys and (pressed_keys[K_LSHIFT] or pressed_keys[K_RSHIFT]):
+                self.speed = 16
+                self.status["AGI"] = 16
+            else:
+                self.speed = 8
+                self.status["AGI"] = 8
+
             if direction == 'd' or (pressed_keys and pressed_keys[K_DOWN]):
                 self.direction = DOWN  # 移動できるかに関係なく向きは変える
-                if mymap.is_movable(self.x, self.y+1):
+                if mymap.is_movable(self.x, self.y+1) and mymap.is_movable(self.x, self.y+2):
                     self.vx, self.vy = 0, self.speed
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+(self.speed//8))]
+                elif mymap.is_movable(self.x, self.y+1):
+                    self.vx, self.vy = 0, 8
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+1)]
             elif direction == 'l' or (pressed_keys and pressed_keys[K_LEFT]):
                 self.direction = LEFT
-                if mymap.is_movable(self.x-1, self.y):
+                if mymap.is_movable(self.x-1, self.y) and mymap.is_movable(self.x-2, self.y):
                     self.vx, self.vy = -self.speed, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-(self.speed//8), self.y)]
+                elif mymap.is_movable(self.x-1, self.y):
+                    self.vx, self.vy = -8, 0
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-1, self.y)]
             elif direction == 'r' or (pressed_keys and pressed_keys[K_RIGHT]):
                 self.direction = RIGHT
-                if mymap.is_movable(self.x+1, self.y):
+                if mymap.is_movable(self.x+1, self.y) and mymap.is_movable(self.x+2, self.y):
                     self.vx, self.vy = self.speed, 0
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else  [self.prevPos[1], (self.x+1, self.y)]
+                    self.prevPos = tempPrevPos if tempPrevPos else  [self.prevPos[1], (self.x+(self.speed//8), self.y)]
+                elif mymap.is_movable(self.x+1, self.y):
+                    self.vx, self.vy = 8, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x+1, self.y)]
             elif direction == 'u' or (pressed_keys and pressed_keys[K_UP]):
                 self.direction = UP
-                if mymap.is_movable(self.x, self.y-1):
+                if mymap.is_movable(self.x, self.y-1) and mymap.is_movable(self.x, self.y-2):
                     self.vx, self.vy = 0, -self.speed
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-(self.speed//8))]
+                elif mymap.is_movable(self.x, self.y-1):
+                    self.vx, self.vy = 0, -8
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
             elif direction is None and MSGWND.selectMsgText is None:
@@ -1777,7 +1800,9 @@ class Player(Character):
                             if isinstance(door, SmallDoor):
                                 door.close()
                                 self.door = None
-
+        if self.speed != 8:
+            self.speed = 8
+            self.status["AGI"] = 8
         # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
         self.frame += 1
         self.image = self.images[self.name][self.direction *
@@ -3261,8 +3286,9 @@ class StatusWindow(Window):
         self.draw_status(100,50,"MP")
         self.draw_status(10,70,"ATK")
         self.draw_status(100,70,"DEF")
+        self.draw_status(10,90,"AGI")
 
-        self.draw_string(10, 90, f"現在地:　{self.player.func}", self.CYAN)
+        self.draw_string(10, 110, f"現在地:　{self.player.func}", self.CYAN)
         Window.blit(self, screen)
 
 #                                                                                                   
