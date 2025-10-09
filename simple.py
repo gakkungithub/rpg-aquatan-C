@@ -2923,6 +2923,8 @@ class ItemWindow(Window):
         self.check_exps_line: tuple[int, bool] = (-1, False)
         self.file_buttons: dict[str, pygame.Rect] = {}
         self.file_window = FileWindow()
+        self.is_inAction = True
+        self.action_trigger_line_dict: dict[int, ItemValue] = {}
 
     def draw_string(self, x, y, string, color, size=None):
         """文字列出力"""
@@ -2978,9 +2980,16 @@ class ItemWindow(Window):
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
                 
+            icon_x = 10
+            if item.itemvalue.children:
+                self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN, 16)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[offset_y // 24] = item.itemvalue
+                icon_x += 15
+
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
-            icon_x = 10
+
             icon_y = offset_y
             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
 
@@ -2999,7 +3008,7 @@ class ItemWindow(Window):
                 self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", self.GREEN)
             
             offset_y += 24
-            if item.itemvalue.children:
+            if item.itemvalue.is_open:
                 # ここで変数の値の開閉ボタンを作る
                 offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'global')
 
@@ -3043,9 +3052,15 @@ class ItemWindow(Window):
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
 
+            icon_x = 10
+            if item.itemvalue.children and item.vartype != "FILE *":
+                self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE, 16)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[offset_y // 24] = item.itemvalue
+                icon_x += 15
+
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype)
-            icon_x = 10
             icon_y = offset_y
             text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
 
@@ -3056,7 +3071,7 @@ class ItemWindow(Window):
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             if item.itemvalue.value in PLAYER.address_to_size:
-                self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE, 15)
+                self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
 
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
@@ -3077,9 +3092,11 @@ class ItemWindow(Window):
                 self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", value_color)
             
             offset_y += 24
-            if item.itemvalue.children and item.vartype != "FILE *":
+            if item.itemvalue.is_open and item.vartype != "FILE *":
                 offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'local')
 
+        if self.is_inAction:
+            self.is_inAction = False
         self.file_window.draw(screen)
         Window.blit(self, screen)
 
@@ -3129,24 +3146,28 @@ class ItemWindow(Window):
                 color = self.GREEN
             else:
                 color = self.BLACK if is_item_changed else self.WHITE
+
+            if itemvalue.children:
+                self.draw_string(10, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[offset_y // 24] = itemvalue
+
             self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color)
             name_offset = self.myfont.get_rect(valuename).width + 20
             if itemvalue.value is not None:
                 self.draw_string(text_x + name_offset, offset_y+4, f"({itemvalue.value})", color)
-                
-            # if itemvalue.declared_exps is not None:
-            #     value_offset = self.myfont.get_rect(f"({itemvalue.value})").width + 15
-            #     change_icon = load_image('./', 'change.png')
-            #     self.surface.blit(change_icon, (text_x + name_offset + value_offset, offset_y))
 
             offset_y += 24
 
-            if itemvalue.children:
+            if itemvalue.is_open:
                 offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+24, type)
 
         return offset_y
     
     def isCursorInWindow(self, pos : tuple[int, int]):
+        if self.is_inAction:
+            return False
+        
         y_line = (pos[1] - self.y - 10) // 24
         local_pos = (pos[0] - self.x, pos[1] - self.y)
         for filename, button in self.file_buttons.items():
@@ -3154,6 +3175,12 @@ class ItemWindow(Window):
                 self.file_window.toggle_is_visible(filename)
                 return True
             
+        if 10 <= pos[0] <= 30 and y_line in self.action_trigger_line_dict and not MSGWND.is_visible:
+            self.action_trigger_line_dict[y_line].is_open = not self.action_trigger_line_dict[y_line].is_open
+            self.is_inAction = True
+            self.action_trigger_line_dict = {}
+            return True
+        
         if self.x <= pos[0] <= self.rect[2] and y_line in self.item_changed_lines:
             if not MSGWND.is_visible:
                 self.check_exps_line = (y_line, False)
@@ -4006,6 +4033,7 @@ class Item:
         self.name = str(name)
         self.line = line
         self.index_exps = exps.get('indexes', None)
+        ITEMWND.is_inAction = True
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: str = vartype
 
@@ -4029,6 +4057,7 @@ class Item:
         temp_itemvalue.changed_exps = comments
 
     def update_value(self, data: dict):
+        ITEMWND.is_inAction = True
         self.itemvalue = ItemValue.from_dict(data)
 
     def remove_itemvalue_exps(self):
@@ -4047,6 +4076,7 @@ class Item:
 class ItemValue:
     def __init__(self, value: str | None, exps: list[str] | None, children: dict[str | int, "ItemValue"]):
         self.value = value
+        self.is_open = True if children else None
         self.declared_exps = exps
         self.changed_exps = None
         self.children = children
