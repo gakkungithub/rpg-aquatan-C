@@ -1772,7 +1772,7 @@ class Player(Character):
             elif direction is None and MSGWND.selectMsgText is None:
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
-                if isinstance(event, MoveEvent):
+                if isinstance(event, MoveEvent) or isinstance(event, Treasure):
                     self.funcInfoWindow_list.append(event.funcInfoWindow)
                 nextx, nexty = self.x, self.y
                 if self.direction == DOWN:
@@ -3000,6 +3000,7 @@ class ItemWindow(Window):
             
             offset_y += 24
             if item.itemvalue.children:
+                # ここで変数の値の開閉ボタンを作る
                 offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'global')
 
         # ローカル変数
@@ -3539,7 +3540,7 @@ class FuncInfoWindow(Window):
                     hoverLink_surf, _ = font.render("条件", self.RED)
                     hoverLink_rect = hoverLink_surf.get_rect(topleft=(x, y))
                     self.hoverLink_info_list.append((hoverLink_surf, hoverLink_rect))
-                    x = hoverLink_rect.right + 5
+                    x = hoverLink_rect.right
 
         def draw(self, surface: pygame.Surface):
             for baseComment_info in self.baseComment_info_list:
