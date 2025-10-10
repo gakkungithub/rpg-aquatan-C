@@ -4669,6 +4669,7 @@ class EventSender:
                     if "values" in msg:
                         PLAYER.remove_itemvalue()
                         for itemvalues in msg["values"]:
+                            print(itemvalues)
                             item = PLAYER.commonItembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                             if item is None:
                                 item = PLAYER.itembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])

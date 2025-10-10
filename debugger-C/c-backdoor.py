@@ -112,10 +112,10 @@ class VarsTracker:
                                 print(f"→ {full_name} points to string: \"{cstr}\"")
                                 var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
                                 if cstr != var_previous_value:
-                                    if name in self.vars_changed:
-                                        self.vars_changed[name].append(('[0]', ))
+                                    if (name,line) in self.vars_changed:
+                                        self.vars_changed[(name,line)].append(('[0]', ))
                                     else:
-                                        self.vars_changed[name]= [('[0]', )]
+                                        self.vars_changed[(name,line)]= [('[0]', )]
                                 var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"→ {full_name} points to unreadable char*")
@@ -676,9 +676,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         def get_new_values(self, values_changed: list[tuple[str, int]]):
             value_changed_dict = []
             for value_changed in values_changed:
+                print(value_changed)
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
-                    value = self.vars_tracker.getValuePartly(value_changed, value_path)
+                    value = self.vars_tracker.getValuePartly(value_changed, value_path.copy())
                     value_changed_dict.append({"item": {"name": value_changed[0], "line": value_changed[1]}, "path": value_path, "value": value})
             return value_changed_dict
         
