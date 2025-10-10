@@ -1968,7 +1968,7 @@ class Player(Character):
                         chara.linenum = linenum
 
                     if (exps := chara.exps.get(str(chara.linenum), None)):
-                        self.sender.send_event({"type": "exp", "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
+                        self.sender.send_event({"type": exps["type"], "fromTo": exps["fromTo"], "funcWarp": exps["funcWarp"]})
                         charaExpressionResult = self.sender.receive_json()
                         if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                             for skippedFunc in charaExpressionResult["skippedFunc"]:

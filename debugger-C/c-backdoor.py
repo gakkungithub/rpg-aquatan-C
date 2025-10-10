@@ -1298,19 +1298,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.str_info_to_send = []
                 if getLine:
                     target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
-                    vars_skipped = False
+                    skipped_line = None
                     for target_line in target_lines:
-                        if list(set([(var, int(target_line)) for var in self.varsDeclLines_list[target_line]]) - set(self.vars_tracker.vars_declared[-1])):
-                            vars_skipped = True
+                        if list(set([(var, int(target_line)) for var in self.varsDeclLines_list[target_line] 
+                                     if (var, int(target_line)) in self.vars_tracker.global_previous_values or (var, int(target_line)) in self.vars_tracker.previous_values[-1]]) 
+                                     - set(self.vars_tracker.vars_declared[-1])):
+                            skipped_line = int(target_line)
                             break
                     # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
-                    if vars_skipped and self.line_number not in self.line_data[self.func_name]["lines"]:
-                        msgJson["line"] = int(target_lines[0])
+                    if skipped_line:
+                        msgJson["line"] = skipped_line
                     else:
                         msgJson["line"] = self.next_line_number
                         # スコープから外れて除外された変数を取り除く
-                        msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
-                        self.vars_tracker.vars_removed = set()
+                    msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
+                    self.vars_tracker.vars_removed = set()
             send_data = json.dumps(msgJson)
             conn.sendall(send_data.encode('utf-8'))
 

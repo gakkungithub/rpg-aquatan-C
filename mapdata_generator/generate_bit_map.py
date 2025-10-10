@@ -102,8 +102,8 @@ class CharaExpression:
         self.func = func
         self.exps_dict: dict[int, dict] = {}
     
-    def addExp(self, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int]):
-        self.exps_dict[line_track[0]] = {"comments": expNodeInfo[3], "var_references": expNodeInfo[1], "line_track": line_track}
+    def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int]):
+        self.exps_dict[line_track[0]] = {"type": type, "comments": expNodeInfo[3], "var_references": expNodeInfo[1], "line_track": line_track}
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -227,7 +227,7 @@ class MapInfo:
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
     def addExpressionToCharaExpression(self, crntRoomID, expNodeInfo, lineNodeID, func):
-        _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
+        type, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
         if crntRoomID not in self.chara_expressions:
             ry, rx, rheight, rwidth = self.room_info[crntRoomID]
             zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
@@ -235,7 +235,7 @@ class MapInfo:
             chara_pos = (int(ry+y), int(rx+x))
             self.eventMap[chara_pos[0], chara_pos[1]] = self.ISEVENT
             self.chara_expressions[crntRoomID] = CharaExpression(chara_pos, func)
-        self.chara_expressions[crntRoomID].addExp(line_track, expNodeInfo)
+        self.chara_expressions[crntRoomID].addExp(type, line_track, expNodeInfo)
 
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
@@ -387,7 +387,7 @@ class MapInfo:
             exps_dict = {}
             for firstLine, exps in chara_expression.exps_dict.items():
                 func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
-                exps_dict[firstLine] = {"fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["var_references"]}
+                exps_dict[firstLine] = {"type": exps["type"], "fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["var_references"]}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             
@@ -850,11 +850,17 @@ class GenBitMap:
 
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
-            toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
+            toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
+            # 今まではifの終了ごとにワープゾーンを作っていたが、ifの終了が連続する場合に対応できなかったので、連続するノードは飛ばすようにした
+            while 1:
+                tempNodeID, _ = self.nextNodeInfo[toNodeID][0]
+                if self.getNodeShape(tempNodeID) != 'terminator':
+                    break
+                toNodeID, _ = self.nextNodeInfo[tempNodeID][0]
             self.createRoom(toNodeID)
             self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
-            nodeID = toNodeID
-            crntRoomID = nodeID
+            self.trackAST(toNodeID, tempNodeID, loopBackID)
+            return
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':
             var_type = self.varNode_info[nodeID]
