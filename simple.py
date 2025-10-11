@@ -344,7 +344,7 @@ def main():
         BIG_ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH - MIN_MAP_SIZE - 30, SCR_HEIGHT // 5 * 3 - 10)
         ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
         ITEMWND.hide()
-        
+
         for gvar_name, item_info in initialResult["items"].items():
             for line, values in item_info.items():
                 PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
@@ -1843,7 +1843,6 @@ class Player(Character):
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
-                        print(itemResult["item"]["value"])
                         event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps)
                         item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                         if (indexes := event.exps.get("indexes", None)):
@@ -2998,7 +2997,7 @@ class ItemWindow(Window):
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype)
+            icon, constLock = self.itemChips.getChip(item.vartype["type"])
 
             icon_y = offset_y
             text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
@@ -3020,7 +3019,7 @@ class ItemWindow(Window):
             offset_y += 24
             if item.itemvalue.is_open:
                 # ここで変数の値の開閉ボタンを作る
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'global')
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, item.vartype["children"], False)
 
         # ローカル変数
         for item in PLAYER.itembag.items[-1]:
@@ -3063,14 +3062,14 @@ class ItemWindow(Window):
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
 
             icon_x = 10
-            if item.itemvalue.children and item.vartype != "FILE *":
+            if item.itemvalue.children and item.vartype["type"] != "FILE *":
                 self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE, 16)
                 if self.is_inAction:
                     self.action_trigger_line_dict[offset_y // 24] = item.itemvalue
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype)
+            icon, constLock = self.itemChips.getChip(item.vartype["type"])
             icon_y = offset_y
             text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
 
@@ -3086,7 +3085,7 @@ class ItemWindow(Window):
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
-            if item.vartype == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname:
+            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname:
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 file_button = pygame.Rect(text_x + name_offset, offset_y + 2, 100, 20)
                 pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
@@ -3096,22 +3095,21 @@ class ItemWindow(Window):
                 self.surface.blit(label_surf, label_rect)
 
             # 配列などの値がないvalueは表示しない
-            if item.itemvalue.value is not None and item.vartype != "FILE *":
+            if item.itemvalue.value is not None and item.vartype["type"] != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 name_offset = self.myfont.get_rect(item.name).width + 20
                 self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", value_color)
             
             offset_y += 24
-            if item.itemvalue.is_open and item.vartype != "FILE *":
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, 'local')
+            if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, item.vartype["children"], True)
 
         if self.is_inAction:
             self.is_inAction = False
         self.file_window.draw(screen)
         Window.blit(self, screen)
 
-    def draw_values(self, itemvalue_children: dict[str | int, "ItemValue"], offset_y: int, offset_x: int, type: str):
-        text_x = offset_x
+    def draw_values(self, itemvalue_children: dict[str, "ItemValue"], offset_y: int, offset_x: int, type_dict: dict, isLocal: bool):
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = False
             if itemvalue.declared_exps is not None:
@@ -3139,23 +3137,29 @@ class ItemWindow(Window):
                 self.item_changed_lines.add(offset_y // 24)
                 pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
-            # 型に応じたアイコンを blit（描画）(型はどのように取得するかまだ考えていないので、今はコメントアウト)
-            # icon, constLock = self.itemChips.getChip(item.vartype)
-            # icon_x = 10
-            # icon_y = offset_y
-            # text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
+                
+            # 型に応じたアイコンを blit（描画)
 
-            # if icon:
-            #     self.surface.blit(icon, (icon_x, icon_y))
+            if valuename[0] == '[' or valuename == '*':
+                icon, constLock = self.itemChips.getChip(type_dict["type"])
+            else:
+                icon, constLock = self.itemChips.getChip(type_dict[valuename]["type"])
 
-            # if constLock:
-            #     self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+            icon_x = 10 + offset_x
+            icon_y = offset_y
+            text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
+
+            if icon:
+                self.surface.blit(icon, (icon_x, icon_y))
+
+            if constLock:
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
-            if type == 'global':
-                color = self.GREEN
-            else:
+            if isLocal:
                 color = self.BLACK if is_item_changed else self.WHITE
+            else:
+                color = self.GREEN
 
             if itemvalue.children:
                 self.draw_string(10, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
@@ -3170,7 +3174,7 @@ class ItemWindow(Window):
             offset_y += 24
 
             if itemvalue.is_open:
-                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+24, type)
+                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+24, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
 
         return offset_y
     
@@ -3748,7 +3752,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, exps, vartype, func, fromTo, funcWarp, mapname):
+    def __init__(self, pos, item, exps, vartype: dict, func, fromTo, funcWarp, mapname):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -4039,13 +4043,13 @@ class Object:
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
-    def __init__(self, name: str, line: int, data: dict, exps: dict, vartype: str):
+    def __init__(self, name: str, line: int, data: dict, exps: dict, vartype: dict):
         self.name = str(name)
         self.line = line
         self.index_exps = exps.get('indexes', None)
         ITEMWND.is_inAction = True
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
-        self.vartype: str = vartype
+        self.vartype: dict = vartype
 
     def get_value(self):
         """値を返す"""

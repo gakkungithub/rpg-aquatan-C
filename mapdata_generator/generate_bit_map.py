@@ -42,7 +42,7 @@ class MoveEvent:
         self.exps = exps
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: dict, type: str, func_name: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: dict, type: dict, func_name: str):
         self.pos = pos
         self.name = name
         self.type = type
@@ -189,7 +189,7 @@ class MapInfo:
         self.move_events.append(MoveEvent(warpFrom, warpTo, warpComment, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: str, crnt_func_name: str):
+    def setItemBox(self, roomNodeID, item_name, lineNodeID, item_exp_dict: dict, var_type: dict, crnt_func_name: str):
         ry, rx, rheight, rwidth = self.room_info[roomNodeID]
         zero_elements = np.argwhere(self.eventMap[ry:ry+rheight, rx:rx+rwidth] == 0)
         _, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
@@ -519,7 +519,7 @@ class GenBitMap:
     PADDING = 1
 
     # 型指定はまた後で行う
-    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, str], expNode_info: dict[str, tuple[str, list[str], list[str], list[str | dict], int]], 
+    def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, dict], expNode_info: dict[str, tuple[str, list[str], list[str], list[str | dict], int]], 
                  roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
         
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
@@ -717,9 +717,9 @@ class GenBitMap:
                 elif self.getNodeShape(gvarContentNodeID) == 'square':
                     eni = self.getExpNodeInfo(gvarContentNodeID)
                     if gvarString:
-                        gvarString = ', '.join([gvarString, f"'{varName}' : {{'values': {eni[3]}, 'type': '{var_type}'}}"])
+                        gvarString = ', '.join([gvarString, f"'{varName}' : {{'values': {eni[3]}, 'type': {var_type}}}"])
                     else:
-                        gvarString = f"'{varName}' : {{'values': {eni[3]}, 'type': '{var_type}'}}"
+                        gvarString = f"'{varName}' : {{'values': {eni[3]}, 'type': {var_type}}}"
                 #これはあり得ないがデバッグ用
                 else:
                     print("wrong node shape")

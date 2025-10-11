@@ -93,7 +93,7 @@ class ASTtoFlowChart:
         self.gotoRoom_list = {}
         self.roomSizeEstimate = None
         self.roomSize_info = {}
-        self.varNode_info: dict[str, str] = {}
+        self.varNode_info: dict[str, dict] = {}
         self.expNode_info: dict[str, tuple[str, list[str], list[str], list[str], int]] = {}
         self.condition_move : dict[str, tuple[str, list[int | str | None]]] = {}
         self.line_info_dict: dict[str, LineInfo] = {}
@@ -171,13 +171,13 @@ class ASTtoFlowChart:
         #引数とCOMPは同じ階層にある
 
         #現在のカーソルからこの関数の戻り値と引数の型を取得するかどうかは後で考える
-        arg_list: list[tuple[str, str, int]] = []
+        arg_list: list[tuple[str, ci.Type, int]] = []
         #ノードがなければreturnのノードはつけないようにするため、Noneを設定しておく
 
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.PARM_DECL:
-                arg_list.append((cr.spelling, cr.type.spelling, cr.location.line))
+                arg_list.append((cr.spelling, cr.type, cr.location.line))
             elif cr.kind == ci.CursorKind.COMPOUND_STMT:
                 func_name = cursor.spelling
                 #関数名を最初のノードの名前とする
@@ -195,7 +195,7 @@ class ASTtoFlowChart:
                 for arg in arg_list:
                     argname, argtype, argline = arg
                     argNodeID = self.createNode(f"{argname},{argline}", 'cylinder')
-                    self.varNode_info[f'"{argNodeID}"'] = argtype
+                    self.varNode_info[f'"{argNodeID}"'] = self.get_var_type(argtype)
                     self.createEdge(nodeID, argNodeID)
                     nodeID = argNodeID
                 nodeID = self.parse_comp_stmt(cr, nodeID)
@@ -250,7 +250,7 @@ class ASTtoFlowChart:
                 return cursor_stmt.location.line
         return None
     
-    #色々な関数内や条件文内のコードの解析を行う
+    # 色々な関数内や条件文内のコードの解析を行う
     def parse_stmt(self, cr: ci.Cursor, nodeID, edgeName=""):
         #ループのbreakやcontinueの情報を保管する
         def createLoopBreakerInfo():
@@ -406,6 +406,26 @@ class ASTtoFlowChart:
             nodeID = expNodeID
         return nodeID
 
+    # 変数の型を取得
+    def get_var_type(self, type: ci.Type):
+        # ポインタ型なら中身も
+        if type.kind == ci.TypeKind.POINTER:
+            pointee = type.get_pointee()
+            return {"type": type.spelling, "children": self.get_var_type(pointee)}
+        # 配列型なら要素型も
+        elif type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
+            elem = type.get_array_element_type()
+            return {"type": type.spelling, "children": self.get_var_type(elem)}
+        # 構造体の場合はフィールド列挙
+        elif type.kind == ci.TypeKind.ELABORATED:
+            struct_type_dict = {"type": type.spelling, "children": {}}
+            for field in type.get_fields():
+                field_type_dict = self.get_var_type(field.type)
+                struct_type_dict["children"][field.spelling] = field_type_dict
+            return struct_type_dict
+        else:
+            return {"type": type.spelling, "children": {}}
+
     # 変数の宣言
     def parse_var_decl(self, cursor: ci.Cursor, nodeID, edgeName=""):
         #この条件は配列の添字のノードを変えるためにある
@@ -423,10 +443,11 @@ class ASTtoFlowChart:
         self.createEdge(nodeID, varNodeID, edgeName)
 
         # 変数の型名はこのcursorで分かる
-        self.varNode_info[f'"{varNodeID}"'] = cursor.type.spelling
+        self.varNode_info[f'"{varNodeID}"'] = self.get_var_type(cursor.type)
 
         #配列
         if isArray:
+            print(cursor.type.get_array_element_type().spelling)
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None
@@ -532,8 +553,8 @@ class ASTtoFlowChart:
                                 memberNodeID = self.createNode(member[0], 'square')
                                 self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
-                            # 構造体のメンバの型を取得する
-                            self.varNode_info[f'"{memberNodeID}"'] = member[1]
+                            # # 構造体のメンバの型を取得する
+                            # self.varNode_info[f'"{memberNodeID}"'] = member[1]
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
                             if member_condition_move[0] != member_crs[0].location.line:
