@@ -110,13 +110,13 @@ class VarsTracker:
                             cstr = process.ReadCStringFromMemory(addr, 100, error)
                             if error.Success():
                                 print(f"→ {full_name} points to string: \"{cstr}\"")
-                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
                                 if cstr != var_previous_value:
                                     if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                        self.vars_changed[(name,line)].append(('*', ))
                                     else:
-                                        self.vars_changed[(name,line)]= [('[0]', )]
-                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(cstr, addr)
+                                        self.vars_changed[(name,line)]= [('*', )]
+                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"→ {full_name} points to unreadable char*")
                         elif type_name == "int":
@@ -124,13 +124,13 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("i", data)[0]
                                 print(f"→ {full_name} points to int: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
                                 if val != var_previous_value:
                                     if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                        self.vars_changed[(name,line)].append(('*', ))
                                     else:
-                                        self.vars_changed[(name,line)]= [('[0]', )]
-                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                                        self.vars_changed[(name,line)]= [('*', )]
+                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"→ {full_name} points to unreadable int*")
                         elif type_name == "float":
@@ -138,13 +138,13 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("f", data)[0]
                                 print(f"→ {full_name} points to float: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
                                 if val != var_previous_value:
                                     if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                        self.vars_changed[(name,line)].append(('*', ))
                                     else:
-                                        self.vars_changed[(name,line)]= [('[0]', )]
-                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                                        self.vars_changed[(name,line)]= [('*', )]
+                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"→ {full_name} points to unreadable float*")
                         elif type_name == "double":
@@ -152,13 +152,13 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("d", data)[0]
                                 print(f"→ {full_name} points to double: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['[0]'].value if '[0]' in var_previous_values[(name, line)].children else None
+                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
                                 if val != var_previous_value:
                                     if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('[0]', ))
+                                        self.vars_changed[(name,line)].append(('*', ))
                                     else:
-                                        self.vars_changed[(name,line)]= [('[0]', )]
-                                var_previous_values[(name, line)].children['[0]'] = VarPreviousValue(val, addr)
+                                        self.vars_changed[(name,line)]= [('*', )]
+                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"→ {full_name} points to unreadable double*")
                         else:
@@ -167,17 +167,17 @@ class VarsTracker:
                             if deref.IsValid() and deref.GetNumChildren() > 0:
                                 print(f"→ Deref {full_name}")
                                 children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[(name, line)].children, [name], line, 1, full_name)
+                                self.track(children, var_previous_values[(name, line)].children, [name], line, full_name)
                     else:
                         children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[(name, line)].children, [name], line, 1, full_name)
+                        self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
 
                 except Exception as e:
                     print(f"→ {full_name} deref error: {e}")
 
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[(name, line)].children, line, [name], 1, full_name)
+                self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
     
         if isLocal and len(self.vars_declared) != 0:
             vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
@@ -187,13 +187,12 @@ class VarsTracker:
                 for var_removed in vars_removed:
                     var_previous_values.pop(var_removed)
                 
-
-    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], depth=0, prefix="") -> list[str]:
+    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix, depth=1) -> list[str]:
         indent = "    " * depth
 
         for var in vars:
-            name = var.GetName()
-            full_name = f"{prefix}.{name}" if prefix else name
+            name = '*' if var.GetType().IsPointerType() else var.GetName() 
+            full_name = f"{prefix}.{name}"
             value = var.GetValue()
             address = var.GetLoadAddress()
 
@@ -229,19 +228,19 @@ class VarsTracker:
                             cstr = process.ReadCStringFromMemory(addr, 100, error)
                             if error.Success():
                                 print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
-                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
                                 if cstr != var_previous_value:
                                     if len(vars_path) == 0:
                                         if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('[0]', ))
+                                            self.vars_changed[(name, line)].append(('*', ))
                                         else:
-                                            self.vars_changed[(name, line)]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('*', )]
                                     else:
                                         if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
                                         else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
-                                var_previous_values[name].children['[0]'] = VarPreviousValue(cstr, addr)
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                var_previous_values[name].children['*'] = VarPreviousValue(cstr, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable char*")
                         elif type_name == "int":
@@ -249,19 +248,19 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("i", data)[0]
                                 print(f"{indent}→ {full_name} points to int: {val}")
-                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
                                         if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('[0]', ))
+                                            self.vars_changed[(name, line)].append(('*', ))
                                         else:
-                                            self.vars_changed[(name, line)]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('*', )]
                                     else:
                                         if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
                                         else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
-                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable int*")
                         elif type_name == "float":
@@ -269,19 +268,19 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("f", data)[0]
                                 print(f"{indent}→ {full_name} points to float: {val}")
-                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
                                         if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('[0]', ))
+                                            self.vars_changed[(name, line)].append(('*', ))
                                         else:
-                                            self.vars_changed[(name, line)]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('*', )]
                                     else:
                                         if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
                                         else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
-                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable float*")
                         elif type_name == "double":
@@ -289,19 +288,19 @@ class VarsTracker:
                             if error.Success():
                                 val = struct.unpack("d", data)[0]
                                 print(f"{indent}→ {full_name} points to double: {val}")
-                                var_previous_value = var_previous_values[name].children['[0]'].value if '[0]' in var_previous_values[name].children else None
+                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
                                 if val != var_previous_value:
                                     if len(vars_path) == 0:
                                         if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('[0]', ))
+                                            self.vars_changed[(name, line)].append(('*', ))
                                         else:
-                                            self.vars_changed[(name, line)]= [('[0]', )]
+                                            self.vars_changed[(name, line)]= [('*', )]
                                     else:
                                         if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '[0]'))
+                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
                                         else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '[0]')]
-                                var_previous_values[name].children['[0]'] = VarPreviousValue(val, addr)
+                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
                             else:
                                 print(f"{indent}→ {full_name} points to unreadable double*")
                         else:
@@ -310,17 +309,17 @@ class VarsTracker:
                             if deref.IsValid() and deref.GetNumChildren() > 0:
                                 print(f"{indent}→ Deref {full_name}")
                                 children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
+                                self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
                     else:
                         children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
+                        self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
 
                 except Exception as e:
                     print(f"{indent}→ {full_name} deref error: {e}")
 
             elif num_children > 0:
                 children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[name].children, line, vars_path + [name], depth + 1, full_name)
+                self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
 
     def getValueAll(self):
         return {var_key[0]: {var_key[1]: {"value": self.previous_values[-1][var_key].value, "children": self.getValuesDict(self.previous_values[-1][var_key].children)}} 
@@ -743,9 +742,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 
                             # アイテムを正しく取得できたら次の変数に移る
                             if not crntFromTo:
+                                # 取得した変数を宣言済リストに登録する
                                 self.vars_tracker.setVarsDeclared(var)
+                                # まだ全ての宣言が完了していない場合
                                 if len(varsDeclLines_copy):
                                     self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func}, False)
+                                # 全ての宣言が完了している場合
                                 else:
                                     # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
                                     # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
@@ -1327,7 +1329,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 debug_manager.analyze_frame()
     except:
         pass
-
 
 # region コマンドライン引数の確認
 parser = argparse.ArgumentParser(description='for the c-backdoor')

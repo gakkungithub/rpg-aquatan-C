@@ -340,6 +340,11 @@ def main():
         
         PLAYER.func = initialResult["firstFunc"]
 
+        ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10)
+        BIG_ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH - MIN_MAP_SIZE - 30, SCR_HEIGHT // 5 * 3 - 10)
+        ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
+        ITEMWND.hide()
+        
         for gvar_name, item_info in initialResult["items"].items():
             for line, values in item_info.items():
                 PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
@@ -364,11 +369,6 @@ def main():
 
         STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
         STATUSWND.show()
-
-        ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10)
-        BIG_ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH - MIN_MAP_SIZE - 30, SCR_HEIGHT // 5 * 3 - 10)
-        ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
-        ITEMWND.hide()
 
         CMNDWND = CommandWindow(TXTBOX_RECT)
         CMNDWND.show()
@@ -1843,6 +1843,7 @@ class Player(Character):
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
+                        print(itemResult["item"]["value"])
                         event.open(itemResult['item']['value'], itemResult['item']['line'], event.exps)
                         item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                         if (indexes := event.exps.get("indexes", None)):
