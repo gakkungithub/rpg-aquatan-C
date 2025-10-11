@@ -900,19 +900,16 @@ def load_mapchips(dir, file):
 
 class ItemChips():
     def __init__(self):
-        def load_itemChip(name):
-            return load_image('itemchip', name)
-        
         self.typeModifierUIMap = {
             'int' : {
-                frozenset() : load_itemChip('jewel2l-5.png'),
-                frozenset(['long']) : load_itemChip('jewel2l-3.png'),
-                frozenset(['long', 'long']) : load_itemChip('jewel2l-4.png'),
-                frozenset(['short']) : load_itemChip('jewel2l-2.png'),
-                frozenset(['unsigned']) : load_itemChip('jewel2b-5.png'),
-                frozenset(['unsigned', 'long']) : load_itemChip('jewel2b-3.png'),
-                frozenset(['unsigned', 'long', 'long']) : load_itemChip('jewel2b-4.png'),
-                frozenset(['unsigned', 'short']) : load_itemChip('jewel2b-2.png'),
+                frozenset() : self.load_itemChip('jewel2l-5.png'),
+                frozenset(['long']) : self.load_itemChip('jewel2l-3.png'),
+                frozenset(['long', 'long']) : self.load_itemChip('jewel2l-4.png'),
+                frozenset(['short']) : self.load_itemChip('jewel2l-2.png'),
+                frozenset(['unsigned']) : self.load_itemChip('jewel2b-5.png'),
+                frozenset(['unsigned', 'long']) : self.load_itemChip('jewel2b-3.png'),
+                frozenset(['unsigned', 'long', 'long']) : self.load_itemChip('jewel2b-4.png'),
+                frozenset(['unsigned', 'short']) : self.load_itemChip('jewel2b-2.png'),
             },
             'char' : {
                 frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-25.png'), (32,32)),
@@ -925,14 +922,17 @@ class ItemChips():
                 frozenset(['long']) : load_image('mapchip', 'foods-33.png'),
             },
             'other' : {
-                frozenset() : load_itemChip('jewel2t-5.png'),
+                frozenset() : self.load_itemChip('jewel2t-5.png'),
             }
         }
         self.constUIMap = {
-            True : pygame.transform.smoothscale(load_itemChip('shield.png'), (12,12)),
+            True : pygame.transform.smoothscale(self.load_itemChip('shield.png'), (12,12)),
             False: None
         }
 
+    def load_itemChip(self, name):
+        return load_image('itemchip', name)
+    
     def getChip(self, type_name: str):
         tokens = type_name.strip().split()
 
@@ -942,12 +942,27 @@ class ItemChips():
         base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
 
         base_type = None
-        for t in tokens:
+        struct_type = None
+        array_type = None
+    
+        for i, t in enumerate(tokens):
+            if '*' in t and t != "FILE":
+                return pygame.transform.smoothscale(self.load_itemChip('pointer.png'), (24,24)), None
+            if t == "FILE":
+                return pygame.transform.smoothscale(self.load_itemChip('file.png'), (40,40)), None
             if t in base_types:
                 base_type = t
+            if 'struct' in t:
+                struct_type = 'struct'
+            if '[' in t:
+                array_type = t
                 break
         
-        if base_type is not None:
+        if array_type is not None:
+            return pygame.transform.smoothscale(self.load_itemChip('array.png'), (24,24)), self.constUIMap[is_const]
+        elif struct_type is not None:
+            return pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
+        elif base_type is not None:
             tokens.remove(base_type)
         else:
             base_type = 'int'

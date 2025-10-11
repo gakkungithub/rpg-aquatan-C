@@ -1,4 +1,2 @@
-start,07_function_in_condition,10, 5
-itemget, 07_function_in_condition,13, 6,num
-itemget, 07_function_in_condition,9, 7,threshold
-end, 07_function_in_condition,9, 7
+start,15_pointer,16, 10
+end, 15_pointer,16, 10
