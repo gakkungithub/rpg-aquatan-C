@@ -376,7 +376,7 @@ class ASTtoFlowChart:
                 self.gotoLabel_list[cr.spelling] = {"toNodeID": f'"{self.roomSizeEstimate[0]}"', "fromNodeID": []}
             nodeID = self.parse_stmt(exec_cr, toNodeID)
         elif cr.kind == ci.CursorKind.CALL_EXPR:
-            var_references = []
+            var_references: set[tuple[str, int]] = set()
             func_references = []
             calc_order_comments = []
             exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
@@ -628,7 +628,7 @@ class ASTtoFlowChart:
     #式(一つのノードexpNodeに内容をまとめる)
     def get_exp(self, cursor, shape='square', label="") -> str:
         expNodeID = self.createNode(label, shape)
-        var_references = []
+        var_references: set[tuple[str, int]] = set()
         func_references = []
         calc_order_comments = []
         exp_terms = self.parse_exp_term(cursor, var_references, func_references, calc_order_comments)
@@ -643,7 +643,7 @@ class ASTtoFlowChart:
 
     # 式の項を一つずつ解析
     # malloc, realloc, fopenが計算式に含まれる場合は特別な条件の下で解析を行う
-    def parse_exp_term(self, cursor: ci.Cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
+    def parse_exp_term(self, cursor: ci.Cursor, var_references: set[tuple[str, int]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]) -> str:
         unary_front_operator_comments = {
             '++': "{expr} を 1 増やしてから {expr} の値を使います",
             '--': "{expr} を 1 減らしてから {expr} の値を使います",
@@ -781,10 +781,11 @@ class ASTtoFlowChart:
                     self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
             else:
                 exp_terms = cursor.spelling
-            var_references.append([exp_terms])
+            var_references.add((exp_terms, cursor.referenced.location.line))
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             index_exp_terms_list = []
+            # 配列の参照は、添字→添字→・・・→配列名の順で取得する
             while 1:
                 array_children = [self.unwrap_unexposed(cr) for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
                 if len(array_children) != 2:
@@ -799,6 +800,8 @@ class ASTtoFlowChart:
             exp_terms = ''.join([name_spell, *list(reversed(index_exp_terms_list))])
             if any(func in exp_terms for func in ("malloc", "realloc", "fopen")):
                 sys.exit(-1)
+            var_references.add((name_spell, array_children[0].referenced.location.line))
+            
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
             member_chain = []
@@ -812,7 +815,7 @@ class ASTtoFlowChart:
                     break
             if member_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
                 member_chain.append(member_cursor.spelling)
-                var_references.append(list(reversed(member_chain)))
+                var_references.add((member_cursor.spelling, member_cursor.referenced.location.line))
                 exp_terms = ".".join(member_chain)
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
@@ -925,7 +928,7 @@ class ASTtoFlowChart:
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
     # そして、コメントを表示するときに既に
 
-    def parse_call_expr(self, cursor, var_references: list[list[str]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
+    def parse_call_expr(self, cursor, var_references: set[tuple[str, int]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
         children = list(cursor.get_children())
 
         # --- 関数名ノードの処理 ---

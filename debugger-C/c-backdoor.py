@@ -676,7 +676,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         def get_new_values(self, values_changed: list[tuple[str, int]]):
             value_changed_dict = []
             for value_changed in values_changed:
-                print(value_changed)
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
                     value = self.vars_tracker.getValuePartly(value_changed, value_path.copy())

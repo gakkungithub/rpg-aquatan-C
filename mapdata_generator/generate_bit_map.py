@@ -102,8 +102,8 @@ class CharaExpression:
         self.func = func
         self.exps_dict: dict[int, dict] = {}
     
-    def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int]):
-        self.exps_dict[line_track[0]] = {"type": type, "comments": expNodeInfo[3], "var_references": expNodeInfo[1], "line_track": line_track}
+    def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str | dict], int]):
+        self.exps_dict[line_track[0]] = {"type": type, "comments": expNodeInfo[3], "vars": [{"name": var_reference[0], "line": var_reference[1]} for var_reference in expNodeInfo[1]], "line_track": line_track}
 
 # マップデータ生成に必要な情報はここに格納
 class MapInfo:
@@ -160,7 +160,7 @@ class MapInfo:
 
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
-    def setWarpZone(self, startNodeID: str, goalNodeID: str, warpComment: dict, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, list[str], list[str], list[str | dict], int] | None = None):
+    def setWarpZone(self, startNodeID: str, goalNodeID: str, warpComment: dict, crnt_func_name: str, mapchip_num: int, warpNodeID: str = None, expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str | dict], int] | None = None):
         sy, sx, sheight, swidth = self.room_info[startNodeID]
         gy, gx, gheight, gwidth = self.room_info[goalNodeID]
         
@@ -215,7 +215,7 @@ class MapInfo:
         self.doors.append(Door(pos, dir, doorname))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
-    def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], detail: str, expNodeInfo: tuple[str, list[str], list[str], list[str], int] | None):
+    def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, condition_line_tracker: tuple[str, list[int | str | None]], detail: str, expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str], int] | None):
         exp_comments = expNodeInfo[3] if expNodeInfo else []
         for exp_comment in exp_comments:
             if isinstance(exp_comment, dict):
@@ -387,7 +387,7 @@ class MapInfo:
             exps_dict = {}
             for firstLine, exps in chara_expression.exps_dict.items():
                 func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
-                exps_dict[firstLine] = {"type": exps["type"], "fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["var_references"]}
+                exps_dict[firstLine] = {"type": exps["type"], "fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["vars"]}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             

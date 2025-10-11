@@ -1982,17 +1982,26 @@ class Player(Character):
                             if charaExpressionResult.get('skipCond', False):
                                 MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
                             else:
-                                item_line_info = {}
-                                for item_value_changed in charaExpressionResult["values"]:
-                                    item_line_info[item_value_changed["item"]["name"]] = item_value_changed["item"]["line"]
+                                item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
 
-                                for var_path in exps["vars"]:
-                                    if (line := item_line_info.get(var_path[0], None)) is None:
+                                for item_value_changed in charaExpressionResult["values"]:
+                                    varname = item_value_changed["item"]["name"]
+                                    line = item_value_changed["item"]["line"]
+                                    if (varname, line) in item_info_dict:
+                                        item_info_dict[(varname, line)].append(item_value_changed["path"])
+                                    else:
+                                        item_info_dict[(varname, line)] = [item_value_changed["path"]]
+
+                                for var_info in exps["vars"]:
+                                    varname = var_info["name"]
+                                    line = var_info["line"]
+                                    if (path_list := item_info_dict.get((varname, line), None)) is None:
                                         continue
-                                    if (item := PLAYER.commonItembag.find(var_path[0], line)) is None:
-                                        item = PLAYER.itembag.find(var_path[0], line)
+                                    if (item := PLAYER.commonItembag.find(varname, line)) is None:
+                                        item = PLAYER.itembag.find(varname, line)
                                     if item is not None:
-                                        item.set_exps(var_path[1:], exps["exps"])
+                                        for path in path_list:
+                                            item.set_exps(path, exps["exps"])
                                 if (mymap.name, chara.func, exps["fromTo"][0]) in self.checkedFuncs:
                                     self.checkedFuncs.pop((mymap.name, chara.func, exps["fromTo"][0]))
                                 chara.linenum = None
@@ -4043,7 +4052,7 @@ class Item:
 
     def set_value(self, vals: dict):
         """値をセット"""
-        path: list[str] = vals["path"]
+        path: list[str] = vals["path"].copy()
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
@@ -4669,7 +4678,6 @@ class EventSender:
                     if "values" in msg:
                         PLAYER.remove_itemvalue()
                         for itemvalues in msg["values"]:
-                            print(itemvalues)
                             item = PLAYER.commonItembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                             if item is None:
                                 item = PLAYER.itembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
