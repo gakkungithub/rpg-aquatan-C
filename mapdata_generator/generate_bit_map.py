@@ -462,6 +462,10 @@ class TileFixed(Tile):
             self.distance = current.distance + self.weight
 
 class AStarFixed(AStar):
+    def __init__(self, world, eventMap):
+        super().__init__(world)
+        self.eventMap = eventMap
+
     def search(self, start_pos, target_pos):
         """A_Star (A*) path search algorithm"""
         start = TileFixed(*start_pos)
@@ -495,7 +499,7 @@ class AStarFixed(AStar):
                 continue
 
             # 通行可能マスであることを確認
-            if self.world[nx][ny] != 0:
+            if self.world[nx][ny] != 0 or self.eventMap[nx][ny] == 2:
                 continue
 
             # 隣接マスに1がある場合は除外（接触を避ける）
@@ -1183,7 +1187,7 @@ class GenBitMap:
             check_map[(sny, snx)] = 0
             check_map[(gny, gnx)] = 0
 
-            path = AStarFixed(check_map).search(start, goal)
+            path = AStarFixed(check_map, self.mapInfo.eventMap).search(start, goal)
 
             check_map[(sny, snx)] = 1
             check_map[(gny, gnx)] = 1
@@ -1191,12 +1195,18 @@ class GenBitMap:
             if path is None or len(path) == 1:
                 self.mapInfo.setWarpZone(startNodeID, goalNodeID, pathComment, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(expNodeID)) 
             else:
-                self.mapInfo.setDoor(path[0], dir, pathComment)     
+                gy, gx, gheight, gwidth = self.mapInfo.room_info[goalNodeID]
+                for i in range(1, len(path)):
+                    if ((gy <= path[i][0] <= gy+gheight-1 and (path[i][1] == gx-1 or path[i][1] == gx+gwidth))
+                        or (gx <= path[i][1] <= gx+gwidth-1 and (path[i][0] == gy-1 or path[i][0] == gy+gheight))):
+                        path = path[:i+1]
+                        break
 
                 for i in range(len(path)):
                     self.floorMap[path[i][0], path[i][1]] = 0
 
-                i = len(path) - 1
+                self.mapInfo.setDoor(path[0], dir, pathComment)     
+
                 dir_door = (path[i-1][0] - path[i][0], path[i-1][1] - path[i][1])
                 if dir_door == (1,0): # 下向き d
                     self.mapInfo.setCharaCheckCondition(self.func_name, path[i], 0, self.mapInfo.condition_line_trackers.get_condition_line_tracker(goalNodeID), pathComment, expNodeInfo=self.getExpNodeInfo(expNodeID))

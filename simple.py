@@ -966,7 +966,7 @@ class ItemChips():
             return [pygame.transform.smoothscale(self.load_itemChip('struct.png'), (8,8)) for _ in range(3)] if is_array else pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
         
         tokens = [t for t in tokens if t not in tokens_to_remove]
-        
+
         if base_type is None:
             base_type = 'int'
         
@@ -3026,7 +3026,7 @@ class ItemWindow(Window):
                 self.surface.blit(icon[0], (icon_x+8, offset_y+4))
                 self.surface.blit(icon[1], (icon_x+4, offset_y+12))
                 self.surface.blit(icon[2], (icon_x+12, offset_y+12))
-                text_x = icon_x + icon[0].get_width() * 3 + 10
+                text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
                 self.surface.blit(icon, (icon_x, offset_y))
@@ -3045,7 +3045,7 @@ class ItemWindow(Window):
             offset_y += 24
             if item.itemvalue.is_open:
                 # ここで変数の値の開閉ボタンを作る
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, item.vartype["children"], False)
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
 
         # ローカル変数
         for item in PLAYER.itembag.items[-1]:
@@ -3101,7 +3101,7 @@ class ItemWindow(Window):
                 self.surface.blit(icon[0], (icon_x+8, offset_y+4))
                 self.surface.blit(icon[1], (icon_x+4, offset_y+12))
                 self.surface.blit(icon[2], (icon_x+12, offset_y+12))
-                text_x = icon_x + icon[0].get_width() * 3 + 10
+                text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
                 self.surface.blit(icon, (icon_x, offset_y))
@@ -3132,7 +3132,7 @@ class ItemWindow(Window):
             
             offset_y += 24
             if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, 24, item.vartype["children"], True)
+                offset_y = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
 
         if self.is_inAction:
             self.is_inAction = False
@@ -3180,7 +3180,7 @@ class ItemWindow(Window):
             else:
                 color = self.GREEN
                 
-            icon_x = offset_x if itemvalue.children else offset_x - 8
+            icon_x = offset_x
             if itemvalue.children:
                 self.draw_string(icon_x, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
                 if self.is_inAction:
@@ -3192,7 +3192,7 @@ class ItemWindow(Window):
                 self.surface.blit(icon[0], (icon_x+8, offset_y+4))
                 self.surface.blit(icon[1], (icon_x+4, offset_y+12))
                 self.surface.blit(icon[2], (icon_x+12, offset_y+12))
-                text_x = icon_x + icon[0].get_width() * 3 + 10
+                text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
                 self.surface.blit(icon, (icon_x, offset_y))
@@ -3208,7 +3208,7 @@ class ItemWindow(Window):
             offset_y += 24
 
             if itemvalue.is_open:
-                offset_y = self.draw_values(itemvalue.children, offset_y, offset_x+24, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                offset_y = self.draw_values(itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
 
         return offset_y
     
