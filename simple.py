@@ -943,36 +943,43 @@ class ItemChips():
 
         base_type = None
         struct_type = None
-        array_type = None
+        is_array = False
     
-        for i, t in enumerate(tokens):
+        tokens_to_remove = []
+        for t in tokens:
             if '*' in t and t != "FILE":
                 return pygame.transform.smoothscale(self.load_itemChip('pointer.png'), (24,24)), None
             if t == "FILE":
-                return pygame.transform.smoothscale(self.load_itemChip('file.png'), (40,40)), None
+                return pygame.transform.smoothscale(self.load_itemChip('file.png'), (48,48)), None
             if t in base_types:
                 base_type = t
+                tokens_to_remove.append(t)
             if 'struct' in t:
                 struct_type = 'struct'
             if '[' in t:
-                array_type = t
+                is_array = True
+                base_type = t.split('[')[0]
+                tokens_to_remove.append(t)
                 break
+
+        if struct_type is not None:
+            return [pygame.transform.smoothscale(self.load_itemChip('struct.png'), (8,8)) for _ in range(3)] if is_array else pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
         
-        if array_type is not None:
-            return pygame.transform.smoothscale(self.load_itemChip('array.png'), (24,24)), self.constUIMap[is_const]
-        elif struct_type is not None:
-            return pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
-        elif base_type is not None:
-            tokens.remove(base_type)
-        else:
+        tokens = [t for t in tokens if t not in tokens_to_remove]
+        
+        if base_type is None:
             base_type = 'int'
         
         modifier_set = frozenset(tokens)
 
-        base_icon = self.typeModifierUIMap.get(base_type, self.typeModifierUIMap['other']).get(modifier_set, self.typeModifierUIMap['other'][frozenset()])
+        base_icon: pygame.Surface = self.typeModifierUIMap.get(base_type, self.typeModifierUIMap['other']).get(modifier_set, self.typeModifierUIMap['other'][frozenset()])
         const_overlay = self.constUIMap[is_const]
 
-        return base_icon, const_overlay
+        if is_array:
+            w, h = base_icon.get_size()
+            return [pygame.transform.smoothscale(base_icon.copy(), (w//2, h//2)) for _ in range(3)], const_overlay
+        else:
+            return base_icon, const_overlay
 
 #                                                                                                        
 #                       88                                    ad88    ad88                               
@@ -2948,7 +2955,7 @@ class ItemWindow(Window):
         self.file_buttons: dict[str, pygame.Rect] = {}
         self.file_window = FileWindow()
         self.is_inAction = True
-        self.action_trigger_line_dict: dict[int, ItemValue] = {}
+        self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
 
     def draw_string(self, x, y, string, color, size=None):
         """文字列出力"""
@@ -3008,20 +3015,24 @@ class ItemWindow(Window):
             if item.itemvalue.children:
                 self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN, 16)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = item.itemvalue
+                    self.action_trigger_line_dict[offset_y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
 
-            icon_y = offset_y
-            text_x = icon_x + icon.get_width() + 6  # ← アイコン幅 + 余白（6px）
-
-            if icon:
-                self.surface.blit(icon, (icon_x, icon_y))
+            if isinstance(icon, list):
+                # (4,4),(12,4),(8,12)の順で描画
+                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
+                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
+                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                text_x = icon_x + icon[0].get_width() * 3 + 10
+            else:
+                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
+                self.surface.blit(icon, (icon_x, offset_y))
 
             if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN)
@@ -3080,19 +3091,23 @@ class ItemWindow(Window):
             if item.itemvalue.children and item.vartype["type"] != "FILE *":
                 self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE, 16)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = item.itemvalue
+                    self.action_trigger_line_dict[offset_y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
-            icon_y = offset_y
-            text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
-
-            if icon:
-                self.surface.blit(icon, (icon_x, icon_y))
+            if isinstance(icon, list):
+                # (4,4),(12,4),(8,12)の順で描画
+                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
+                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
+                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                text_x = icon_x + icon[0].get_width() * 3 + 10
+            else:
+                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
+                self.surface.blit(icon, (icon_x, offset_y))
 
             if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
             if item.itemvalue.value in PLAYER.address_to_size:
                 self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
@@ -3154,32 +3169,36 @@ class ItemWindow(Window):
                                  pygame.Rect(0, offset_y, self.rect.width, 24))
                 
             # 型に応じたアイコンを blit（描画)
-
             if valuename[0] == '[' or valuename == '*':
                 icon, constLock = self.itemChips.getChip(type_dict["type"])
             else:
                 icon, constLock = self.itemChips.getChip(type_dict[valuename]["type"])
-
-            icon_x = 10 + offset_x
-            icon_y = offset_y
-            text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（10px）
-
-            if icon:
-                self.surface.blit(icon, (icon_x, icon_y))
-
-            if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, icon_y))
 
             # アイコンの右に名前と値を描画
             if isLocal:
                 color = self.BLACK if is_item_changed else self.WHITE
             else:
                 color = self.GREEN
-
+                
+            icon_x = offset_x if itemvalue.children else offset_x - 8
             if itemvalue.children:
-                self.draw_string(10, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
+                self.draw_string(icon_x, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = itemvalue
+                    self.action_trigger_line_dict[offset_y // 24] = (itemvalue, icon_x)
+                icon_x += 15
+
+            if isinstance(icon, list):
+                # (4,4),(12,4),(8,12)の順で描画
+                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
+                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
+                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                text_x = icon_x + icon[0].get_width() * 3 + 10
+            else:
+                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
+                self.surface.blit(icon, (icon_x, offset_y))
+
+            if constLock:
+                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
             self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color)
             name_offset = self.myfont.get_rect(valuename).width + 20
@@ -3204,8 +3223,9 @@ class ItemWindow(Window):
                 self.file_window.toggle_is_visible(filename)
                 return True
             
-        if 10 <= pos[0] <= 30 and y_line in self.action_trigger_line_dict and not MSGWND.is_visible:
-            self.action_trigger_line_dict[y_line].is_open = not self.action_trigger_line_dict[y_line].is_open
+        if (y_line in self.action_trigger_line_dict and self.action_trigger_line_dict[y_line][1] <= pos[0] <= self.action_trigger_line_dict[y_line][1] + 20 
+            and not MSGWND.is_visible):
+            self.action_trigger_line_dict[y_line][0].is_open = not self.action_trigger_line_dict[y_line][0].is_open
             self.is_inAction = True
             self.action_trigger_line_dict = {}
             return True
