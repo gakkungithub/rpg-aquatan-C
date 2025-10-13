@@ -169,6 +169,7 @@ def main():
                             # ステージのボタンを押した場合
                             elif code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
+                                    stage_index = SBWND.code_names.index(code_name) + 1
                                     SBWND.hide()
                                     stage_name = code_name
                                 elif server is None:
@@ -367,7 +368,7 @@ def main():
         LIGHTWND.set_color_scene("normal")
         LIGHTWND.show()
 
-        STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10),PLAYER)
+        STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10), PLAYER, stage_index)
         STATUSWND.show()
 
         CMNDWND = CommandWindow(TXTBOX_RECT)
@@ -396,6 +397,10 @@ def main():
         
         while not PLAYER.goaled:
             clock.tick(MAX_FRAME_PER_SEC)
+
+            if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
+                MSGWND.set("プレイヤーのライフが尽きました、、、\nGAME OVER !!", (['ステージ選択画面に戻る'], 'finished'))
+
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
                 fieldmap.update()
@@ -818,6 +823,7 @@ def main():
             MSGWND.next(fieldmap)
             pygame.display.flip()
 
+        
         server.terminate()
 
 #                                                                                                                                                                                         
@@ -3356,7 +3362,7 @@ class StatusWindow(Window):
     BLUE = Color(31, 31, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
-    def __init__(self, rect: pygame.Rect, player: Player):
+    def __init__(self, rect: pygame.Rect, player: Player, stage_index: int):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
         self.myfont = pygame.freetype.Font(
@@ -3364,6 +3370,7 @@ class StatusWindow(Window):
         self.color = self.WHITE
         self.player = player
         self.name = "あくあたん" + self.player.name
+        self.stage_index = stage_index
 
     def draw_string(self, x, y, string, color):
         """文字列出力"""
@@ -3380,17 +3387,16 @@ class StatusWindow(Window):
         if not self.is_visible:
             return
         Window.draw(self)
-#        self.surface.blit(self.img_schedule, self.text_rect)
-        self.draw_string(10, 10, self.name, self.WHITE)
+        # self.surface.blit(self.img_schedule, self.text_rect)
+        self.draw_string(10, 10, f"ステージ {self.stage_index}", self.WHITE)
+        self.draw_string(10, 30, f"現在地:　{self.player.func}", self.CYAN)
 
-        self.draw_status(10,30,"LV")
-        self.draw_status(10,50,"HP")
-        self.draw_status(100,50,"MP")
-        self.draw_status(10,70,"ATK")
-        self.draw_status(100,70,"DEF")
-        self.draw_status(10,90,"AGI")
+        self.draw_status(10, 50, "HP")
+        self.draw_status(100, 50, "MP")
+        self.draw_status(10, 70, "ATK")
+        self.draw_status(100, 70, "DEF")
+        self.draw_status(10, 90, "AGI")
 
-        self.draw_string(10, 110, f"現在地:　{self.player.func}", self.CYAN)
         Window.blit(self, screen)
 
 #                                                                                                   
@@ -4777,6 +4783,10 @@ class EventSender:
                                 PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                             else:
                                 PLAYER.address_to_size.pop(memory_info["address"], None)
+                    if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
+                        PLAYER.status["HP"] -= 10
+                        if "message" in msg:
+                            msg["message"] += '\fプレイヤーに10ダメージ!!'
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg
