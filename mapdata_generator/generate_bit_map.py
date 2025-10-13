@@ -856,15 +856,19 @@ class GenBitMap:
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
             toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
+            tempNode_info = None
             # 今まではifの終了ごとにワープゾーンを作っていたが、ifの終了が連続する場合に対応できなかったので、連続するノードは飛ばすようにした
             while 1:
-                tempNodeID, _ = self.nextNodeInfo[toNodeID][0]
+                if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
+                    break
+                tempNodeID, _ = tempNode_info[0]
                 if self.getNodeShape(tempNodeID) != 'terminator':
+                    self.createRoom(toNodeID)
                     break
                 toNodeID, _ = self.nextNodeInfo[tempNodeID][0]
-            self.createRoom(toNodeID)
             self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
-            self.trackAST(toNodeID, tempNodeID, loopBackID)
+            if tempNode_info:
+                self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':

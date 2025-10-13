@@ -404,6 +404,8 @@ def main():
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
                 fieldmap.update()
+            elif PLAYER.damage_motion:
+                PLAYER.update(fieldmap)
 
             MSGWND.update()
             offset = calc_offset(PLAYER)
@@ -1525,8 +1527,8 @@ class Character:
         self.movetype = movetype  # 移動タイプ
         self.message = message  # メッセージ
         self.moveto = []
-        self.hp = ""  # 在室時間
-        self.hp_color = (211, 211, 255, 255)
+        self.damage = ""  # ダメージ
+        self.damage_color = (255, 0, 0, 255)
         self.lim_lu = (self.x - 2, self.y - 2)
         self.lim_rd = (self.x + 2, self.y + 2)
 
@@ -1631,7 +1633,7 @@ class Character:
         screen.blit(self.image, (px-offsetx, py-offsety))
         screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
                     0], (px-offsetx, py-offsety-18))
-        screen.blit(font.render(str(self.hp), self.hp_color)
+        screen.blit(font.render(self.damage, self.damage_color)
                     [0], (px-offsetx+32, py-offsety))
 
     def set_pos(self, x, y, direction):
@@ -1686,20 +1688,23 @@ class Player(Character):
     def __init__(self, name, pos, direction, sender):
         Character.__init__(self, name, pos, direction, False, None)
         self.prevPos = [pos, pos]
-        self.wait = 0
+        self.damage_motion: list[int] = []
         self.dest = {}
         self.place_label = "away"
         self.automove = []
         self.waitingMove = None
         self.moveHistory = []
         self.move5History = []
-        self.status = {"LV":1, "HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
+        self.status = {"HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
         self.itembag = ItemBag()
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
         self.itemNameShow = False
-        self.door: SmallDoor | None = None # スモールドアイベントがNoneでない(扉の上にいる)時に移動したら扉を閉じるようにする。
+        # スモールドアを扉を閉じるために記憶
+        self.door: SmallDoor | None = None 
+        # プレイヤーが条件式通過した後に条件式確認キャラが元の位置に戻るために記憶する
         self.ccchara: CharaCheckCondition = None
+        # 遷移済みの関数の情報を記憶
         self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
         self.goaled = False
         self.funcInfoWindow_list: list[FuncInfoWindow] = []
@@ -1734,6 +1739,10 @@ class Player(Character):
                     if isinstance(door, SmallDoor):
                         door.close()
                         self.door = None
+        elif self.damage_motion:
+            if self.damage_motion[0] == 0:
+                PLAYER.damage = ""
+            self.rect.move_ip(self.damage_motion.pop(0), 0)
         elif self.waitingMove is not None:
             dest_map = self.waitingMove.dest_map
             dest_x = self.waitingMove.dest_x
@@ -1771,29 +1780,10 @@ class Player(Character):
                 cmd = "\0"
             # endregion
 
-            # コマンドまたは矢印ボタンの入力(cmd入力)がなければ、自動移動かキー移動だと考える
+            # コマンドまたは矢印ボタンの入力(cmd入力)がなければキー移動だと考える
             if not direction in ('u', 'd', 'l', 'r'):
-                # 自動移動 (cmd以上に優先される)
-                if len(self.automove) > 0:
-                    direction = self.get_next_automove()
                 # キー入力 (cmd移動/自動移動がない時のみ許す => 同時入力は受け付けない)
-                else: 
-                    pressed_keys = pygame.key.get_pressed()
-
-            # cmd入力と自動移動の許可を判断 (入力の独立性は既に確保されているので一緒に判断しても良い)
-            # if direction in ('u', 'd', 'l', 'r'):
-            #     if ((self.y - self.prevPos[0][1] == -1 and direction == 'd')
-            #     or (self.x - self.prevPos[0][0] == 1 and direction == 'l')
-            #     or (self.x - self.prevPos[0][0] == -1 and direction == 'r')
-            #     or (self.y - self.prevPos[0][1] == 1 and direction == 'u')):
-            #         tempPrevPos = [None, self.prevPos[0]]
-            #         MSGWND.set("ここから先は進入できません!!")
-            #     self.pop_automove()
-            # elif direction == 'x':
-            #     self.wait += 1
-            #     if self.wait > 60:
-            #         self.wait = 0
-            #         self.pop_automove()
+                pressed_keys = pygame.key.get_pressed()
 
             if pressed_keys and (pressed_keys[K_LSHIFT] or pressed_keys[K_RSHIFT]):
                 self.speed = 16
@@ -2107,8 +2097,9 @@ class Player(Character):
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                                                 self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
                                             self.ccchara = chara.set_checked()
+                                            MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
                                 else:
-                                    MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
+                                    MSGWND.set("異なる行動をしようとしています")
                                     return False
                             else:
                                 MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
@@ -4785,8 +4776,10 @@ class EventSender:
                                 PLAYER.address_to_size.pop(memory_info["address"], None)
                     if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
                         PLAYER.status["HP"] -= 10
+                        PLAYER.damage = "-10"
+                        PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
                         if "message" in msg:
-                            msg["message"] += '\fプレイヤーに10ダメージ!!'
+                            msg["message"] += '\fプレイヤーに10ダメージ !!'
                     if ITEMWND:
                         ITEMWND.file_window.read_filelines()
                     return msg
