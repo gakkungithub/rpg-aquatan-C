@@ -819,13 +819,12 @@ def main():
                             continue
 
                         # 表示中でないなら話す
-                        PLAYER.talk(fieldmap, CODEWND.linenum)
+                        PLAYER.talk(fieldmap)
 
                 # endregion
             MSGWND.next(fieldmap)
             pygame.display.flip()
 
-        
         server.terminate()
 
 #                                                                                                                                                                                         
@@ -1995,7 +1994,7 @@ class Player(Character):
             return True
         return False
 
-    def talk(self, mymap: Map, linenum: int):
+    def talk(self, mymap: Map):
         """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
         # 向いている方向のとなりの座標を求める
         nextx, nexty = self.x, self.y
@@ -2749,7 +2748,6 @@ class MessageWindow(Window):
                             newItems = []
                             func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
                             arg_index = 0
-                            print(func_num_checked, event.funcExps)
                             for name, argInfo in skipResult["skipTo"]["items"].items():
                                 for line, itemInfo in argInfo.items():
                                     item = Item(name, int(line), itemInfo["value"], event.funcExps[func_num_checked]["args"][arg_index], itemInfo["type"])
@@ -3369,8 +3367,9 @@ class StatusWindow(Window):
         self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
 
     def draw_status(self,x,y,label):
-        self.draw_string(x, y, label, self.WHITE)
-        self.draw_string(x+40, y, f"{self.player.status[label]:>5}", self.WHITE)
+        color = self.RED if label == "HP" and self.player.status["HP"] <= 30 else self.WHITE
+        self.draw_string(x, y, label, color)
+        self.draw_string(x+40, y, f"{self.player.status[label]:>5}", color)
 
     def draw(self, screen):
         """メッセージを描画する
@@ -3386,7 +3385,7 @@ class StatusWindow(Window):
         self.draw_status(100, 50, "MP")
         self.draw_status(10, 70, "ATK")
         self.draw_status(100, 70, "DEF")
-        self.draw_status(10, 90, "AGI")
+        # self.draw_status(10, 90, "AGI")
 
         Window.blit(self, screen)
 

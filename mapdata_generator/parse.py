@@ -447,7 +447,6 @@ class ASTtoFlowChart:
 
         #配列
         if isArray:
-            print(cursor.type.get_array_element_type().spelling)
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
             cr_init_members = None

@@ -413,22 +413,22 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
         def step_conditionally(self, var_check = True):
             # scanf フォーマット → Python 正規表現パターンの対応表
             scanf_patterns = {
-                "%d": r"[-+]?\d+",
-                "%i": r"[-+]?(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)",
-                "%u": r"\d+",
-                "%o": r"[0-7]+",
-                "%x": r"[0-9a-fA-F]+",
-                "%X": r"[0-9a-fA-F]+",
-                "%f": r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?",
-                "%F": r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?",
-                "%e": r"[-+]?\d+(\.\d+)?[eE][-+]?\d+",
-                "%E": r"[-+]?\d+(\.\d+)?[eE][-+]?\d+",
-                "%g": r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?",
-                "%G": r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?",
-                "%c": r".",
-                "%s": r"\S+",
-                "%p": r"0x[0-9a-fA-F]+",
-                "%n": None,
+                "%d": (r"[-+]?\d+", "符号付き10進整数"),
+                "%i": (r"[-+]?(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)", "符号付き整数(何進数かは自動判定)"),
+                "%u": (r"\d+", "符号なし10進整数"),
+                "%o": (r"[0-7]+", "8進整数"),
+                "%x": (r"[0-9a-f]+", "16進整数(小文字)"),
+                "%X": (r"[0-9A-F]+", "16進整数(大文字)"),
+                "%f": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点"),
+                "%F": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点(INF, NANも可)"),
+                "%e": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(小文字)"),
+                "%E": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(大文字)"),
+                "%g": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(小文字)"),
+                "%G": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(大文字)"),
+                "%c": (r".", "1文字"),
+                "%s": (r"\S+", "文字列(区切りとなる空白以外)"),
+                "%p": (r"0x[0-9a-fA-F]+", "ポインタ"),
+                "%n": (r"", "出力された文字の個数")
             }
 
             def skip_whitespace(text, pos):
@@ -442,7 +442,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 pos = 0
                 results = []
 
-                for token in tokens:
+                for i, token in enumerate(tokens):
                     if token.endswith("c"):
                         pass
                     elif token.endswith("n"):
@@ -451,30 +451,34 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     else:
                         pos = skip_whitespace(text, pos)
 
-                    pat = scanf_patterns.get(token.lstrip("*"))
+                    pat = scanf_patterns.get(token.lstrip("*"), (None, None))[0]
                     if not pat:
                         raise ValueError(f"Unsupported format specifier: {token}")
 
                     if pos >= len(text):
-                        return "incomplete", results, ""
+                        return "incomplete", results, "", {"incomplete": [f'{t}: {scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i:]]}
                     
                     regex = re.compile(pat)
                     match = regex.match(text, pos)
+                    # mismatchしたらscanfは終了して、mismatch以降の変数にはランダムな値が入るので、解析を終了する
                     if not match:
-                        return "mismatch", results, text[pos:]
+                        return "mismatch", results, text[pos:], {"mismatch": f'{token}: {scanf_patterns[token.lstrip("*")][1]}', "incomplete": [f'{t}: {scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i+1:]]}
 
                     value = match.group(0)
+                    # *がつく指定子では変数に代入しない
                     if not token.startswith("%*"):
                         results.append(value)
                     pos = match.end()
 
-                remaining = text[pos:]
-                return "ok", results, remaining
+                return "ok", results, text[pos:], {}
 
             def is_complete_match(fmt: str, text: str):
                 """入力文字列がフォーマット全体に合致するかを確認"""
-                state, results, remaining = match_scanf(fmt, text)
-                return state, results, remaining
+                # stateは、incomplete, mismatch, okのどれか(これで入力の過不足一致不一致を確認する)
+                # resultsは一致した入力の結果
+                # remainingは入力の過分
+                state, results, remaining_text, errors = match_scanf(fmt, text)
+                return state, results, remaining_text, errors
             
             # プロセスの状態を更新
             if self.isEnd:
@@ -485,7 +489,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                         raise ProgramFinished()
                     else:
-                        self.event_sender({"message": "NG行動をしました1!!", "status": "ng"})
+                        self.event_sender({"message": "returnキャラに話しかけてください!!", "status": "ng"})
 
             self.thread = self.frame.GetThread()
             self.process = self.thread.GetProcess()
@@ -533,7 +537,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             self.event_sender({"message": f"アイテム {itemname[0]} を正確に取得できました!!", "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"}, False)
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                        # 複数回入力を間違えたらヒントをあげる
+                        if errorCnt >= 3:
+                            items = list(set(skipped_varDecls) - set(vars_event))
+                            self.event_sender({"message": f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!", "status": "ng"})
+                        else:
+                            self.event_sender({"message": "何らかのアイテムを取得してください!!", "status": "ng"})
             self.skipped_lines = []
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["input"] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
@@ -547,13 +556,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             # inputが入れられるまで次のstepには行かない
             if input_check:
+                errorCnt = 0
                 while True:
                     if (event := self.event_reciever()) is None:
                         return
                     if (new_stdin := event.get('stdin', None)) is not None:
-                        state, results, remaining = is_complete_match(self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0], self.stdin_buffer + new_stdin)
+                        state, results, remaining, errors = is_complete_match(self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0], self.stdin_buffer + new_stdin)
                         if state == "incomplete":
-                            self.event_sender({"message": "入力が足りていません!! もう一度入力してください!!", "status": "ng"})
+                            errorCnt += 1
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"入力({', '.join(errors['incomplete'])})が足りていません!! もう一度入力してください!!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": "入力が足りていません!! もう一度入力してください!!", "status": "ng"})
                             continue
                         self.stdin_buffer = remaining
                         self.process.PutSTDIN(new_stdin)
@@ -590,7 +604,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if state == "ok":
                         self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
                     elif state == "mismatch":
-                        self.event_sender({"message": "値がscanfのフォーマットに合致しませんでした、、、", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                        message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
+                        if errors["incomplete"]:
+                            incomplete_message = ", ".join(errors["incomplete"]) + "\nに該当する変数にはランダムな値が設定されます"
+                            message += "\f" + incomplete_message
+                        self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()})
                 
                 if str(self.line_number) in self.line_data[self.func_name]["file"] and (self.frame_num, self.line_number) not in self.file_check_num:
                     self.file_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["file"][str(self.line_number)], -1)
