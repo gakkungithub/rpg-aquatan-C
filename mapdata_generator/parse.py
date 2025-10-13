@@ -215,7 +215,7 @@ class ASTtoFlowChart:
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
         cursor_stmt_list: list[ci.Cursor] = list(cursor.get_children())
         for i, cr in enumerate(cursor_stmt_list):
-            if (next_line := self.get_next_line(cursor_stmt_list[i+1:])):
+            if (next_line := self.get_next_line_in_comp(cursor_stmt_list[i+1:])):
                 self.nextLines.append((next_line, True))
             else:
                 next_line = cursor.extent.end.line
@@ -226,7 +226,7 @@ class ASTtoFlowChart:
         return nodeID
 
     # self.condition_move用で、次の行が初期化なしまたは静的変数の変数宣言であるかどうかを確かめるための関数
-    def get_next_line(self, cursor_stmt_list):
+    def get_next_line_in_comp(self, cursor_stmt_list):
         for cursor_stmt in cursor_stmt_list:
             if cursor_stmt.kind == ci.CursorKind.DECL_STMT:
                 for vcr in cursor_stmt.get_children():
@@ -947,8 +947,6 @@ class ASTtoFlowChart:
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
-    # そして、コメントを表示するときに既に
-
     def parse_call_expr(self, cursor, var_references: set[tuple[str, int]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict]):
         children = list(cursor.get_children())
 
@@ -1009,25 +1007,25 @@ class ASTtoFlowChart:
             func_references.append((ref_spell, arg_func_order_list))
             return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
 
-    #typedefの解析
+    # typedefの解析
     def parse_typedef(self, cursor):
         print(f"{cursor.underlying_typedef_type.spelling} {cursor.spelling}")
 
-    #構造体の解析(フローチャートには含めないが、アイテムには必要なので解析)
+    # 構造体の解析(フローチャートには含めないが、アイテムには必要なので解析)
     def parse_struct(self, cursor):
         print(f"struct {cursor.spelling}")
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             print(f"    {cr.type.spelling} {cr.spelling}")
 
-    #共用体の解析(フローチャートには含めないが、アイテムには必要なので解析)
+    # 共用体の解析(フローチャートには含めないが、アイテムには必要なので解析)
     def parse_union(self, cursor):
         print(f"union {cursor.spelling}")
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             print(f"    {cr.type.spelling} {cr.spelling}")
     
-    #列挙型の解析(フローチャートには含めないが、アイテムには必要なので解析)
+    # 列挙型の解析(フローチャートには含めないが、アイテムには必要なので解析)
     def parse_enum(self, cursor):
         print(f"enum {cursor.spelling}")
         value = 0
@@ -1040,7 +1038,7 @@ class ASTtoFlowChart:
                 print(f"    {cr.type.spelling} {cr.spelling} = {value}")
             value += 1
 
-    #分岐で新たな部屋情報を登録する
+    # 分岐で新たな部屋情報を登録する
     def createRoomSizeEstimate(self, nodeID):
         if self.roomSizeEstimate:
             #部屋情報が完成したらroomSize辞書に移す
@@ -1050,6 +1048,17 @@ class ASTtoFlowChart:
             #部屋のサイズの初期値は9 (5*4などの部屋ができる)
             self.roomSizeEstimate = [nodeID, 9]
 
+    # 条件文の終点から繋がる次の処理の行を探す関数
+    def get_next_line_after_cond_stmt(self):
+        next_line = None
+        for next_line in list(reversed(self.nextLines)):
+            if next_line[1]:
+                break
+        if next_line is None:
+            sys.exit(-1)
+        
+        return next_line
+    
     #if文
     #現在ノードに全ての子ノードをくっつける。出口ノードを作成する
     #子ノード(現在のノードの条件が真/偽それぞれの場合の遷移先)を引数に関数を再帰する
@@ -1110,12 +1119,7 @@ class ASTtoFlowChart:
         trueEndNodeID = self.createNode("", 'terminator')
         end_line = then_cursor.extent.end.line
 
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
 
         self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd', [end_line, next_line[0]])
         self.createEdge(then_end, trueEndNodeID)
@@ -1219,12 +1223,8 @@ class ASTtoFlowChart:
         endNodeID = self.createNode("", 'doublecircle')
         self.createEdge(condNodeID, endNodeID, "false")
         self.createRoomSizeEstimate(endNodeID)
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
+
         self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
 
         self.createEdgeForLoop(endNodeID, loop_back_node, [cond_cursor.location.line])
@@ -1274,12 +1274,8 @@ class ASTtoFlowChart:
             self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
             self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cr.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
 
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
+
         self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
         #ここでdo_whileを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(falseNodeID)
@@ -1369,12 +1365,7 @@ class ASTtoFlowChart:
         #ここでforを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
 
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
 
         self.condition_move[f'"{endNodeID}"'] = ('forFalse', [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
         
@@ -1493,12 +1484,8 @@ class ASTtoFlowChart:
         createSwitchBreakerEdge(endNodeID)
         #ここでswitchを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
+        
         self.condition_move[f'"{endNodeID}"'] = ('switchEnd', [None, next_line[0]])
 
         self.line_info_dict[self.scanning_func].setLine(last_line)
@@ -1510,12 +1497,8 @@ class ASTtoFlowChart:
         loopBreaker = self.loopBreaker_list.pop()
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
-        next_line = None
-        for next_line in list(reversed(self.nextLines)):
-            if next_line[1]:
-                break
-        if next_line is None:
-            sys.exit(-1)
+        next_line = self.get_next_line_after_cond_stmt()
+
         for breakNodeID, breakLine in break_list:
             self.createEdge(breakNodeID, breakToNodeID)
             self.condition_move[f'"{breakNodeID}"'] = ('break', [breakLine, next_line[0]])

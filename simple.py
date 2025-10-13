@@ -135,7 +135,7 @@ def main():
         # region ステージ選択メニュー
         stage_name = None
         code_name = None
-        last_mouse_pos = None
+        sbw_scroll_mouse_pos = None
         mouse_down = False
         scroll_start = False
         server = None
@@ -155,7 +155,7 @@ def main():
                         if event.button == 1 and SBWND.is_visible:
                             mouse_down = True
                             code_name = SBWND.is_clicked(event.pos)
-                            last_mouse_pos = event.pos
+                            sbw_scroll_mouse_pos = event.pos
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
                             if code_name == SBWND.is_clicked(event.pos) == 'color support':
@@ -188,7 +188,7 @@ def main():
                             scroll_start = False
                     if mouse_down and event.type == pygame.MOUSEMOTION:
                         scroll_start = True
-                        dx = - (event.pos[0] - last_mouse_pos[0])
+                        dx = - (event.pos[0] - sbw_scroll_mouse_pos[0])
                         if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
                             SBWND.scrollX += dx
                         elif SBWND.scrollX + dx < 0:
@@ -197,7 +197,7 @@ def main():
                             SBWND.scrollX = SBWND.maxScrollX
                         if dx != 0:
                             SBWND.load_sb()
-                        last_mouse_pos = event.pos
+                        sbw_scroll_mouse_pos = event.pos
                     
                     if server is not None and event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN):
                         # ステップ実行してプログラムの終了に到達した時プログラムを終了する
@@ -390,7 +390,9 @@ def main():
 
         PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
 
-        last_mouse_pos = None
+        code_scroll_mouse_pos = None
+        item_expand_mouse_pos = None
+        item_scroll_mouse_pos = None
         
         while not PLAYER.goaled:
             clock.tick(MAX_FRAME_PER_SEC)
@@ -457,9 +459,14 @@ def main():
                             CODEWND.scrollY = 0
                             CODEWND.scrollX = 0
                         elif CODEWND.isCursorInWindow(event.pos):
-                            last_mouse_pos = event.pos
-                        elif ITEMWND.isCursorInWindow(event.pos):
-                            pass
+                            code_scroll_mouse_pos = event.pos
+                    
+                    if (action_type := ITEMWND.isCursorInWindow(event.pos)):
+                        if action_type == 'expand':
+                            item_expand_mouse_pos = event.pos
+                        elif action_type == 'scroll':
+                            item_scroll_mouse_pos = event.pos
+
                     if len(PLAYER.funcInfoWindow_list):
                         PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
 
@@ -467,7 +474,14 @@ def main():
                     
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     mouse_down = False
-                    last_mouse_pos = None
+                    code_scroll_mouse_pos = None
+                    if item_expand_mouse_pos:
+                        item_expand_mouse_pos = None
+                        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
+                    elif item_scroll_mouse_pos:
+                        item_scroll_mouse_pos = None
+                        ITEMWND.is_inAction = True
+
                     end_timer()
                     if cmd == "pause" and cmd == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
@@ -504,19 +518,50 @@ def main():
                                     #     pygame.display.update()
 
                 if mouse_down:
-                    if event.type == pygame.MOUSEMOTION and last_mouse_pos:
-                        dy = - (event.pos[1] - last_mouse_pos[1])
-                        dx = - (event.pos[0] - last_mouse_pos[0])
-                        if CODEWND.scrollY + dy > 0:
-                            CODEWND.scrollY += dy
-                        else:
-                            CODEWND.scrollY = 0
-                        if CODEWND.scrollX + dx > 0:
-                            CODEWND.scrollX += dx
-                        else:
-                            CODEWND.scrollX = 0
-                        last_mouse_pos = event.pos
-                    elif last_mouse_pos is None:
+                    if event.type == pygame.MOUSEMOTION:
+                        if code_scroll_mouse_pos:
+                            dy = - (event.pos[1] - code_scroll_mouse_pos[1])
+                            dx = - (event.pos[0] - code_scroll_mouse_pos[0])
+                            if CODEWND.scrollY + dy > 0:
+                                CODEWND.scrollY += dy
+                            else:
+                                CODEWND.scrollY = 0
+                            if CODEWND.scrollX + dx > 0:
+                                CODEWND.scrollX += dx
+                            else:
+                                CODEWND.scrollX = 0
+                            code_scroll_mouse_pos = event.pos
+                        elif item_expand_mouse_pos:
+                            dy = event.pos[1] - item_expand_mouse_pos[1]
+                            dx = event.pos[0] - item_expand_mouse_pos[0]
+                            if SCR_WIDTH // 5 - 10 <= ITEMWND.rect[2] + dx <= SCR_WIDTH // 2 and not (dx >= 0 and ITEMWND.is_right_edge):
+                                ITEMWND.rect[2] += dx
+                                ITEMWND.width += dx
+                            else:
+                                dx = 0
+                            if SCR_HEIGHT // 5 * 3 - 10 <= ITEMWND.rect[3] + dy <= SCR_WIDTH - 10 and not (dy >= 0 and ITEMWND.is_bottom_edge):
+                                ITEMWND.rect[3] += dy
+                                ITEMWND.height += dy 
+                            else:
+                                dy = 0
+                            
+                            if dx != 0 or dy != 0:
+                                ITEMWND.surface = pygame.transform.smoothscale(ITEMWND.surface, (ITEMWND.width, ITEMWND.height))
+                            item_expand_mouse_pos = event.pos
+                        elif item_scroll_mouse_pos:
+                            dy = event.pos[1] - item_scroll_mouse_pos[1]
+                            dx = event.pos[0] - item_scroll_mouse_pos[0]
+                            if dy < 0 and not ITEMWND.is_bottom_edge:
+                                ITEMWND.offset_y += dy
+                            elif dy >= 0:
+                                ITEMWND.offset_y = min(ITEMWND.offset_y+dy, 10)
+                            if dx < 0 and not ITEMWND.is_right_edge:
+                                ITEMWND.offset_x += dx
+                            elif dx >= 0:
+                                ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
+                            item_scroll_mouse_pos = event.pos
+                    
+                    elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                 # endregion
                 
@@ -2935,11 +2980,9 @@ class ItemWindow(Window):
     WHITE = Color(255, 255, 255, 255)
     BLACK = Color(0, 0, 0, 255)
     RED = Color(255, 31, 31, 255)
-    GREEN = Color(31, 255, 31, 255)
+    GREEN = Color(0, 170, 0, 255)
     BLUE = Color(31, 31, 255, 255)
     CYAN = Color(100, 248, 248, 255)
-
-    mapchip = 456  # アイテムのUI(テスト用)
 
     def __init__(self, rect, player):
         Window.__init__(self, rect)
@@ -2948,7 +2991,6 @@ class ItemWindow(Window):
             FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
-        self.image = Map.images[self.mapchip]
         self.itemChips = ItemChips()
         self.item_changed_lines: set[int] = set()
         self.check_exps_line: tuple[int, bool] = (-1, False)
@@ -2956,15 +2998,35 @@ class ItemWindow(Window):
         self.file_window = FileWindow()
         self.is_inAction = True
         self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
+        self.offset_y = 10
+        self.offset_x = 10
+        self.is_bottom_edge = True
+        self.is_right_edge = True
 
-    def draw_string(self, x, y, string, color, size=None):
+    def draw_string(self, x: int, y: int, string: str, color: pygame.Color, size=None):
         """文字列出力"""
         if size:
             self.myfont.size = size
         surf, rect = self.myfont.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+        if self.is_right_edge and self.rect[2] - 10 < x + rect.width:
+            self.is_right_edge = False
+        if self.is_bottom_edge and self.rect[3] - 10 < y + 24:
+            self.is_bottom_edge = False
         if size:
             self.myfont.size = self.FONT_HEIGHT
+        return x + rect.width
+
+    def draw_itemValueChangedRect(self, exps: list[str], offset_y: int):
+        if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
+            if self.check_exps_line[1]:
+                self.check_exps_line = (-1, False)
+            else:
+                MSGWND.set('\f'.join(exps))
+                self.check_exps_line = (self.check_exps_line[0], True)
+        self.item_changed_lines.add(offset_y // 24)
+        pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
+                            pygame.Rect(0, offset_y, self.rect.width, 24))
 
     def draw(self, screen):
         """メッセージを描画する
@@ -2973,45 +3035,23 @@ class ItemWindow(Window):
             return
         
         Window.draw(self)
-        offset_y = 10
+        offset_y = self.offset_y
+        offset_x = self.offset_x
+
+        right_edge = self.offset_x
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
-            is_item_changed = False
+            is_item_changed = True
             if item.itemvalue.declared_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(item.itemvalue.declared_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
-            if item.index_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(item.index_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
-            if item.itemvalue.changed_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(item.itemvalue.changed_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+                self.draw_itemValueChangedRect(item.itemvalue.declared_exps, offset_y)
+            elif item.index_exps is not None:
+                self.draw_itemValueChangedRect(item.index_exps, offset_y)
+            elif item.itemvalue.changed_exps is not None:
+                self.draw_itemValueChangedRect(item.itemvalue.changed_exps, offset_y)
+            else:
+                is_item_changed = False
                 
-            icon_x = 10
+            icon_x = offset_x
             if item.itemvalue.children:
                 self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN, 16)
                 if self.is_inAction:
@@ -3035,59 +3075,33 @@ class ItemWindow(Window):
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN)
+            right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN), right_edge)
 
+            name_offset = self.myfont.get_rect(item.name).width + text_x
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
-                name_offset = self.myfont.get_rect(item.name).width + 30
-                self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", self.GREEN)
+                name_offset += 30
+                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({item.itemvalue.value})", self.GREEN), right_edge)
             
             offset_y += 24
-            if item.itemvalue.is_open:
-                # ここで変数の値の開閉ボタンを作る
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
 
+            if item.itemvalue.is_open:
+                offset_y, children_right_edge = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
+                right_edge = max(children_right_edge, right_edge)
+            
         # ローカル変数
         for item in PLAYER.itembag.items[-1]:
-            is_item_changed = False
+            is_item_changed = True
             if item.itemvalue.declared_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        comments = []
-                        for comment in item.itemvalue.declared_exps:
-                            comments.append(comment["comment"] if isinstance(comment, dict) else comment)
-                        MSGWND.set('\f'.join(comments))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
-            if item.index_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(item.index_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
-            if item.itemvalue.changed_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(item.itemvalue.changed_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_exps], offset_y)
+            elif item.index_exps is not None:
+                self.draw_itemValueChangedRect(item.index_exps, offset_y)
+            elif item.itemvalue.changed_exps is not None:
+                self.draw_itemValueChangedRect(item.itemvalue.changed_exps, offset_y)
+            else:
+                is_item_changed = False
 
-            icon_x = 10
+            icon_x = offset_x
             if item.itemvalue.children and item.vartype["type"] != "FILE *":
                 self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE, 16)
                 if self.is_inAction:
@@ -3113,7 +3127,7 @@ class ItemWindow(Window):
                 self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
+            right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE), right_edge)
 
             if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname:
                 name_offset = self.myfont.get_rect(item.name).width + 30
@@ -3124,49 +3138,39 @@ class ItemWindow(Window):
                 self.file_buttons[PLAYER.address_to_fname[item.itemvalue.value]] = file_button
                 self.surface.blit(label_surf, label_rect)
 
+            name_offset = self.myfont.get_rect(item.name).width + text_x
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None and item.vartype["type"] != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
-                name_offset = self.myfont.get_rect(item.name).width + 20
-                self.draw_string(text_x + name_offset, offset_y+4, f"({item.itemvalue.value})", value_color)
-            
+                name_offset += 30
+                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({item.itemvalue.value})", value_color), right_edge)
+
             offset_y += 24
+
             if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
-                offset_y = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
+                offset_y, children_right_edge = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
+                right_edge = max(children_right_edge, right_edge)
 
         if self.is_inAction:
             self.is_inAction = False
+        if not self.is_bottom_edge and offset_y <= self.rect[3]:
+            self.is_bottom_edge = True
+        if not self.is_right_edge and right_edge <= self.rect[2]:
+            self.is_right_edge = True
+
         self.file_window.draw(screen)
         Window.blit(self, screen)
 
     def draw_values(self, itemvalue_children: dict[str, "ItemValue"], offset_y: int, offset_x: int, type_dict: dict, isLocal: bool):
+        right_edge = 10
         for valuename, itemvalue in itemvalue_children.items():
-            is_item_changed = False
+            is_item_changed = True
             if itemvalue.declared_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        comments = []
-                        for comment in itemvalue.declared_exps:
-                            comments.append(comment["comment"] if isinstance(comment, dict) else comment)
-                        MSGWND.set('\f'.join(comments))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.WHITE,
-                                pygame.Rect(0, offset_y, self.rect.width, 24))
-            if itemvalue.changed_exps is not None:
-                is_item_changed = True
-                if not MSGWND.is_visible and self.check_exps_line[0] == offset_y // 24:
-                    if self.check_exps_line[1]:
-                        self.check_exps_line = (-1, False)
-                    else:
-                        MSGWND.set('\f'.join(itemvalue.changed_exps))
-                        self.check_exps_line = (self.check_exps_line[0], True)
-                self.item_changed_lines.add(offset_y // 24)
-                pygame.draw.rect(self.surface, self.RED if self.check_exps_line[0] == offset_y // 24 and self.check_exps_line[1] else self.CYAN, 
-                                 pygame.Rect(0, offset_y, self.rect.width, 24))
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in itemvalue.declared_exps], offset_y)
+            elif itemvalue.changed_exps is not None:
+                self.draw_itemValueChangedRect(itemvalue.changed_exps, offset_y)
+            else:
+                is_item_changed = False
                 
             # 型に応じたアイコンを blit（描画)
             if valuename[0] == '[' or valuename == '*':
@@ -3200,42 +3204,63 @@ class ItemWindow(Window):
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
-            self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color)
+            right_edge = max(self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color), right_edge)
             name_offset = self.myfont.get_rect(valuename).width + 20
+
+            name_offset = self.myfont.get_rect(valuename).width + text_x
+            # 配列などの値がないvalueは表示しない
             if itemvalue.value is not None:
-                self.draw_string(text_x + name_offset, offset_y+4, f"({itemvalue.value})", color)
+                value_color = self.BLACK if is_item_changed else self.WHITE 
+                name_offset += 30
+                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({itemvalue.value})", value_color), right_edge)
 
             offset_y += 24
 
             if itemvalue.is_open:
-                offset_y = self.draw_values(itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                offset_y, children_right_edge = self.draw_values(itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                right_edge = max(children_right_edge, right_edge)
 
-        return offset_y
+        return offset_y, right_edge
     
-    def isCursorInWindow(self, pos : tuple[int, int]):
+    def isCursorInWindow(self, pos: tuple[int, int]):
         if self.is_inAction:
-            return False
+            return None
         
-        y_line = (pos[1] - self.y - 10) // 24
+        # アイテムウィンドウの拡大
         local_pos = (pos[0] - self.x, pos[1] - self.y)
+
+        if self.rect[2] - 20 <= local_pos[0] <= self.rect[2] and self.rect[3] - 20 <= local_pos[1] <= self.rect[3]:
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
+            return 'expand'
+        
         for filename, button in self.file_buttons.items():
             if button.collidepoint(local_pos):
                 self.file_window.toggle_is_visible(filename)
-                return True
+                return None
             
-        if (y_line in self.action_trigger_line_dict and self.action_trigger_line_dict[y_line][1] <= pos[0] <= self.action_trigger_line_dict[y_line][1] + 20 
+        y_line = (local_pos[1] - 10) // 24
+        if (y_line in self.action_trigger_line_dict and self.action_trigger_line_dict[y_line][1] <= local_pos[0] <= self.action_trigger_line_dict[y_line][1] + 20 
             and not MSGWND.is_visible):
+            # ▶︎を閉じた後に表示文字列の見切れがなくなることもあるので右端/下端の判別をリセットする
+            if self.action_trigger_line_dict[y_line][0].is_open:
+                self.is_right_edge = True
+                self.is_bottom_edge = True
             self.action_trigger_line_dict[y_line][0].is_open = not self.action_trigger_line_dict[y_line][0].is_open
             self.is_inAction = True
             self.action_trigger_line_dict = {}
-            return True
+            self.item_changed_lines = set()
+            return None
         
-        if self.x <= pos[0] <= self.rect[2] and y_line in self.item_changed_lines:
-            if not MSGWND.is_visible:
-                self.check_exps_line = (y_line, False)
-            return True
-        else:
-            return False
+        if self.x <= local_pos[0] <= self.rect[2] and y_line in self.item_changed_lines and not MSGWND.is_visible:
+            self.check_exps_line = (y_line, False)
+            return None
+        
+        if self.x <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
+            self.item_changed_lines = set()
+            self.action_trigger_line_dict = {}
+            return 'scroll'
+        
+        return None
 
                                                                                                                                                    
 # 88888888ba  88             88                                    I8,        8        ,8I 88                      88                                 
@@ -4082,6 +4107,7 @@ class Item:
         self.name = str(name)
         self.line = line
         self.index_exps = exps.get('indexes', None)
+        # アイテムの追加なのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_inAction = True
         self.itemvalue: ItemValue = ItemValue.from_dict(data, exps=exps["values"])
         self.vartype: dict = vartype
@@ -4106,6 +4132,7 @@ class Item:
         temp_itemvalue.changed_exps = comments
 
     def update_value(self, data: dict):
+        # 値を更新するだけなのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_inAction = True
         self.itemvalue = ItemValue.from_dict(data)
 
@@ -4422,8 +4449,7 @@ class Button:
     
     def draw(self, surface):
         surface.blit(self.button_image, self.rect)
-
-                                                                                                                                                                                   
+                                                                                                                                                                             
 #   ,ad8888ba,                                                                                    88 I8,        8        ,8I 88                      88                                 
 #  d8"'    `"8b                                                                                   88 `8b       d8b       d8' ""                      88                                 
 # d8'                                                                                             88  "8,     ,8"8,     ,8"                          88                                 
@@ -4552,7 +4578,7 @@ class MiniMapWindow(Window, Map):
                     tile = self.map[y][x]
                 else:
                     tile = self.default
-                if tile >= 489 and 535 >= tile:
+                if tile not in [390, 43, 402, 31]:
                     continue
                 pos_x = x * MIN_MAP_SIZE / self.tile_num + self.offset_x
                 pos_y = y * MIN_MAP_SIZE / self.tile_num + self.offset_y
