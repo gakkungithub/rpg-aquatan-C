@@ -1352,9 +1352,11 @@ class ASTtoFlowChart:
         #changeノードがある条件
         if self.loopBreaker_list[-1]["continue"] or nodeID:
             if changeExpr_cursor:
-                changeNodeID = self.get_exp(changeExpr_cursor, shape='parallelogram')
+                changeNodeID = self.get_exp(changeExpr_cursor, shape='parallelogram', label=str(exec_cursor.extent.end.line))
             else:
-                changeNodeID = self.createNode("", shape='parallelogram')
+                changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
+        else:
+            sys.exit(-1)
 
         self.createEdge(nodeID, changeNodeID)
         self.createEdge(changeNodeID, condNodeID)

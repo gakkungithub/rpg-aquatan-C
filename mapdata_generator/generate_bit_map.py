@@ -866,8 +866,18 @@ class GenBitMap:
                     self.createRoom(toNodeID)
                     break
                 toNodeID, _ = self.nextNodeInfo[tempNodeID][0]
-            self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
             if tempNode_info:
+                if self.getNodeShape(tempNodeID) == 'parallelogram' and self.getNodeLabel(tempNodeID) != "":
+                    _, c_move_fromTo = self.mapInfo.condition_line_trackers.get_condition_line_tracker(nodeID)
+                    c_move_fromTo.pop(-1)
+                    c_move_fromTo.append(int(self.getNodeLabel(tempNodeID)))
+                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
+                    self.trackAST(toNodeID, self.nextNodeInfo[toNodeID][0][0], loopBackID)
+                else:
+                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
+                    self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
+            else:
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
                 self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける

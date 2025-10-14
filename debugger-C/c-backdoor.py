@@ -577,7 +577,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         else:
                             break
                     else:
-                        self.event_sender({"message": f"ヒント: 値を入力してください!!", "status": "ng"})
+                        errorCnt += 1
+                        if errorCnt >= 3:
+                            self.event_sender({"message": f"値をフォーマット({self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0]})\nに沿って入力してください!!", "status": "ng"})
+                        else:
+                            self.event_sender({"message": "値を入力してください!!", "status": "ng"})
                 self.input_check_num[(self.next_frame_num, self.next_line_number)][0].pop(input_check)
                 if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0]) == 0:
                     self.input_check_num.pop((self.next_frame_num, self.next_line_number))
@@ -602,6 +606,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 
                 if input_check:
                     if state == "ok":
+                        message = f"値({', '.join(results)})がstdinに入力されました!!"
                         self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
                     elif state == "mismatch":
                         message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
@@ -1125,13 +1130,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"] and not self.isEnd:
                 if (event := self.event_reciever()) is None:
                     return PROGRESS
-                if (ngname := event.get('ng', None)) is not None:
-                    if ngname == "notEnter":
-                        self.event_sender({"message": "ここから先は進入できません1!!", "status": "ng"})
-                    else:
-                        self.event_sender({"message": "NG行動をしました2!!", "status": "ng"})
-                    return CONTINUE
-                elif (fromTo := event.get('fromTo', None)) is not None:
+                if (fromTo := event.get('fromTo', None)) is not None:
                     type = event.get('type', '')
                     # そもそも最初の行番が合致していなければ下のwhile Trueに入る前にカットする必要がある
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
@@ -1140,7 +1139,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
                                 if type == "exp" and self.line_number in self.line_data[self.func_name]["onelines"]:
                                     if self.crnt_oneline == self.line_number:
-                                        self.event_sender({"message": "異なる行動をしようとしています12!!", "status": "ng"})
+                                        self.event_sender({"message": "計算式ではありません", "status": "ng"})
                                         return CONTINUE
                                     self.crnt_oneline = self.line_number
                                 funcWarp = event['funcWarp']
@@ -1154,7 +1153,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                     if self.line_number == self.crnt_oneline:
                                         self.crnt_oneline = None
                                     else:
-                                        self.event_sender({"message": "異なる行動をしようとしています11!!", "status": "ng"})
+                                        self.event_sender({"message": "ここはif文の終点ではありません\n(最終行の計算式が完了していません)", "status": "ng"})
                                         return CONTINUE
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'continue':
@@ -1203,7 +1202,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 check_return(fromTo, funcWarp)
                                 return PROGRESS
                             else:
-                                self.event_sender({"message": "ここから先は進入できません4!!", "status": "ng"})
+                                self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                                 return CONTINUE
                         elif fromTo[:2] == [None, self.next_line_number]:
                             if type == 'doWhileInit':
@@ -1219,7 +1218,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             self.event_sender({"message": f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
                             self.skipped_lines = [l for l in self.skipped_lines if backToLine < int(l) < self.next_line_number]
                         else:
-                            self.event_sender({"message": "ここから先は進入できません5!!", "status": "ng"})
+                            self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                             return CONTINUE            
                     elif len(fromTo) == 1 and fromTo == [self.line_number]:
                         if type == 'whileIn':
@@ -1279,13 +1278,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 self.event_sender({"message": "", "status": "ok"}, False)
                                 self.line_loop.append(self.line_number)
                         else:
-                            self.event_sender({"message": "ここから先は進入できません6!!", "status": "ng"})
+                            self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                     else:
-                        self.event_sender({"message": "ここから先は進入できません7!!", "status": "ng"})
+                        self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                 else:
-                    self.event_sender({"message": "NG行動をしました6!!", "status": "ng"})
+                    self.event_sender({"message": "異なる処理に対するアクションをしました!!", "status": "ng"})
                     return CONTINUE
 
             if self.crnt_oneline is None:
