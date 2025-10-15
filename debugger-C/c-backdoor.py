@@ -182,10 +182,11 @@ class VarsTracker:
         if isLocal and len(self.vars_declared) != 0:
             vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
             self.vars_removed.update(vars_removed)
-            if vars_removed:
-                self.vars_declared[-1] = list(set(self.vars_declared[-1]) - vars_removed)
-                for var_removed in vars_removed:
+            for var_removed in vars_removed:
+                if var_removed in self.vars_declared[-1]:
+                    self.vars_declared[-1].remove(var_removed)
                     var_previous_values.pop(var_removed)
+                
                 
     def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix, depth=1) -> list[str]:
         indent = "    " * depth
@@ -727,6 +728,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if (event := self.event_reciever()) is None:
                             raise NoConnection()
                         if (item := event.get('item', None)) is not None:
+                            print('here22')
                             itemname = (item["name"], item["line"])
                             if itemname != var:
                                 errorCnt += 1
@@ -1288,10 +1290,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     return CONTINUE
 
             if self.crnt_oneline is None:
+                print('here1')
                 self.step_conditionally()
 
-                # 変数は前回の処理で変更されていたら見る
+                print('here3')
+
                 self.vars_checker()
+                print('here')
 
             return PROGRESS
 
