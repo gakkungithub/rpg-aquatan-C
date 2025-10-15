@@ -728,7 +728,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         if (event := self.event_reciever()) is None:
                             raise NoConnection()
                         if (item := event.get('item', None)) is not None:
-                            print('here22')
                             itemname = (item["name"], item["line"])
                             if itemname != var:
                                 errorCnt += 1

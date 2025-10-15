@@ -772,7 +772,7 @@ class GenBitMap:
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID)
                 exp = self.getExpNodeInfo(nodeID)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目のdo-while文の?の真偽の確認に移る", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目のdo-while文の?の真偽の確認に進む", "hover": [exp[0]]})
                 crntRoomID = nodeID
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID)
