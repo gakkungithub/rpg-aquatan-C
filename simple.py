@@ -134,7 +134,7 @@ def main():
 
         # region ステージ選択メニュー
         stage_name = None
-        code_name = None
+        button_name = None
         sbw_scroll_mouse_pos = None
         mouse_down = False
         scroll_start = False
@@ -154,29 +154,29 @@ def main():
                     if event.type == pygame.MOUSEBUTTONDOWN:
                         if event.button == 1 and SBWND.is_visible:
                             mouse_down = True
-                            code_name = SBWND.is_clicked(event.pos)
+                            button_name = SBWND.is_clicked(event.pos)
                             sbw_scroll_mouse_pos = event.pos
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
-                            if code_name == SBWND.is_clicked(event.pos) == 'color support':
+                            if button_name == SBWND.is_clicked(event.pos) == 'color support':
                                 SBWND.color_support = not SBWND.color_support
-                            elif code_name == SBWND.is_clicked(event.pos) == 'check lldb':
+                            elif button_name == SBWND.is_clicked(event.pos) == 'check lldb':
                                 if server is not None:
                                     SBWND.close()
                                     server = None
                                 else:
                                     SBWND.stage_selecting = not SBWND.stage_selecting
-                            # ステージのボタンを押した場合
-                            elif code_name is not None and scroll_start == False and code_name == SBWND.is_clicked(event.pos):
+                            # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
+                            elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
-                                    stage_index = SBWND.code_names.index(code_name) + 1
+                                    stage_index = button_name + 1
                                     SBWND.hide()
-                                    stage_name = code_name
+                                    stage_name = SBWND.code_names[button_name]
                                 elif server is None:
-                                    programname = code_name
+                                    programname = SBWND.code_names[button_name]
                                     programpath = f"{DATA_DIR}/{programname}/{programname}"
-                                    # 現在は一つのcファイルにしか対応してないので、下記のようにリストに要素を一つだけ入れる
                                     # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+                                    # 現在は一つのcファイルにしか対応してないので、下記のようにリストに要素を一つだけ入れる
                                     cfiles = [f"{programpath}.c"]
 
                                     # cプログラムを整形する
@@ -927,7 +927,6 @@ def load_mapchips(dir, file):
             if line.startswith("#"):
                 continue  # コメント行は無視
             data = line.split(",")
-            #mapchip_id = int(data[0])
             mapchip_name = data[1]
             movable = int(data[2])  # 移動可能か？
             transparent = int(data[3])  # 背景を透明にするか？
@@ -1203,11 +1202,6 @@ class Map:
                 else:
                     screen.blit(self.images[self.map[y][x]],
                                 (x*GS-offsetx, y*GS-offsety))
-        if len(PLAYER.funcInfoWindow_list):
-            if PLAYER.funcInfoWindowIndex >= len(PLAYER.funcInfoWindow_list):
-                PLAYER.funcInfoWindowIndex = len(PLAYER.funcInfoWindow_list) - 1
-            else:
-                PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
 
         # このマップにあるイベントを描画
         for event in self.events:
@@ -1215,6 +1209,13 @@ class Map:
         # このマップにいるキャラクターを描画
         for chara in self.charas:
             chara.draw(screen, offset)
+
+        # 条件・関数ウィンドウはイベント・キャラクターより上に描画したいので、上のループの後に描画する
+        if len(PLAYER.funcInfoWindow_list):
+            if PLAYER.funcInfoWindowIndex >= len(PLAYER.funcInfoWindow_list):
+                PLAYER.funcInfoWindowIndex = len(PLAYER.funcInfoWindow_list) - 1
+            else:
+                PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
 
     def is_movable(self, x, y):
         """(x,y)は移動可能か？"""
@@ -4239,11 +4240,15 @@ class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
     code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
                   "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer", "18_stdio_input_output", "19_file_io", "20_memory_management"]
+    code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文", "関数宣言と定義", "条件文の中に関数", "一次元配列", "二次元配列", "文字列と文字配列",
+                         "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列とポインタの組合せ", "関数の引数にポインタ", "標準入出力", "ファイルの入出力", "メモリ管理"]
+    
+    # code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文\n(while, do while, for)", "関数宣言と定義", "条件文に関数が\n含まれる場合", "一次元配列", "二次元配列", "文字列と文字配列",
+    #                      "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列のポインタと\nポインタの配列", "関数の引数にポインタ", "標準入出力\n(scanf, printf)", "ファイルの入出力", "メモリ管理"]
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
     MINI_BUTTON_FONT_SIZE = 12
-
     FONT_COLOR = (255, 255, 255)
 
     def __init__(self):
@@ -4274,7 +4279,7 @@ class StageButtonWindow:
         y = SBW_HEIGHT // 4
         self.button_stages = []
         for i, code_name in enumerate(self.code_names):
-            self.button_stages.append(StageButton(code_name, i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+            self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
             x += self.SB_WIDTH + 10
 
     def blit(self, screen):
@@ -4300,14 +4305,15 @@ class StageButtonWindow:
             mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
             screen.blit(mode_change_label_surf, mode_change_label_rect)
 
-    def is_clicked(self,pos):
-        for button in self.button_stages:
+    def is_clicked(self, pos):
+        # ステージの内容と説明を両方code_namesリストに格納したいので、ステージボタンはインデックスで取得する
+        for i, button in enumerate(self.button_stages):
             if button.rect.collidepoint(pos):
-                return button.code_name
-            if self.color_support_button_rect.collidepoint(pos):
-                return 'color support'
-            if self.checking_lldb_button_rect.collidepoint(pos):
-                return 'check lldb'
+                return i
+        if self.color_support_button_rect.collidepoint(pos):
+            return 'color support'
+        if self.checking_lldb_button_rect.collidepoint(pos):
+            return 'check lldb'
         return None
     
     def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
@@ -4369,20 +4375,27 @@ class StageButtonWindow:
 class StageButton:
     """ボタン"""
     BG_COLOR = (0, 0, 255)
-    FONT_COLOR = (255, 255, 255)
+    WHITE = (255, 255, 255)
+    BLACK = (255, 255, 0)
 
-    def __init__(self, code_name, stage_num, pos_x, pos_y, button_w, button_h):
+    def __init__(self, code_name, code_explanation, stage_num, pos_x, pos_y, button_w, button_h):
         self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
         self.code_name: str = code_name
+        self.code_explanation: str = code_explanation
         self.stage_num = stage_num + 1
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 24)
     
     def draw(self, surface: pygame.Surface):
         pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
-        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.FONT_COLOR)
+        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.WHITE)
         text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
         self.surface.blit(text_surf, text_rect)
+        self.font.size = 12
+        explanation_surf, _ = self.font.render(self.code_explanation, self.BLACK)
+        explanation_rect = explanation_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2 + 30))
+        self.surface.blit(explanation_surf, explanation_rect)
+        self.font.size = 24
         surface.blit(self.surface, self.rect)
 
 #        db                                                             88888888ba                                                   I8,        8        ,8I 88                      88                                 
