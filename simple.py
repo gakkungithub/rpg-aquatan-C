@@ -3609,7 +3609,7 @@ class MoveEvent():
 
 class FuncInfoWindow(Window):
     """関数の遷移歴を表示するウィンドウ"""
-    FONT_SIZE = 20
+    FONT_SIZE = 18
     NOT_CHECKED_COLOR = (255, 0, 0)
     SKIPPED_CHECK_COLOR = (0, 0, 255)
     CHECKED_COLOR = (0, 255, 0)
@@ -3620,6 +3620,7 @@ class FuncInfoWindow(Window):
     class Detail:
         CYAN = Color(100, 248, 248, 255)
         RED = Color(255, 0, 0, 255)
+        WHITE = Color(255, 255, 255, 255)
 
         def __init__(self, detail: dict, font: pygame.freetype.Font):
             self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
@@ -3627,17 +3628,33 @@ class FuncInfoWindow(Window):
             self.hoverComment_list = detail["hover"]
 
             x, y = 50, 10
-            split_detail: list[str] = detail["detail"].split('?')
-            for i, detail in enumerate(split_detail):
-                baseComment_surf, _ = font.render(detail, self.CYAN)
-                baseComment_rect = baseComment_surf.get_rect(topleft=(x, y))
-                self.baseComment_info_list.append((baseComment_surf, baseComment_rect))
-                if i + 1 != len(split_detail):
-                    x = baseComment_rect.right
-                    hoverLink_surf, _ = font.render("条件", self.RED)
-                    hoverLink_rect = hoverLink_surf.get_rect(topleft=(x, y))
-                    self.hoverLink_info_list.append((hoverLink_surf, hoverLink_rect))
-                    x = hoverLink_rect.right
+
+            # 各行（'+'区切り）を処理
+            for i, line in enumerate(detail["detail"].split('+')):
+                parts = line.split('?')
+
+                for j, text in enumerate(parts):
+                    # 通常テキストを描画
+                    base_surf, _ = font.render(text, self.CYAN)
+                    base_rect = base_surf.get_rect(topleft=(x, y))
+                    self.baseComment_info_list.append((base_surf, base_rect))
+                    x = base_rect.right
+
+                    # 条件リンクを描画（最後以外）
+                    if j < len(parts) - 1:
+                        cond_surf, _ = font.render("条件", self.RED)
+                        cond_rect = cond_surf.get_rect(topleft=(x, y))
+                        self.hoverLink_info_list.append((cond_surf, cond_rect))
+                        x = cond_rect.right
+
+                # 最後の要素でなければ「かつ」を追加して改行
+                if i < len(detail["detail"].split('+')) - 1:
+                    y = base_rect.bottom + 4
+                    x = 50
+                    and_surf, _ = font.render("かつ", self.WHITE)
+                    and_rect = and_surf.get_rect(topleft=(x, y))
+                    self.baseComment_info_list.append((and_surf, and_rect))
+                    y = and_rect.bottom + 4
 
         def draw(self, surface: pygame.Surface):
             for baseComment_info in self.baseComment_info_list:

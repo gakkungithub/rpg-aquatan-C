@@ -1154,10 +1154,12 @@ class ASTtoFlowChart:
                     self.line_info_dict[self.scanning_func].setLine(end_line)
                     if f'"{nodeID}"' in self.condition_move and self.condition_move[f'"{nodeID}"'][0] == 'exp':
                         self.line_info_dict[self.scanning_func].setOneLine(end_line)
+                    self.createEdge(nodeID, falseEndNodeID)
                 else:
+                    nodeID = condNodeID
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
                     self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [next_line[0]])
-                self.createEdge(nodeID, falseEndNodeID)
+                    self.createEdge(nodeID, falseEndNodeID, "False")
                 nodeIDs = [trueEndNodeID, falseEndNodeID]
         else:
             # elseがなくても終点を作る

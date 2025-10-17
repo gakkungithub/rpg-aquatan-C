@@ -207,12 +207,23 @@ class MapInfo:
             self.auto_events.append(AutoEvent(pos, 7, "r" if dx == 1 else "l"))
 
     # 出口のドア生成
-    def setDoor(self, pos: tuple[int, int], dir: int, pathComment: dict):
-        doorname = ""
-        for i, split_comment in enumerate(pathComment["detail"].split('?')):
-            doorname += split_comment
-            if i != len(pathComment["hover"]):
-                doorname += f'条件 {pathComment["hover"][i]}'
+    def setDoor(self, pos: tuple[int, int], dir: int, pathComment_dict: dict):
+        hover_list = pathComment_dict["hover"]
+        detail_parts = pathComment_dict["detail"].split('+')
+        crnt_condition_num = 0
+        parts = []
+
+        for part in detail_parts:
+            subparts = part.split('?')
+            segment = ""
+            for i, s in enumerate(subparts):
+                segment += s
+                if i < len(subparts) - 1:  # ? があった場所に条件を挿入
+                    segment += f'条件 {hover_list[crnt_condition_num]}'
+                    crnt_condition_num += 1
+            parts.append(segment)
+
+        doorname = "かつ\n".join(parts)
         self.doors.append(Door(pos, dir, doorname))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
@@ -749,8 +760,8 @@ class GenBitMap:
         
         for labelName, gotoRoom in self.gotoRoom_list[self.func_name].items():
             toNodeID = gotoRoom["toNodeID"]
-            fromNodeIDs = gotoRoom["fromNodeID"]
-            for fromNodeID in fromNodeIDs:
+            fromNodeID_list = gotoRoom["fromNodeID"]
+            for fromNodeID in fromNodeID_list:
                 self.mapInfo.setWarpZone(fromNodeID, toNodeID, f"ラベル: {labelName} に遷移します", self.func_name, 158)
 
         self.mapInfo.setPlayerInitPos(nodeID)
@@ -760,7 +771,7 @@ class GenBitMap:
                 self.func_name = ref
                 self.trackFuncAST(nextRefInfo)
     
-    def trackAST(self, crntRoomID, nodeID, loopBackID = None):
+    def trackAST(self, crntRoomID, nodeID, loopBackID = None, condition_comment_dict: dict = None):
         #引数を取得
         if self.getNodeShape(nodeID) == 'cylinder':
             # クラスの属性に値を設定
@@ -768,7 +779,7 @@ class GenBitMap:
             self.mapInfo.func_warps[self.func_name].args[argname] = {"type": self.varNode_info[nodeID], "line": int(argline)}
         #if文とdo_while文とswitch文
         elif self.getNodeShape(nodeID) == 'diamond':
-            nodeIDs = []
+            nodeID_list: list[str | tuple[str, dict]] = []
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID)
                 exp = self.getExpNodeInfo(nodeID)
@@ -782,38 +793,61 @@ class GenBitMap:
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         exp = self.getExpNodeInfo(nodeID)
                         self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
-                    nodeIDs.append(toNodeID)
+                    nodeID_list.append(toNodeID)
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
                 for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                     self.createRoom(toNodeID)
                     if self.getNodeShape(toNodeID) == 'circle':
+                        # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
-                        nodeIDs.insert(0, toNodeID)
+                        if condition_comment_dict:
+                            path_comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真" , "hover": condition_comment_dict["hover"] + [exp[0]]}
+                        else:
+                            path_comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真" , "hover": [exp[0]]}
+                        self.createPath(crntRoomID, toNodeID, path_comment_dict, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
-                        nodeIDs.append(toNodeID)
-                    elif self.getNodeShape(toNodeID) == 'invtriangle': # 条件文から派生するcase文なので、条件文の計算式を確かめる必要がある
+                        # 今までのif条件を繋げる (今まで+今回の条件が偽の場合を次のdiamondに渡す)
+                        if condition_comment_dict:
+                            comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]]}
+                        else:
+                            comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}
+                        exp = self.getExpNodeInfo(nodeID)
+                        nodeID_list.append((toNodeID, comment_dict))
+                    elif self.getNodeShape(toNodeID) == 'invtriangle':
                         switch_exp = self.getExpNodeInfo(nodeID)
                         if (exp := self.getExpNodeInfo(toNodeID)) is not None:
                             warp_comment = {"detail": f"{exp[4]}行目の?が真", "hover": [f"case {exp[0]} ({switch_exp[0]} == {exp[0]})"]}
                         else:
                             warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない(default)", "hover": [switch_exp[0]]}
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
-                        nodeIDs.insert(0, toNodeID)
+                        nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
+                        # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
-                        nodeIDs.append(toNodeID)
+                        if condition_comment_dict:
+                            path_comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]]}
+                        else:
+                            path_comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}
+                        self.createPath(crntRoomID, toNodeID, path_comment_dict, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        nodeID_list.append(toNodeID)
+                    # elseにて、中の処理がない場合
                     elif self.getNodeShape(toNodeID) == 'terminator':
-                        self.trackAST(crntRoomID, toNodeID, loopBackID)
+                        # 今までのif条件を繋げる
+                        exp = self.getExpNodeInfo(nodeID)
+                        if condition_comment_dict:
+                            comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]]}
+                        else:
+                            comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}
+                        self.trackAST(crntRoomID, toNodeID, loopBackID, comment_dict)
                     else:
                         print("unknown node appeared")
-            for toNodeID in nodeIDs:
-                if self.getNodeShape(toNodeID) == 'diamond':
-                    self.trackAST(crntRoomID, toNodeID, loopBackID)
+            for toNodeID_info in nodeID_list:
+                if isinstance(toNodeID_info, tuple):
+                    self.trackAST(crntRoomID, toNodeID_info[0], loopBackID, toNodeID_info[1])
                 else:
-                    self.trackAST(toNodeID, toNodeID, loopBackID)
+                    self.trackAST(toNodeID_info, toNodeID_info, loopBackID)
             return
 
         #while文とfor文は最終ノードからワープで戻る必要があるので、現在の部屋ノードのID(戻り先)を取得する
@@ -821,26 +855,26 @@ class GenBitMap:
             #条件文以前の処理を同部屋に含めてはいけない
             self.createRoom(nodeID)
             #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
-            nodeIDs = []
+            nodeID_list = []
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 self.createRoom(toNodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
                     exp = self.getExpNodeInfo(nodeID)
                     self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
-                    nodeIDs.insert(0, toNodeID)
+                    nodeID_list.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
                     exp = self.getExpNodeInfo(nodeID)
                     self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]]}, expNodeID=nodeID) # 条件文の計算式を確かめる
-                    nodeIDs.append(toNodeID)
-            # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeIDsは空リスト
-            if nodeIDs:
+                    nodeID_list.append(toNodeID)
+            # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeID_listは空リスト
+            if nodeID_list:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
                 self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認に移る", "hover": [exp[0]]})
                 # true
-                self.trackAST(nodeIDs[0], nodeIDs[0], nodeID)
+                self.trackAST(nodeID_list[0], nodeID_list[0], nodeID)
                 # false
-                self.trackAST(nodeIDs[1], nodeIDs[1], loopBackID)
+                self.trackAST(nodeID_list[1], nodeID_list[1], loopBackID)
 
         #話しかけると関数の遷移元に戻るようにする
         elif self.getNodeShape(nodeID) == 'lpromoter':
@@ -866,7 +900,10 @@ class GenBitMap:
                     self.createRoom(toNodeID)
                     break
                 toNodeID, _ = self.nextNodeInfo[tempNodeID][0]
-            self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
+            if condition_comment_dict:
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, condition_comment_dict, self.func_name, 158, warpNodeID=nodeID)
+            else:
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
             if tempNode_info:
                 self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return

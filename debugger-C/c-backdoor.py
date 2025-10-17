@@ -1289,13 +1289,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     return CONTINUE
 
             if self.crnt_oneline is None:
-                print('here1')
                 self.step_conditionally()
-
-                print('here3')
-
                 self.vars_checker()
-                print('here')
 
             return PROGRESS
 
