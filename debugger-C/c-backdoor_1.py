@@ -392,8 +392,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.str_info_to_send = []
             self.skipped_lines = []
             self.crnt_oneline = None
-            self.line_history: list[int] = []
-            self.events_history: list[dict] = []
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
@@ -496,15 +494,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             self.thread = self.frame.GetThread()
             self.process = self.thread.GetProcess()
-            # target = self.process.GetTarget()
-            # 現在の命令アドレス
-            # pc_addr = self.frame.GetPCAddress()
-
-            # 現在の命令を取得（必要な数だけ、ここでは1つ）
-            # inst = target.ReadInstructions(pc_addr, 1)[0]
-            
-            # mnemonic = inst.GetMnemonic(target)
-            # print(f"Next instruction: {mnemonic} {inst.GetOperands(target)}")
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["return"] and len(self.func_checked) < self.next_frame_num - 1:
                 self.func_checked.append(self.line_data[self.func_crnt_name]["return"][str(self.next_line_number)].copy())
@@ -683,7 +672,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             frame_num = thread.GetNumFrames()
             
             print(f"{func_name} at {file_name}:{line_number}")
-            self.line_history.append(line_number)
             return state, frame, file_name, line_number, func_name, frame_num
 
         def get_std_outputs(self):
@@ -1299,21 +1287,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         def event_reciever(self):
             # JSONが複数回に分かれて送られてくる可能性があるためパース
-            while True:
-                data = conn.recv(1024)
-                # ここは後々変えるかも
-                if not data:
-                    return None
-                buffer = data.decode()
-                event = json.loads(buffer)
-                if "check" not in event:
-                    break
-                print("line_check: ", self.line_history)
-                for history in self.events_history:
-                    print(history)
-                self.event_sender({"status": "check", "history": self.line_history})
-            # このevents_historyとline_historyを使って処理を戻すことを考える
-            self.events_history.append(event)
+            data = conn.recv(1024)
+            # ここは後々変えるかも
+            if not data:
+                return None
+            buffer = data.decode()
+            event = json.loads(buffer)
+            print(f"[受信イベント] {event}")
             return event
     
         def event_sender(self, msgJson, getLine=True):

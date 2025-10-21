@@ -604,10 +604,6 @@ def main():
 
                     if cmd == "":
                         continue
-                    elif cmd == "check":
-                        sender.send_event({"check": True})
-
-                        sender.receive_json()
                     elif cmd == "undo":
                         if len(PLAYER.move5History) < 1:
                             MSGWND.set("No history...")
@@ -4807,8 +4803,6 @@ class EventSender:
                                 PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                             else:
                                 PLAYER.address_to_size.pop(memory_info["address"], None)
-                    if msg["status"] == "check":
-                        PLAYER.goaled = True
                     if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
                         PLAYER.status["HP"] -= 10
                         PLAYER.damage = "-10"
