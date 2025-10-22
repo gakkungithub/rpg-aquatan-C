@@ -17,355 +17,51 @@ DATA_DIR = BASE_DIR + '/mapdata'
 CONTINUE = 1
 PROGRESS = 0
 
-class VarPreviousValue:
-    def __init__(self, value=None, address=None):
-        self.value: str | None = value
-        self.address = address
-        self.children: dict[str, VarPreviousValue] = {}  # 配列の添字や構造体のメンバ
-
-    def update_value(self, value, address):
-        """LLDBのSBValueから最新値を更新"""
-        self.value = value
-        self.address = address
-
-class VarsTracker:
-    def __init__(self, gvars):
-        self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
-        self.global_previous_values: dict[tuple[str, int], VarPreviousValue] = {}
-        self.vars_changed: dict[tuple[str, int], list[tuple[str, ...]]] = {}
-        # 編集済み
-        self.vars_declared: list[list[tuple[str, int]]] = []
-        # 編集済み
-        self.vars_removed: set[tuple[str, int]] = set()
-        self.frames = ['start']
-        self.track_var(gvars, self.global_previous_values, isLocal=False)
-    
-    def trackStart(self, frame):
-        current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
-                      for i in range(thread.GetNumFrames())]
-        # 何かしらの関数に遷移したとき
-        if len(current_frames) > len(self.frames):
-            self.previous_values.append({})
-            self.vars_declared.append([])
-            self.frames = current_frames
-        # 何かしらの関数から戻ってきたとき
-        elif len(current_frames) < len(self.frames):
-            self.previous_values.pop()
-            self.vars_declared.pop()
-            self.frames = current_frames
-        
-        gvars = []
-        for module in target.module_iter():
-            for sym in module:
-                if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
-                    name = sym.GetName()
-                    if name:
-                        var = target.FindFirstGlobalVariable(name)
-                        if var.IsValid():
-                            gvars.append(var)
-
-        self.vars_changed = {}
-        self.track_var(gvars, self.global_previous_values, isLocal=False)
-        self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
-
-    def track_var(self, vars, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal=True):
-        crnt_vars: list[tuple[str, int]] = []
-
-        for var in vars:
-            name = var.GetName()
-            line = int(var.GetDeclaration().GetLine())
-            full_name = name
-            value = var.GetValue()
-            address = var.GetLoadAddress()
-
-            var_previous_value = var_previous_values[(name, line)].value if (name, line) in var_previous_values else None
-
-            if value != var_previous_value:
-                print(f"{full_name} = {value}    ← changed")
-                self.vars_changed[(name,line)] = [()]
-            else:
-                print(f"{full_name} = {value}")
-
-            if isLocal:
-                crnt_vars.append((name, line))
-
-            if (name, line) in var_previous_values:
-                var_previous_values[(name, line)].update_value(value, address)
-            else:
-                var_previous_values[(name, line)] = VarPreviousValue(value, address)
-
-            num_children = var.GetNumChildren()
-            
-            if var.GetType().IsPointerType():
-                pointee_type = var.GetType().GetPointeeType()
-                type_name = pointee_type.GetName()
-
-                try:
-                    if not pointee_type.IsPointerType():
-                        addr = int(var.GetValue(), 16)
-                        target = var.GetTarget()
-                        process = target.GetProcess()
-                        error = lldb.SBError()
-                        if type_name == "char":
-                            cstr = process.ReadCStringFromMemory(addr, 100, error)
-                            if error.Success():
-                                print(f"→ {full_name} points to string: \"{cstr}\"")
-                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
-                                if cstr != var_previous_value:
-                                    if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('*', ))
-                                    else:
-                                        self.vars_changed[(name,line)]= [('*', )]
-                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(cstr, addr)
-                            else:
-                                print(f"→ {full_name} points to unreadable char*")
-                        elif type_name == "int":
-                            data = process.ReadMemory(addr, 4, error)
-                            if error.Success():
-                                val = struct.unpack("i", data)[0]
-                                print(f"→ {full_name} points to int: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
-                                if val != var_previous_value:
-                                    if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('*', ))
-                                    else:
-                                        self.vars_changed[(name,line)]= [('*', )]
-                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"→ {full_name} points to unreadable int*")
-                        elif type_name == "float":
-                            data = process.ReadMemory(addr, 4, error)
-                            if error.Success():
-                                val = struct.unpack("f", data)[0]
-                                print(f"→ {full_name} points to float: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
-                                if val != var_previous_value:
-                                    if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('*', ))
-                                    else:
-                                        self.vars_changed[(name,line)]= [('*', )]
-                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"→ {full_name} points to unreadable float*")
-                        elif type_name == "double":
-                            data = process.ReadMemory(addr, 8, error)
-                            if error.Success():
-                                val = struct.unpack("d", data)[0]
-                                print(f"→ {full_name} points to double: {val}")
-                                var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
-                                if val != var_previous_value:
-                                    if (name,line) in self.vars_changed:
-                                        self.vars_changed[(name,line)].append(('*', ))
-                                    else:
-                                        self.vars_changed[(name,line)]= [('*', )]
-                                var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"→ {full_name} points to unreadable double*")
-                        else:
-                            # 構造体などの場合
-                            deref = var.Dereference()
-                            if deref.IsValid() and deref.GetNumChildren() > 0:
-                                print(f"→ Deref {full_name}")
-                                children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[(name, line)].children, [name], line, full_name)
-                    else:
-                        children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
-
-                except Exception as e:
-                    print(f"→ {full_name} deref error: {e}")
-
-            elif num_children > 0:
-                children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
-    
-        if isLocal and len(self.vars_declared) != 0:
-            vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
-            self.vars_removed.update(vars_removed)
-            for var_removed in vars_removed:
-                if var_removed in self.vars_declared[-1]:
-                    self.vars_declared[-1].remove(var_removed)
-                    var_previous_values.pop(var_removed)
-                
-                
-    def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix, depth=1) -> list[str]:
-        indent = "    " * depth
-
-        for var in vars:
-            name = '*' if var.GetType().IsPointerType() else var.GetName() 
-            full_name = f"{prefix}.{name}"
-            value = var.GetValue()
-            address = var.GetLoadAddress()
-
-            var_previous_value = var_previous_values[name].value if name in var_previous_values else None
-
-            if value != var_previous_value:
-                print(f"{indent}{full_name} = {value}    ← changed")
-                if (vars_path[0], line) in self.vars_changed:
-                    self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name))
-                else:
-                    self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name)]
-            else:
-                print(f"{indent}{full_name} = {value}")
-
-            if name in var_previous_values:
-                var_previous_values[name].update_value(value, address)
-            else:
-                var_previous_values[name] = VarPreviousValue(value, address)
-
-            num_children = var.GetNumChildren()
-            
-            if var.GetType().IsPointerType():
-                pointee_type = var.GetType().GetPointeeType()
-                type_name = pointee_type.GetName()
-
-                try:
-                    if not pointee_type.IsPointerType():
-                        addr = int(var.GetValue(), 16)
-                        target = var.GetTarget()
-                        process = target.GetProcess()
-                        error = lldb.SBError()
-                        if type_name == "char":
-                            cstr = process.ReadCStringFromMemory(addr, 100, error)
-                            if error.Success():
-                                print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
-                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
-                                if cstr != var_previous_value:
-                                    if len(vars_path) == 0:
-                                        if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('*', ))
-                                        else:
-                                            self.vars_changed[(name, line)]= [('*', )]
-                                    else:
-                                        if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
-                                        else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
-                                var_previous_values[name].children['*'] = VarPreviousValue(cstr, addr)
-                            else:
-                                print(f"{indent}→ {full_name} points to unreadable char*")
-                        elif type_name == "int":
-                            data = process.ReadMemory(addr, 4, error)
-                            if error.Success():
-                                val = struct.unpack("i", data)[0]
-                                print(f"{indent}→ {full_name} points to int: {val}")
-                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
-                                if val != var_previous_value:
-                                    if len(vars_path) == 0:
-                                        if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('*', ))
-                                        else:
-                                            self.vars_changed[(name, line)]= [('*', )]
-                                    else:
-                                        if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
-                                        else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
-                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"{indent}→ {full_name} points to unreadable int*")
-                        elif type_name == "float":
-                            data = process.ReadMemory(addr, 4, error)
-                            if error.Success():
-                                val = struct.unpack("f", data)[0]
-                                print(f"{indent}→ {full_name} points to float: {val}")
-                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
-                                if val != var_previous_value:
-                                    if len(vars_path) == 0:
-                                        if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('*', ))
-                                        else:
-                                            self.vars_changed[(name, line)]= [('*', )]
-                                    else:
-                                        if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
-                                        else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
-                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"{indent}→ {full_name} points to unreadable float*")
-                        elif type_name == "double":
-                            data = process.ReadMemory(addr, 8, error)
-                            if error.Success():
-                                val = struct.unpack("d", data)[0]
-                                print(f"{indent}→ {full_name} points to double: {val}")
-                                var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
-                                if val != var_previous_value:
-                                    if len(vars_path) == 0:
-                                        if (name, line) in self.vars_changed:
-                                            self.vars_changed[(name, line)].append(('*', ))
-                                        else:
-                                            self.vars_changed[(name, line)]= [('*', )]
-                                    else:
-                                        if (vars_path[0], line) in self.vars_changed:
-                                            self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
-                                        else:
-                                            self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
-                                var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
-                            else:
-                                print(f"{indent}→ {full_name} points to unreadable double*")
-                        else:
-                            # 構造体などの場合
-                            deref = var.Dereference()
-                            if deref.IsValid() and deref.GetNumChildren() > 0:
-                                print(f"{indent}→ Deref {full_name}")
-                                children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
-                    else:
-                        children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                        self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
-
-                except Exception as e:
-                    print(f"{indent}→ {full_name} deref error: {e}")
-
-            elif num_children > 0:
-                children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
-
-    def getValueAll(self):
-        return {var_key[0]: {var_key[1]: {"value": self.previous_values[-1][var_key].value, "children": self.getValuesDict(self.previous_values[-1][var_key].children)}} 
-                for var_key in self.vars_declared[-1] if var_key in self.previous_values[-1]}
-    
-    def getGlobalValueAll(self):
-        return {var_key[0]: {var_key[1]: {"value": global_previous_value.value, "children": self.getValuesDict(global_previous_value.children)}} 
-                for var_key, global_previous_value in self.global_previous_values.items()}
-
-    def getValuesDict(self, previous_values: dict[str, VarPreviousValue]):
-        values_dict = {}
-        for varname, previous_value in previous_values.items():
-            values_dict[varname] = {"value": previous_value.value, "children": self.getValuesDict(previous_value.children)}
-        return values_dict
-    
-    def getValuePartly(self, var_name: tuple[str, int], value_path: list[str]):
-        temp_previous_value = self.previous_values[-1][var_name]
-        while len(value_path):
-            children_name = value_path.pop(0)
-            temp_previous_value = temp_previous_value.children[children_name]
-        return temp_previous_value.value
-
-    # "item": {"value": aaa, "children": {}}
-    def getValueByVar(self, varname: tuple[str, int], back=0):
-        return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
-        
-    # {"value": bbb, "children": {0: {...}}...}
-    def getValueByVarDict(self, previous_value: VarPreviousValue):
-        value_var_declared_dict = {"value": previous_value.value, "children": {}}
-        for var_part, var_previous_value in previous_value.children.items():
-            value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
-        return value_var_declared_dict
-    
-    def setVarsDeclared(self, name: tuple[str, int]):
-        return self.vars_declared[-1].append(name)
-
 def handle_client(conn: socket.socket, addr: tuple[str, int]):
     class ProgramFinished(Exception):
         pass
 
+    class RollBack(Exception):
+        pass
+    
     class NoConnection(Exception):
         pass
 
-    class DebugManager():
-        def __init__(self, process, thread):
+    class VarPreviousValue:
+        def __init__(self, value=None, address=None):
+            self.value: str | None = value
+            self.address = address
+            self.children: dict[str, VarPreviousValue] = {}  # 配列の添字や構造体のメンバ
+
+        def update_value(self, value, address):
+            """LLDBのSBValueから最新値を更新"""
+            self.value = value
+            self.address = address
+
+    class VarsTracker:
+        def __init__(self, gvars):
+            self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
+            self.global_previous_values: dict[tuple[str, int], VarPreviousValue] = {}
+            self.vars_changed: dict[tuple[str, int], list[tuple[str, ...]]] = {}
+            self.vars_declared: list[list[tuple[str, int]]] = []
+            self.vars_removed: set[tuple[str, int]] = set()
+            self.frames = ['start']
+            self.track_var(gvars, self.global_previous_values, isLocal=False)
+        
+        def trackStart(self, frame):
+            current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
+                        for i in range(thread.GetNumFrames())]
+            # 何かしらの関数に遷移したとき
+            if len(current_frames) > len(self.frames):
+                self.previous_values.append({})
+                self.vars_declared.append([])
+                self.frames = current_frames
+            # 何かしらの関数から戻ってきたとき
+            elif len(current_frames) < len(self.frames):
+                self.previous_values.pop()
+                self.vars_declared.pop()
+                self.frames = current_frames
+            
             gvars = []
             for module in target.module_iter():
                 for sym in module:
@@ -375,10 +71,314 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                             var = target.FindFirstGlobalVariable(name)
                             if var.IsValid():
                                 gvars.append(var)
-            self.vars_tracker: VarsTracker = VarsTracker(gvars)
+
+            self.vars_changed = {}
+            self.track_var(gvars, self.global_previous_values, isLocal=False)
+            self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
+
+        def track_var(self, vars, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal=True):
+            crnt_vars: list[tuple[str, int]] = []
+
+            for var in vars:
+                name = var.GetName()
+                line = int(var.GetDeclaration().GetLine())
+                full_name = name
+                value = var.GetValue()
+                address = var.GetLoadAddress()
+
+                var_previous_value = var_previous_values[(name, line)].value if (name, line) in var_previous_values else None
+
+                if value != var_previous_value:
+                    print(f"{full_name} = {value}    ← changed")
+                    self.vars_changed[(name,line)] = [()]
+                else:
+                    print(f"{full_name} = {value}")
+
+                if isLocal:
+                    crnt_vars.append((name, line))
+
+                if (name, line) in var_previous_values:
+                    var_previous_values[(name, line)].update_value(value, address)
+                else:
+                    var_previous_values[(name, line)] = VarPreviousValue(value, address)
+
+                num_children = var.GetNumChildren()
+                
+                if var.GetType().IsPointerType():
+                    pointee_type = var.GetType().GetPointeeType()
+                    type_name = pointee_type.GetName()
+
+                    try:
+                        if not pointee_type.IsPointerType():
+                            addr = int(var.GetValue(), 16)
+                            target = var.GetTarget()
+                            process = target.GetProcess()
+                            error = lldb.SBError()
+                            if type_name == "char":
+                                cstr = process.ReadCStringFromMemory(addr, 100, error)
+                                if error.Success():
+                                    print(f"→ {full_name} points to string: \"{cstr}\"")
+                                    var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
+                                    if cstr != var_previous_value:
+                                        if (name,line) in self.vars_changed:
+                                            self.vars_changed[(name,line)].append(('*', ))
+                                        else:
+                                            self.vars_changed[(name,line)]= [('*', )]
+                                    var_previous_values[(name, line)].children['*'] = VarPreviousValue(cstr, addr)
+                                else:
+                                    print(f"→ {full_name} points to unreadable char*")
+                            elif type_name == "int":
+                                data = process.ReadMemory(addr, 4, error)
+                                if error.Success():
+                                    val = struct.unpack("i", data)[0]
+                                    print(f"→ {full_name} points to int: {val}")
+                                    var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
+                                    if val != var_previous_value:
+                                        if (name,line) in self.vars_changed:
+                                            self.vars_changed[(name,line)].append(('*', ))
+                                        else:
+                                            self.vars_changed[(name,line)]= [('*', )]
+                                    var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"→ {full_name} points to unreadable int*")
+                            elif type_name == "float":
+                                data = process.ReadMemory(addr, 4, error)
+                                if error.Success():
+                                    val = struct.unpack("f", data)[0]
+                                    print(f"→ {full_name} points to float: {val}")
+                                    var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
+                                    if val != var_previous_value:
+                                        if (name,line) in self.vars_changed:
+                                            self.vars_changed[(name,line)].append(('*', ))
+                                        else:
+                                            self.vars_changed[(name,line)]= [('*', )]
+                                    var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"→ {full_name} points to unreadable float*")
+                            elif type_name == "double":
+                                data = process.ReadMemory(addr, 8, error)
+                                if error.Success():
+                                    val = struct.unpack("d", data)[0]
+                                    print(f"→ {full_name} points to double: {val}")
+                                    var_previous_value = var_previous_values[(name, line)].children['*'].value if '*' in var_previous_values[(name, line)].children else None
+                                    if val != var_previous_value:
+                                        if (name,line) in self.vars_changed:
+                                            self.vars_changed[(name,line)].append(('*', ))
+                                        else:
+                                            self.vars_changed[(name,line)]= [('*', )]
+                                    var_previous_values[(name, line)].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"→ {full_name} points to unreadable double*")
+                            else:
+                                # 構造体などの場合
+                                deref = var.Dereference()
+                                if deref.IsValid() and deref.GetNumChildren() > 0:
+                                    print(f"→ Deref {full_name}")
+                                    children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
+                                    self.track(children, var_previous_values[(name, line)].children, [name], line, full_name)
+                        else:
+                            children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                            self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
+
+                    except Exception as e:
+                        print(f"→ {full_name} deref error: {e}")
+
+                elif num_children > 0:
+                    children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                    self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
+        
+            if isLocal and len(self.vars_declared) != 0:
+                vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
+                self.vars_removed.update(vars_removed)
+                for var_removed in vars_removed:
+                    if var_removed in self.vars_declared[-1]:
+                        self.vars_declared[-1].remove(var_removed)
+                        var_previous_values.pop(var_removed)
+                        
+        def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix, depth=1) -> list[str]:
+            indent = "    " * depth
+
+            for var in vars:
+                name = '*' if var.GetType().IsPointerType() else var.GetName() 
+                full_name = f"{prefix}.{name}"
+                value = var.GetValue()
+                address = var.GetLoadAddress()
+
+                var_previous_value = var_previous_values[name].value if name in var_previous_values else None
+
+                if value != var_previous_value:
+                    print(f"{indent}{full_name} = {value}    ← changed")
+                    if (vars_path[0], line) in self.vars_changed:
+                        self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name))
+                    else:
+                        self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name)]
+                else:
+                    print(f"{indent}{full_name} = {value}")
+
+                if name in var_previous_values:
+                    var_previous_values[name].update_value(value, address)
+                else:
+                    var_previous_values[name] = VarPreviousValue(value, address)
+
+                num_children = var.GetNumChildren()
+                
+                if var.GetType().IsPointerType():
+                    pointee_type = var.GetType().GetPointeeType()
+                    type_name = pointee_type.GetName()
+
+                    try:
+                        if not pointee_type.IsPointerType():
+                            addr = int(var.GetValue(), 16)
+                            target = var.GetTarget()
+                            process = target.GetProcess()
+                            error = lldb.SBError()
+                            if type_name == "char":
+                                cstr = process.ReadCStringFromMemory(addr, 100, error)
+                                if error.Success():
+                                    print(f"{indent}→ {full_name} points to string: \"{cstr}\"")
+                                    var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
+                                    if cstr != var_previous_value:
+                                        if len(vars_path) == 0:
+                                            if (name, line) in self.vars_changed:
+                                                self.vars_changed[(name, line)].append(('*', ))
+                                            else:
+                                                self.vars_changed[(name, line)]= [('*', )]
+                                        else:
+                                            if (vars_path[0], line) in self.vars_changed:
+                                                self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
+                                            else:
+                                                self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                    var_previous_values[name].children['*'] = VarPreviousValue(cstr, addr)
+                                else:
+                                    print(f"{indent}→ {full_name} points to unreadable char*")
+                            elif type_name == "int":
+                                data = process.ReadMemory(addr, 4, error)
+                                if error.Success():
+                                    val = struct.unpack("i", data)[0]
+                                    print(f"{indent}→ {full_name} points to int: {val}")
+                                    var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
+                                    if val != var_previous_value:
+                                        if len(vars_path) == 0:
+                                            if (name, line) in self.vars_changed:
+                                                self.vars_changed[(name, line)].append(('*', ))
+                                            else:
+                                                self.vars_changed[(name, line)]= [('*', )]
+                                        else:
+                                            if (vars_path[0], line) in self.vars_changed:
+                                                self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
+                                            else:
+                                                self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                    var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"{indent}→ {full_name} points to unreadable int*")
+                            elif type_name == "float":
+                                data = process.ReadMemory(addr, 4, error)
+                                if error.Success():
+                                    val = struct.unpack("f", data)[0]
+                                    print(f"{indent}→ {full_name} points to float: {val}")
+                                    var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
+                                    if val != var_previous_value:
+                                        if len(vars_path) == 0:
+                                            if (name, line) in self.vars_changed:
+                                                self.vars_changed[(name, line)].append(('*', ))
+                                            else:
+                                                self.vars_changed[(name, line)]= [('*', )]
+                                        else:
+                                            if (vars_path[0], line) in self.vars_changed:
+                                                self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
+                                            else:
+                                                self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                    var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"{indent}→ {full_name} points to unreadable float*")
+                            elif type_name == "double":
+                                data = process.ReadMemory(addr, 8, error)
+                                if error.Success():
+                                    val = struct.unpack("d", data)[0]
+                                    print(f"{indent}→ {full_name} points to double: {val}")
+                                    var_previous_value = var_previous_values[name].children['*'].value if '*' in var_previous_values[name].children else None
+                                    if val != var_previous_value:
+                                        if len(vars_path) == 0:
+                                            if (name, line) in self.vars_changed:
+                                                self.vars_changed[(name, line)].append(('*', ))
+                                            else:
+                                                self.vars_changed[(name, line)]= [('*', )]
+                                        else:
+                                            if (vars_path[0], line) in self.vars_changed:
+                                                self.vars_changed[(vars_path[0], line)].append((*vars_path[1:], name, '*'))
+                                            else:
+                                                self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name, '*')]
+                                    var_previous_values[name].children['*'] = VarPreviousValue(val, addr)
+                                else:
+                                    print(f"{indent}→ {full_name} points to unreadable double*")
+                            else:
+                                # 構造体などの場合
+                                deref = var.Dereference()
+                                if deref.IsValid() and deref.GetNumChildren() > 0:
+                                    print(f"{indent}→ Deref {full_name}")
+                                    children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
+                                    self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
+                        else:
+                            children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                            self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
+
+                    except Exception as e:
+                        print(f"{indent}→ {full_name} deref error: {e}")
+
+                elif num_children > 0:
+                    children = [var.GetChildAtIndex(i) for i in range(num_children)]
+                    self.track(children, var_previous_values[name].children, line, vars_path + [name], full_name, depth + 1)
+
+        def getValueAll(self):
+            return {var_key[0]: {var_key[1]: {"value": self.previous_values[-1][var_key].value, "children": self.getValuesDict(self.previous_values[-1][var_key].children)}} 
+                    for var_key in self.vars_declared[-1] if var_key in self.previous_values[-1]}
+        
+        def getValueAllFrame(self):
+            var_dict_list = []
+            for i in range(len(self.vars_declared)):
+                var_dict = {var_key[0]: {var_key[1]: {"value": self.previous_values[i][var_key].value, "children": self.getValuesDict(self.previous_values[i][var_key].children)}} 
+                        for var_key in self.vars_declared[i] if var_key in self.previous_values[i]}
+                var_dict_list.append(var_dict)
+            return var_dict_list
+        
+        def getGlobalValueAll(self):
+            return {var_key[0]: {var_key[1]: {"value": global_previous_value.value, "children": self.getValuesDict(global_previous_value.children)}} 
+                    for var_key, global_previous_value in self.global_previous_values.items()}
+
+        def getValuesDict(self, previous_values: dict[str, VarPreviousValue]):
+            values_dict = {}
+            for varname, previous_value in previous_values.items():
+                values_dict[varname] = {"value": previous_value.value, "children": self.getValuesDict(previous_value.children)}
+            return values_dict
+        
+        def getValuePartly(self, var_name: tuple[str, int], value_path: list[str]):
+            temp_previous_value = self.previous_values[-1][var_name]
+            while len(value_path):
+                children_name = value_path.pop(0)
+                temp_previous_value = temp_previous_value.children[children_name]
+            return temp_previous_value.value
+
+        # "item": {"value": aaa, "children": {}}
+        def getValueByVar(self, varname: tuple[str, int], back=0):
+            return self.getValueByVarDict(self.previous_values[int(-1+back)][varname])
+            
+        # {"value": bbb, "children": {0: {...}}...}
+        def getValueByVarDict(self, previous_value: VarPreviousValue):
+            value_var_declared_dict = {"value": previous_value.value, "children": {}}
+            for var_part, var_previous_value in previous_value.children.items():
+                value_var_declared_dict["children"][var_part] = self.getValueByVarDict(var_previous_value)
+            return value_var_declared_dict
+        
+        def setVarsDeclared(self, name: tuple[str, int]):
+            return self.vars_declared[-1].append(name)
+
+    class DebugManager():
+        def __init__(self):
+            self.vars_tracker: VarsTracker = None
             self.isEnd = False
-            self.process = process
-            self.thread = thread
+            self.isRollBack = False
+            self.process = None
+            self.thread = None
             self.line_loop = []
             self.func_checked = []
             self.std_messages = []
@@ -392,7 +392,24 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.str_info_to_send = []
             self.skipped_lines = []
             self.crnt_oneline = None
+            self.line_history: list[int] = []
+            self.events_history: list[dict] = []
 
+        def set_process_and_thread(self, process, thread, isRollBack: bool):
+            gvars = []
+            for module in target.module_iter():
+                for sym in module:
+                    if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
+                        name = sym.GetName()
+                        if name:
+                            var = target.FindFirstGlobalVariable(name)
+                            if var.IsValid():
+                                gvars.append(var)
+            self.vars_tracker: VarsTracker = VarsTracker(gvars)
+            self.process = process
+            self.thread = thread
+            self.isRollBack = isRollBack
+            
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
@@ -400,7 +417,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
                     self.get_std_outputs()
-                    self.event_sender({"line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
+                    self.event_sender({"message": "最初の処理", "line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
                     self.line_number: int = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
                     self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
@@ -565,7 +582,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.process.PutSTDIN(new_stdin)
                         self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check].pop(0)
                         if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check]):
-                            self.event_sender({"message": "次のscanf用に入力してください!!", "status": "ok"})
+                            self.event_sender({"message": "次のscanf用に入力してください!!", "status": "ok"}, False)
                         else:
                             break
                     else:
@@ -599,13 +616,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 if input_check:
                     if state == "ok":
                         message = f"値({', '.join(results)})がstdinに入力されました!!"
-                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                     elif state == "mismatch":
                         message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
                         if errors["incomplete"]:
                             incomplete_message = ", ".join(errors["incomplete"]) + "\nに該当する変数にはランダムな値が設定されます"
                             message += "\f" + incomplete_message
-                        self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()})
+                        self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                 
                 if str(self.line_number) in self.line_data[self.func_name]["file"] and (self.frame_num, self.line_number) not in self.file_check_num:
                     self.file_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["file"][str(self.line_number)], -1)
@@ -672,12 +689,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             frame_num = thread.GetNumFrames()
             
             print(f"{func_name} at {file_name}:{line_number}")
+            self.line_history.append(line_number)
+
             return state, frame, file_name, line_number, func_name, frame_num
 
         def get_std_outputs(self):
             # 新しい出力だけ読む
             out_chunk = stdout_r.read()
-
             err_chunk = stderr_r.read()
 
             if out_chunk:
@@ -901,7 +919,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
-                        # 条件文での値の変化はここで一括で取得する (allではなくpartlyにするかどうかは考える)
+                        # 条件文での値の変化はここで一括で取得する
                         self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
@@ -1287,17 +1305,38 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
         def event_reciever(self):
             # JSONが複数回に分かれて送られてくる可能性があるためパース
+            if self.isRollBack:
+                event = self.events_history.pop(0)
+                if len(self.events_history) == 0:
+                    self.isRollBack = False
+                    self.event_sender({"status": "rollbackEnd", "gvars": self.vars_tracker.getGlobalValueAll(), "vars": self.vars_tracker.getValueAllFrame()}, False)
+                    print(".    ", event)
+                return event
             data = conn.recv(1024)
             # ここは後々変えるかも
             if not data:
                 return None
-            buffer = data.decode()
-            event = json.loads(buffer)
-            print(f"[受信イベント] {event}")
+            event = json.loads(data.decode())
+            if "rollback" in event:
+                self.event_sender({"status": "rollback"})
+                data = conn.recv(1024)
+                # ここは後々変えるかも
+                if not data:
+                    return None
+                event = json.loads(data.decode())
+                if event["rollback"]:
+                    self.events_history[:] = self.events_history[:event["index"]]
+                    raise RollBack()
+            else:
+                # このevents_historyとline_historyを使って処理を戻すことを考える
+                self.events_history.append(event)
             return event
     
         def event_sender(self, msgJson, getLine=True):
-            if msgJson["status"] == "ok":
+            if self.isRollBack:
+                return
+            
+            if msgJson["status"] == "ok" or msgJson["status"] == "rollbackEnd":
                 msgJson["std"] = self.std_messages
                 msgJson["files"] = self.file_info_to_send
                 self.file_info_to_send = []
@@ -1322,69 +1361,88 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         # スコープから外れて除外された変数を取り除く
                     msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
                     self.vars_tracker.vars_removed = set()
+            else:
+                self.events_history.pop(-1)
+
             send_data = json.dumps(msgJson)
             conn.sendall(send_data.encode('utf-8'))
 
-    try:
-        print(f"[接続] {addr} が接続しました")
-            
-        with conn:
-            debug_manager = DebugManager(process, thread)
+    print(f"[接続] {addr} が接続しました")
+    debug_manager = DebugManager()
+    isRollBack = False
+    while True:
+        try:
+            # region lldbの初期設定
+            lldb.SBDebugger.Initialize()
+            debugger = lldb.SBDebugger.Create()
+            debugger.SetAsync(False)
 
+            target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
+            if not target:
+                print("failed in build of target")
+                exit(-1)
+
+            # breakpointを行で指定するならByLocation
+            breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
+
+            launch_info = lldb.SBLaunchInfo([])
+            launch_info.SetWorkingDirectory(os.getcwd())
+
+            stdout_file = tempfile.NamedTemporaryFile(delete=False)
+            stderr_file = tempfile.NamedTemporaryFile(delete=False)
+
+            # stdout, stderr を別々のパイプにする
+            launch_info.AddOpenFileAction(1, stdout_file.name, True, True)  # fd=1 → stdout
+            launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
+
+            error = lldb.SBError()
+            process = target.Launch(launch_info, error)
+
+            # 読み取り用にlogファイルを常にopenしておく
+            stdout_r = open(stdout_file.name, "r")
+            stderr_r = open(stderr_file.name, "r")
+
+            if not error.Success() or not process or not process.IsValid():
+                print("failed in operation")
+                exit(-1)
+
+            thread = process.GetThreadAtIndex(0)
+            if not thread.IsValid():
+                print("no valid thread found")
+                exit(-1)
+            # endregion
+
+            debug_manager.set_process_and_thread(process, thread, isRollBack)
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped:
                 debug_manager.analyze_frame()
-    except:
-        pass
+
+        except Exception as e:
+            if isinstance(e, RollBack):
+                stdout_r.close()
+                stderr_r.close()
+                os.unlink(stdout_file.name)
+                os.unlink(stderr_file.name)
+                isRollBack = True
+            else:
+                print("サーバー終了")
+                break
+
+    stdout_r.close()
+    stderr_r.close()
+
+    os.unlink(stdout_file.name)
+    os.unlink(stderr_file.name)
 
 # region コマンドライン引数の確認
 parser = argparse.ArgumentParser(description='for the c-backdoor')
 # ベース名を取得
 parser.add_argument('--name', type=str, required=True, help='string')
+parser.add_argument('--lines', type=str, required=True, help='string')
+parser.add_argument('--events', type=str, required=True, help='string')
+
 # 引数を解析
 args = parser.parse_args()
-# endregion
-
-# region lldbの初期設定
-lldb.SBDebugger.Initialize()
-debugger = lldb.SBDebugger.Create()
-debugger.SetAsync(False)
-
-target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
-if not target:
-    print("failed in build of target")
-    exit(1)
-
-# print(f"Command line arguments: {args}")
-
-# breakpointを行で指定するならByLocation
-breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
-
-launch_info = lldb.SBLaunchInfo([])
-launch_info.SetWorkingDirectory(os.getcwd())
-
-stdout_file = tempfile.NamedTemporaryFile(delete=False)
-stderr_file = tempfile.NamedTemporaryFile(delete=False)
-
-# stdout, stderr を別々のパイプにする
-launch_info.AddOpenFileAction(1, stdout_file.name, True, True)  # fd=1 → stdout
-launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
-
-error = lldb.SBError()
-process = target.Launch(launch_info, error)
-
-# 読み取り用にlogファイルを常にopenしておく
-stdout_r = open(stdout_file.name, "r")
-stderr_r = open(stderr_file.name, "r")
-
-if not error.Success() or not process or not process.IsValid():
-    print("failed in operation")
-    exit(1)
-
-thread = process.GetThreadAtIndex(0)
-if not thread.IsValid():
-    print("no valid thread found")
-    exit(1)
 # endregion
 
 # region サーバーの開始メソッドは再利用性がないのでインライン展開する
@@ -1403,12 +1461,4 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     server_thread.start()
 
     server_thread.join()
-
-stdout_r.close()
-stderr_r.close()
-
-os.unlink(stdout_file.name)
-os.unlink(stderr_file.name)
-
-print("[サーバ終了]")
 # endregion

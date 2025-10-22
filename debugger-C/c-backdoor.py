@@ -576,7 +576,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.process.PutSTDIN(new_stdin)
                         self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check].pop(0)
                         if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check]):
-                            self.event_sender({"message": "次のscanf用に入力してください!!", "status": "ok"})
+                            self.event_sender({"message": "次のscanf用に入力してください!!", "status": "ok"}, False)
                         else:
                             break
                     else:
@@ -610,13 +610,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 if input_check:
                     if state == "ok":
                         message = f"値({', '.join(results)})がstdinに入力されました!!"
-                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()})
+                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                     elif state == "mismatch":
                         message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
                         if errors["incomplete"]:
                             incomplete_message = ", ".join(errors["incomplete"]) + "\nに該当する変数にはランダムな値が設定されます"
                             message += "\f" + incomplete_message
-                        self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()})
+                        self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                 
                 if str(self.line_number) in self.line_data[self.func_name]["file"] and (self.frame_num, self.line_number) not in self.file_check_num:
                     self.file_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["file"][str(self.line_number)], -1)
@@ -1311,7 +1311,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 print("line_check: ", self.line_history)
                 for history in self.events_history:
                     print(history)
-                self.event_sender({"status": "check", "history": self.line_history})
+                self.event_sender({"status": "check", "lines": self.line_history, "events": self.events_history})
             # このevents_historyとline_historyを使って処理を戻すことを考える
             self.events_history.append(event)
             return event
@@ -1361,6 +1361,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 parser = argparse.ArgumentParser(description='for the c-backdoor')
 # ベース名を取得
 parser.add_argument('--name', type=str, required=True, help='string')
+parser.add_argument('--lines', type=str, required=True, help='string')
+parser.add_argument('--events', type=str, required=True, help='string')
+
 # 引数を解析
 args = parser.parse_args()
 # endregion
