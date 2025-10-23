@@ -242,7 +242,7 @@ def main():
                 sys.exit(1)   # 呼び出し元プログラムを終了
 
         # サーバを立てる
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
+        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
 
         line_history = None
         events_history = None
@@ -612,7 +612,7 @@ def main():
                     if cmd == "":
                         continue
                     elif cmd == "rollback":
-                        if len(CODEWND.history) >= 2:
+                        if len(CODEWND.history):
                             sender.send_event({"rollback": True})
                             MMAPWND.hide()
                             CODEWND.show()
@@ -818,6 +818,10 @@ def main():
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
                     if MSGWND.selectMsgText is not None:
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+
+                if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
+                    if CODEWND.rollback_index is not None:
+                        CODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
 
                 if event.type == KEYDOWN and event.key == K_f:
                     # 足元にあるのが宝箱かワープゾーンかを調べる
@@ -1912,6 +1916,7 @@ class Player(Character):
                     if itemResult.get('skip', False):
                         MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                     else:
+                        print(itemResult)
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
@@ -2824,6 +2829,7 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+
                 elif self.select_type == 'rollback':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index})
@@ -2852,7 +2858,8 @@ class MessageWindow(Window):
                                 PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {}, player_history[2]["gvars"][(gvar_name, int(line))]))
 
                         PLAYER.itembag = ItemBag()
-                        PLAYER.itembag.items.pop(0)
+                        if len(rollbackResult["vars"]) != 0:
+                            PLAYER.itembag.items.pop(0)
                         for i, var_dict in enumerate(rollbackResult["vars"]):
                             PLAYER.itembag.items.append([])
                             for var_name, var_info in var_dict.items():
@@ -2867,12 +2874,18 @@ class MessageWindow(Window):
                         PLAYER.std_messages = []
                         PLAYER.address_to_fname = {}
                         PLAYER.address_to_size = {}
-                        PLAYER.func = None
-                        self.sender.code_window.rollback_index = None
+                        PLAYER.func = player_history[2]["func"]
+
+                        self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+
                         fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                     else:
                         self.sender.send_event({"rollback": False})
+                        self.sender.receive_json()
+                        MSGWND.set("巻き戻しを取り止めました")
+                    self.sender.code_window.rollback_index = None
+
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None
@@ -4689,7 +4702,7 @@ class CodeWindow(Window):
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
-            if self.rollback_index and (i + 1) == self.history[self.rollback_index][1]:
+            if self.rollback_index is not None and (i + 1) == self.history[self.rollback_index][1]:
                 bg_rect = pygame.Rect(
                     x_offset - 5,
                     y_offset,
@@ -4715,7 +4728,7 @@ class CodeWindow(Window):
             return False
         
     def selectRollBackLine(self, dir: int):
-        if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
+        if self.rollback_index is None or (self.rollback_index == 0 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
             return
         
         self.rollback_index += dir
@@ -4772,21 +4785,21 @@ class EventSender:
                     self.code_window.rollback_index = len(self.code_window.history) - 1
                     MSGWND.set("右上のコードウィンドウの水色の行まで戻りますか?", (['はい', 'いいえ'], 'rollback'))
                     return msg
-                if msg["status"] == "rollbackEnd":
+                if msg["status"] == "rollbackFalse":
                     return msg
-                
-                gvar_dict = {}
-                for gvar in PLAYER.commonItembag.items[-1]:
-                    gvar_dict[(gvar.name, gvar.line)] = gvar.vartype
-                
-                var_list = []
-                for item_list in PLAYER.itembag.items:
-                    var_dict = {}
-                    for var in item_list:
-                        var_dict[(var.name, var.line)] = var.vartype
-                    var_list.append(var_dict)
-                
-                self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "status": PLAYER.status.copy(), "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "gvars": gvar_dict, "vars": var_list}))
+                if msg["status"] == "ok" and not "firstFunc" in msg:
+                    gvar_dict = {}
+                    for gvar in PLAYER.commonItembag.items[-1]:
+                        gvar_dict[(gvar.name, gvar.line)] = gvar.vartype
+                    
+                    var_list = []
+                    for item_list in PLAYER.itembag.items:
+                        var_dict = {}
+                        for var in item_list:
+                            var_dict[(var.name, var.line)] = var.vartype
+                        var_list.append(var_dict)
+                    
+                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "status": PLAYER.status.copy(), "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
 
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])
@@ -4836,7 +4849,8 @@ class EventSender:
             except json.JSONDecodeError:
                 continue  # JSONがまだ完全でないので続けて待つ
             except socket.timeout:
-                raise TimeoutError("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+                if self.code_window.rollback_index is None:
+                    raise TimeoutError("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
             except Exception as e:
                 print(f"受信エラー: {e}")
                 raise
