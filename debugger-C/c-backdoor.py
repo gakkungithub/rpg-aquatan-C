@@ -392,7 +392,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.str_info_to_send = []
             self.skipped_lines = []
             self.crnt_oneline = None
-            self.line_history: list[int] = []
             self.events_history: list[dict] = []
 
         def set_process_and_thread(self, process, thread, rollback_index: int | None):
@@ -689,7 +688,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             frame_num = thread.GetNumFrames()
             
             print(f"{func_name} at {file_name}:{line_number}")
-            self.line_history.append(line_number)
 
             return state, frame, file_name, line_number, func_name, frame_num
 
@@ -1307,7 +1305,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if self.rollback_index is not None:
                 event = self.events_history[self.rollback_index]
                 self.rollback_index += 1
-                print(".    ", event)
+                print(event)
                 return event
             data = conn.recv(1024)
             # ここは後々変えるかも
@@ -1322,9 +1320,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     return NoConnection()
                 event = json.loads(data.decode())
                 if event["rollback"]:
-                    print(self.events_history)
+                    self.line_loop = []
+                    self.func_checked = []
+                    self.std_messages = []
+                    self.input_check_num = {}
+                    self.stdin_buffer = ""
+                    self.file_check_num = {}
+                    self.file_info_to_send = []
+                    self.memory_check_num = {}
+                    self.memory_info_to_send = []
+                    self.str_check_num = {}
+                    self.str_info_to_send = []
+                    self.skipped_lines = []
+                    self.crnt_oneline = None
                     self.events_history[:] = self.events_history[:event["index"]]
-                    print(self.events_history)
                     raise RollBack()
                 else:
                     self.event_sender({"status": "rollbackFalse"})
@@ -1335,6 +1344,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
     
         def event_sender(self, msgJson, getLine=True):
             if self.rollback_index is not None:
+                print(msgJson)
                 if len(self.events_history) == self.rollback_index:
                     msgJson = {"status": "rollbackTrue", "gvars": self.vars_tracker.getGlobalValueAll(), "vars": self.vars_tracker.getValueAllFrame()}
                     getLine = False

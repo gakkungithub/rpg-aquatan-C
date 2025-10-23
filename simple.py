@@ -102,9 +102,6 @@ def main():
         ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
     )
 
-    line_history: list[int] | None = None
-    events_history: list[dict] | None = None
-
     while True:
         if os.uname()[0] != 'Darwin':
             drivers = ['fbcon', 'directfb', 'svgalib']
@@ -225,27 +222,24 @@ def main():
         # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
         cfiles = [f"{programpath}.c"]
 
-        if line_history is None:
-            try:
-                # cプログラムを整形する
-                subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+        try:
+            # cプログラムを整形する
+            subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
-                # cファイルを解析してマップデータを生成する
-                # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
-                cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
-                if SBWND.color_support:
-                    cfcode.append("-u")
-                subprocess.run(cfcode, cwd="mapdata_generator", check=True)
-                subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
-            except subprocess.CalledProcessError as e:
-                print(f"subprocess failed with exit code {e.returncode}")
-                sys.exit(1)   # 呼び出し元プログラムを終了
+            # cファイルを解析してマップデータを生成する
+            # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
+            cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+            if SBWND.color_support:
+                cfcode.append("-u")
+            subprocess.run(cfcode, cwd="mapdata_generator", check=True)
+            subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+        except subprocess.CalledProcessError as e:
+            print(f"subprocess failed with exit code {e.returncode}")
+            sys.exit(1)   # 呼び出し元プログラムを終了
 
         # サーバを立てる
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
 
-        line_history = None
-        events_history = None
         # endregion
 
         # region マップの初期設定
@@ -1645,7 +1639,7 @@ class Character:
         offsetx, offsety = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 18)
+        font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 20)
         screen.blit(self.image, (px-offsetx, py-offsety))
         screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
                     0], (px-offsetx, py-offsety-18))
@@ -2880,6 +2874,7 @@ class MessageWindow(Window):
 
                         fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                         fieldmap.add_chara(PLAYER)  # マップに再登録
+                        MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
                     else:
                         self.sender.send_event({"rollback": False})
                         self.sender.receive_json()
@@ -4783,7 +4778,7 @@ class EventSender:
                     return msg
                 if msg["status"] == "rollback":
                     self.code_window.rollback_index = len(self.code_window.history) - 1
-                    MSGWND.set("右上のコードウィンドウの水色の行まで戻りますか?", (['はい', 'いいえ'], 'rollback'))
+                    MSGWND.set("右上のコードウィンドウの水色の行の処理直前まで巻き戻しますか?", (['はい', 'いいえ'], 'rollback'))
                     return msg
                 if msg["status"] == "rollbackFalse":
                     return msg
