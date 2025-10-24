@@ -3590,6 +3590,62 @@ class MoveEvent():
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
+                                                 
+# 88888888ba,                                 88 88  
+# 88      `"8b               ,d               "" 88  
+# 88        `8b              88                  88  
+# 88         88  ,adPPYba, MM88MMM ,adPPYYba, 88 88  
+# 88         88 a8P_____88   88    ""     `Y8 88 88  
+# 88         8P 8PP"""""""   88    ,adPPPPP88 88 88  
+# 88      .a8P  "8b,   ,aa   88,   88,    ,88 88 88  
+# 88888888Y"'    `"Ybbd8"'   "Y888 `"8bbdP"Y8 88 88  
+
+class Detail:
+    CYAN = Color(100, 248, 248, 255)
+    RED = Color(255, 0, 0, 255)
+    WHITE = Color(255, 255, 255, 255)
+
+    def __init__(self, detail: dict, font: pygame.freetype.Font):
+        self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
+        self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
+        self.hoverComment_list = detail["hover"]
+
+        x, y = 50, 10
+        # 各行（'+'区切り）を処理
+        for i, line in enumerate(detail["detail"].split('+')):
+            parts = line.split('?')
+
+            for j, text in enumerate(parts):
+                # 通常テキストを描画
+                base_surf, _ = font.render(text, self.CYAN)
+                base_rect = base_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((base_surf, base_rect))
+                x = base_rect.right
+
+                # 条件リンクを描画（最後以外）
+                if j < len(parts) - 1:
+                    cond_surf, _ = font.render("条件", self.RED)
+                    cond_rect = cond_surf.get_rect(topleft=(x, y))
+                    self.hoverLink_info_list.append((cond_surf, cond_rect))
+                    x = cond_rect.right
+
+            y = base_rect.bottom + 4
+            # 最後の要素でなければ「かつ」を追加して改行
+            if i < len(detail["detail"].split('+')) - 1:
+                x = 50
+                and_surf, _ = font.render("かつ", self.WHITE)
+                and_rect = and_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((and_surf, and_rect))
+                y = and_rect.bottom + 4
+
+        self.bottom_y = y
+        
+
+    def draw(self, surface: pygame.Surface):
+        for baseComment_info in self.baseComment_info_list:
+            surface.blit(baseComment_info[0], baseComment_info[1])
+        for hoverLink_info in self.hoverLink_info_list:
+            surface.blit(hoverLink_info[0], hoverLink_info[1])
 
 # 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
 # 88                                         88              d8"            `8b       d8b       d8' ""                      88                                 
@@ -3610,58 +3666,13 @@ class FuncInfoWindow(Window):
     LINE_COLOR = (255, 255, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
-    class Detail:
-        CYAN = Color(100, 248, 248, 255)
-        RED = Color(255, 0, 0, 255)
-        WHITE = Color(255, 255, 255, 255)
-
-        def __init__(self, detail: dict, font: pygame.freetype.Font):
-            self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
-            self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
-            self.hoverComment_list = detail["hover"]
-
-            x, y = 50, 10
-
-            # 各行（'+'区切り）を処理
-            for i, line in enumerate(detail["detail"].split('+')):
-                parts = line.split('?')
-
-                for j, text in enumerate(parts):
-                    # 通常テキストを描画
-                    base_surf, _ = font.render(text, self.CYAN)
-                    base_rect = base_surf.get_rect(topleft=(x, y))
-                    self.baseComment_info_list.append((base_surf, base_rect))
-                    x = base_rect.right
-
-                    # 条件リンクを描画（最後以外）
-                    if j < len(parts) - 1:
-                        cond_surf, _ = font.render("条件", self.RED)
-                        cond_rect = cond_surf.get_rect(topleft=(x, y))
-                        self.hoverLink_info_list.append((cond_surf, cond_rect))
-                        x = cond_rect.right
-
-                # 最後の要素でなければ「かつ」を追加して改行
-                if i < len(detail["detail"].split('+')) - 1:
-                    y = base_rect.bottom + 4
-                    x = 50
-                    and_surf, _ = font.render("かつ", self.WHITE)
-                    and_rect = and_surf.get_rect(topleft=(x, y))
-                    self.baseComment_info_list.append((and_surf, and_rect))
-                    y = and_rect.bottom + 4
-
-        def draw(self, surface: pygame.Surface):
-            for baseComment_info in self.baseComment_info_list:
-                surface.blit(baseComment_info[0], baseComment_info[1])
-            for hoverLink_info in self.hoverLink_info_list:
-                surface.blit(hoverLink_info[0], hoverLink_info[1])
-
     def __init__(self, funcs, warpPos, detail: dict | None = None):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs: list[dict] = funcs
         self.warpPos = warpPos
-        self.detail = self.Detail(detail, self.font) if detail else None
+        self.detail = Detail(detail, self.font) if detail else None
         self.left_arrow, _ = self.font.render("◀", (255, 255, 255, 255))
         self.right_arrow, _ = self.font.render("▶", (255, 255, 255, 255))
         self.left_rect = self.left_arrow.get_rect(center=(20, 140))
@@ -3699,7 +3710,7 @@ class FuncInfoWindow(Window):
         y_offset = 10
         if self.detail:
             self.detail.draw(self.surface)
-            y_offset += self.FONT_SIZE + 10
+            y_offset = self.detail.bottom_y
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
         for i, func in enumerate(self.funcs):

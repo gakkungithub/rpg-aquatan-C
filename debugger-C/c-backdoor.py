@@ -1305,7 +1305,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             if self.rollback_index is not None:
                 event = self.events_history[self.rollback_index]
                 self.rollback_index += 1
-                print(event)
                 return event
             data = conn.recv(1024)
             # ここは後々変えるかも
