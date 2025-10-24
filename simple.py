@@ -4693,13 +4693,14 @@ class CodeWindow(Window):
         Window.draw(self)
         x_offset = 10 - self.scrollX
         y_offset = 10 - self.scrollY
+        digit_line = len(str(len(self.lines)))
         for i, line in enumerate(self.lines):
             # 自動調整onの時は現在の行の3行前から表示するようにする
             if self.is_auto_scroll and i < self.linenum - 3:
                 continue
             if y_offset > self.maxY:
                 break
-            text = line.rstrip()
+            text = f"{str(i+1):>{digit_line}}  {line.rstrip()}"
             if (i + 1) == self.linenum:
                 bg_rect = pygame.Rect(
                     x_offset - 5,

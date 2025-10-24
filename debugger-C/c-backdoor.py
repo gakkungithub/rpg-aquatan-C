@@ -17,15 +17,15 @@ DATA_DIR = BASE_DIR + '/mapdata'
 CONTINUE = 1
 PROGRESS = 0
 
-def handle_client(conn: socket.socket, addr: tuple[str, int]):
+def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
     class ProgramFinished(Exception):
-        pass
+        print("プログラムが終了しました")
 
     class RollBack(Exception):
-        pass
+        print("処理の巻き戻しを実行します")
     
     class NoConnection(Exception):
-        pass
+        print("クライアントとの接続が切れました")
 
     class VarPreviousValue:
         def __init__(self, value=None, address=None):
@@ -39,16 +39,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.address = address
 
     class VarsTracker:
-        def __init__(self, gvars):
+        def __init__(self, gvars: list[lldb.SBValue]):
             self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
             self.global_previous_values: dict[tuple[str, int], VarPreviousValue] = {}
             self.vars_changed: dict[tuple[str, int], list[tuple[str, ...]]] = {}
             self.vars_declared: list[list[tuple[str, int]]] = []
             self.vars_removed: set[tuple[str, int]] = set()
-            self.frames = ['start']
+            self.frames: list[str] = ['start']
             self.track_var(gvars, self.global_previous_values, isLocal=False)
         
-        def trackStart(self, frame):
+        def trackStart(self, frame: lldb.SBFrame):
             current_frames = [thread.GetFrameAtIndex(i).GetFunctionName()
                         for i in range(thread.GetNumFrames())]
             # 何かしらの関数に遷移したとき
@@ -68,7 +68,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                     if sym.GetType() == lldb.eSymbolTypeData:  # データシンボル（変数）
                         name = sym.GetName()
                         if name:
-                            var = target.FindFirstGlobalVariable(name)
+                            var: lldb.SBValue = target.FindFirstGlobalVariable(name)
                             if var.IsValid():
                                 gvars.append(var)
 
@@ -76,7 +76,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.track_var(gvars, self.global_previous_values, isLocal=False)
             self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
 
-        def track_var(self, vars, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal=True):
+        def track_var(self, vars: list[lldb.SBValue] | lldb.SBValueList, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal: bool = True):
             crnt_vars: list[tuple[str, int]] = []
 
             for var in vars:
@@ -174,18 +174,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 deref = var.Dereference()
                                 if deref.IsValid() and deref.GetNumChildren() > 0:
                                     print(f"→ Deref {full_name}")
-                                    children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
-                                    self.track(children, var_previous_values[(name, line)].children, [name], line, full_name)
+                                    self.track([deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())], var_previous_values[(name, line)].children, [name], line, full_name)
                         else:
-                            children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                            self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
+                            self.track([var.GetChildAtIndex(i) for i in range(num_children)], var_previous_values[(name, line)].children, line, [name], full_name)
 
                     except Exception as e:
                         print(f"→ {full_name} deref error: {e}")
 
                 elif num_children > 0:
-                    children = [var.GetChildAtIndex(i) for i in range(num_children)]
-                    self.track(children, var_previous_values[(name, line)].children, line, [name], full_name)
+                    self.track([var.GetChildAtIndex(i) for i in range(num_children)], var_previous_values[(name, line)].children, line, [name], full_name)
         
             if isLocal and len(self.vars_declared) != 0:
                 vars_removed = set(var_previous_values.keys()) - set(crnt_vars)
@@ -195,7 +192,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                         self.vars_declared[-1].remove(var_removed)
                         var_previous_values.pop(var_removed)
                         
-        def track(self, vars, var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix, depth=1) -> list[str]:
+        def track(self, vars: list[lldb.SBValue], var_previous_values: dict[str, VarPreviousValue], line: int, vars_path: list[str], prefix: str, depth: int = 1) -> list[str]:
             indent = "    " * depth
 
             for var in vars:
@@ -333,7 +330,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             return {var_key[0]: {var_key[1]: {"value": self.previous_values[-1][var_key].value, "children": self.getValuesDict(self.previous_values[-1][var_key].children)}} 
                     for var_key in self.vars_declared[-1] if var_key in self.previous_values[-1]}
         
-        def getValueAllFrame(self):
+        def getValueAllEachFrame(self):
             var_dict_list = []
             for i in range(len(self.vars_declared)):
                 var_dict = {var_key[0]: {var_key[1]: {"value": self.previous_values[i][var_key].value, "children": self.getValuesDict(self.previous_values[i][var_key].children)}} 
@@ -394,7 +391,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.crnt_oneline = None
             self.events_history: list[dict] = []
 
-        def set_process_and_thread(self, process, thread, rollback_index: int | None):
+        def set_process_and_thread(self, process: lldb.SBProcess, thread: lldb.SBThread, rollback_index: int | None) -> None:
             gvars = []
             for module in target.module_iter():
                 for sym in module:
@@ -427,7 +424,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             self.vars_tracker.trackStart(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self, var_check = True):
+        def step_conditionally(self, var_check: bool = True) -> None:
             # scanf フォーマット → Python 正規表現パターンの対応表
             scanf_patterns = {
                 "%d": (r"[-+]?\d+", "符号付き10進整数"),
@@ -672,7 +669,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             self.get_std_outputs()
 
-        def get_next_state(self) -> None | tuple[int, lldb.SBFrame, str, int, str, int]:
+        def get_next_state(self) -> tuple[int, lldb.SBFrame, str, int, str, int] | None:
             state = self.process.GetState()
 
             frame = thread.GetFrameAtIndex(0)
@@ -691,7 +688,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             return state, frame, file_name, line_number, func_name, frame_num
 
-        def get_std_outputs(self):
+        def get_std_outputs(self) -> None:
             # 新しい出力だけ読む
             out_chunk = stdout_r.read()
             err_chunk = stderr_r.read()
@@ -703,16 +700,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 err_chunk = "/".join(err_chunk.rstrip("\n").split("\n"))
                 self.std_messages.append(f". [stderr]: {err_chunk}")
 
-        def get_new_values(self, values_changed: list[tuple[str, int]]):
-            value_changed_dict = []
+        def get_new_values(self, values_changed: list[tuple[str, int]]) -> list[dict]:
+            value_changed_dict_list = []
             for value_changed in values_changed:
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
                     value = self.vars_tracker.getValuePartly(value_changed, value_path.copy())
-                    value_changed_dict.append({"item": {"name": value_changed[0], "line": value_changed[1]}, "path": value_path, "value": value})
-            return value_changed_dict
+                    value_changed_dict_list.append({"item": {"name": value_changed[0], "line": value_changed[1]}, "path": value_path, "value": value})
+            return value_changed_dict_list
         
-        def vars_checker(self, isForFalse=False):
+        def vars_checker(self, isForFalse: bool = False) -> None:
             if self.isEnd:
                 return
             
@@ -870,8 +867,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
             # 変数が初期化されない時、スキップされるので、それも読み取る
             self.skipped_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
 
-        def analyze_frame(self, backToLine: int = None):
-            def check_condition(condition_type: str, fromTo: list[int], funcWarp: list[dict]):
+        def analyze_frame(self, backToLine: int = None) -> int: # Literal[PROGRESS, CONTINUE]
+            def check_condition(condition_type: str, fromTo: list[int], funcWarp: list[dict]) -> None:
                 errorCnt = 0
                 line_number_track: list[int] = fromTo[:2]
                 func_num = 0
@@ -1009,7 +1006,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                                 break
                             line_number_track.append(crntFromTo.pop(0))
 
-            def check_return(fromTo: list[int], funcWarp: list[dict]):
+            def check_return(fromTo: list[int], funcWarp: list[dict]) -> None:
                 errorCnt = 0
                 line_number_track: list[int] = fromTo[:2]
                 func_num = 0
@@ -1300,7 +1297,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
 
             return PROGRESS
 
-        def event_reciever(self):
+        def event_reciever(self) -> dict | None:
             # JSONが複数回に分かれて送られてくる可能性があるためパース
             if self.rollback_index is not None:
                 event = self.events_history[self.rollback_index]
@@ -1341,11 +1338,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]):
                 self.events_history.append(event)
             return event
     
-        def event_sender(self, msgJson, getLine=True):
+        def event_sender(self, msgJson: dict, getLine: bool = True) -> None:
             if self.rollback_index is not None:
-                print(msgJson)
                 if len(self.events_history) == self.rollback_index:
-                    msgJson = {"status": "rollbackTrue", "gvars": self.vars_tracker.getGlobalValueAll(), "vars": self.vars_tracker.getValueAllFrame()}
+                    msgJson = {"status": "rollbackTrue", "gvars": self.vars_tracker.getGlobalValueAll(), "vars": self.vars_tracker.getValueAllEachFrame()}
                     getLine = False
                     self.rollback_index = None
                 else:
