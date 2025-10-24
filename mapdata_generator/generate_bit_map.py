@@ -555,7 +555,7 @@ class GenBitMap:
             # 値が1の位置のインデックスを取得
             ones_idx = np.argwhere(self.floorMap == 1)
 
-            # その中からランダムにいくつか選ぶ（例：全体の2%）
+            # その中からランダムにいくつか選ぶ（全体の2%）
             num_to_modify = len(ones_idx) // 50
             selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
 
@@ -566,11 +566,34 @@ class GenBitMap:
             for (i, j) in selected_idx:
                 a = np.random.randint(0, 100)
                 self.floorMap[i, j] = 32 * 100 + a
+        elif wall_chip_type == 2:
+            # 値が1の位置のインデックスを取得
+            ones_idx = np.argwhere(self.floorMap == 1)
 
-        elif wall_chip_type in (1, 2):
-            # 通常通り処理
-            value = [343, 160][wall_chip_type - 1]
-            self.floorMap = np.where(self.floorMap == 1, value, self.floorMap)
+            # その中からランダムにいくつか選ぶ（全体の1%）
+            num_to_modify = len(ones_idx) // 100
+            selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
+
+            # まず全体を100に置き換え
+            self.floorMap = np.where(self.floorMap == 1, 160, self.floorMap)
+
+            # 選ばれた一部に花タイルを設置する
+            for (i, j) in selected_idx:
+                self.floorMap[i, j] = 16000
+        elif wall_chip_type == 1:
+            # 値が1の位置のインデックスを取得
+            ones_idx = np.argwhere(self.floorMap == 1)
+
+            # その中からランダムにいくつか選ぶ（全体の2%）
+            num_to_modify = len(ones_idx) // 50
+            selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
+
+            # まず全体を32に置き換え
+            self.floorMap = np.where(self.floorMap == 1, 343, self.floorMap)
+
+            # 選ばれた一部に694(反転色タイル)を代入
+            for (i, j) in selected_idx:
+                self.floorMap[i, j] = 694
         else:
             bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
             for i in range(1, height+1):

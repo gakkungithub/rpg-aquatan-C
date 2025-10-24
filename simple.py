@@ -1228,6 +1228,11 @@ class Map:
                                     (x*GS-offsetx, y*GS-offsety))
                         screen.blit(self.bg_images[self.map[y][x] % 100],
                                     (x*GS-offsetx, y*GS-offsety))
+                    elif self.map[y][x] == 16000:
+                        screen.blit(self.images[160],
+                                    (x*GS-offsetx, y*GS-offsety))
+                        screen.blit(self.bg_images[100],
+                                    (x*GS-offsetx, y*GS-offsety))
                     else:
                         screen.blit(self.images[self.map[y][x]],
                                     (x*GS-offsetx, y*GS-offsety))
@@ -1251,7 +1256,7 @@ class Map:
         # マップ範囲内か？
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
             return False
-        if 3200 <= self.map[y][x] <= 3299:
+        if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
             return False
         # マップチップは移動可能か？
         if self.movable_type[self.map[y][x]] == 0:
@@ -1275,7 +1280,7 @@ class Map:
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
             return False
         # マップチップは移動可能か？
-        if 3200 <= self.map[y][x] <= 3299:
+        if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
             return False
         if self.movable_type[self.map[y][x]] == 0:
             return False
