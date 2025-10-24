@@ -1313,9 +1313,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 data = conn.recv(1024)
                 # ここは後々変えるかも
                 if not data:
-                    return NoConnection()
+                    raise NoConnection()
                 event = json.loads(data.decode())
                 if event["rollback"]:
+                    self.isEnd = False
                     self.line_loop = []
                     self.func_checked = []
                     self.std_messages = []

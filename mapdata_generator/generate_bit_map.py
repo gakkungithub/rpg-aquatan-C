@@ -8,7 +8,6 @@ import configparser
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 from astar.search import AStar, Tile
-import mapChipID as mcID
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = BASE_DIR + '/mapdata'
@@ -253,7 +252,7 @@ class MapInfo:
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
         defaultMapChips = [503, 343, 160, 32]
         floorMap = np.where(floorMap == 0, random.choice([390, 43, 402, 31]), floorMap) 
-        # gray thick brick, grass floor, gray thin brick, or dungeon_floor
+        # 390 = gray thick brick, 43 = grass floor, 402 = gray thin brick, or 31 = dungeon_floor
 
         self.writeMapIni(pname, self.initPos, gvar_str)
         self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type])
@@ -403,13 +402,11 @@ class MapInfo:
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": chara_expression.pos[1], "y": chara_expression.pos[0], "dir": 0,
                                "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
             
-        filename = f'{DATA_DIR}/{pname}/{pname}.json'
-        with open(filename, 'w') as f:
+        with open(f'{DATA_DIR}/{pname}/{pname}.json', 'w') as f:
             fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
             json.dump(fileContent, f) 
 
-        vl_filename = f'{DATA_DIR}/{pname}/{pname}_varDeclLines.json'
-        with open(vl_filename, 'w') as f:
+        with open(f'{DATA_DIR}/{pname}/{pname}_varDeclLines.json', 'w') as f:
             json.dump(vardecl_lines, f) 
 
     def writeMapIni(self, pname, initPos: tuple[int, int], gvarString):
@@ -552,51 +549,70 @@ class GenBitMap:
     def setMapChip(self, pname, line_info_dict, isUniversal):
         wallFlags = np.zeros(8, dtype=int)
         height, width = self.floorMap.shape
-        bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
         # ここで壁パネルの種類を選択する
         wall_chip_type = random.randint(0, 3)
-        for i in range(1, height+1):
-            for j in range(1, width+1):
-                if bitMap_padded[i, j]:
-                    wallFlags[:] = 0
-                    #まず上下左右が壁であるかを確かめる(壁でないならそちら方向に仕切りが出来る)
-                    if bitMap_padded[i, j-1] == 0:
-                        #左壁フラグ
-                        wallFlags[0] = 1
-                    if bitMap_padded[i-1, j] == 0:
-                        #上壁フラグ
-                        wallFlags[1] = 1
-                    if bitMap_padded[i, j+1] == 0:
-                        #右壁フラグ
-                        wallFlags[2] = 1
-                    if bitMap_padded[i+1, j] == 0:
-                        #下壁フラグ
-                        wallFlags[3] = 1
-                    #次に斜めを確かめる
-                    if wallFlags[0] + wallFlags[1] == 0:
-                        #左上
-                        if bitMap_padded[i-1, j-1] == 0:
-                            #左上角壁フラグ
-                            wallFlags[4] = 1
-                    if wallFlags[1] + wallFlags[2] == 0:
-                        #右上
-                        if bitMap_padded[i-1, j+1] == 0:
-                            #右上角壁フラグ
-                            wallFlags[5] = 1
-                    if wallFlags[2] + wallFlags[3] == 0:
-                        #右下
-                        if bitMap_padded[i+1, j+1] == 0:
-                            #右下角壁フラグ
-                            wallFlags[6] = 1
-                    if wallFlags[3] + wallFlags[0] == 0:
-                        #左下
-                        if bitMap_padded[i+1, j-1] == 0:
-                            #左下角壁フラグ
-                            wallFlags[7] = 1
-                    bitMap_padded[i, j] = self.getFloorChipID(wallFlags, wall_chip_type)
+        if wall_chip_type == 3:
+            # 値が1の位置のインデックスを取得
+            ones_idx = np.argwhere(self.floorMap == 1)
 
-        self.floorMap = bitMap_padded[1:height+1, 1:width+1]
+            # その中からランダムにいくつか選ぶ（例：全体の2%）
+            num_to_modify = len(ones_idx) // 50
+            selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
 
+            # まず全体を32に置き換え
+            self.floorMap = np.where(self.floorMap == 1, 32, self.floorMap)
+
+            # 選ばれた一部に32*100 + a の値を代入
+            for (i, j) in selected_idx:
+                a = np.random.randint(0, 100)
+                self.floorMap[i, j] = 32 * 100 + a
+
+        elif wall_chip_type in (1, 2):
+            # 通常通り処理
+            value = [343, 160][wall_chip_type - 1]
+            self.floorMap = np.where(self.floorMap == 1, value, self.floorMap)
+        else:
+            bitMap_padded = np.pad(self.floorMap, pad_width=1, mode='constant', constant_values=0)
+            for i in range(1, height+1):
+                for j in range(1, width+1):
+                    if bitMap_padded[i, j]:
+                        wallFlags[:] = 0
+                        #まず上下左右が壁であるかを確かめる(壁でないならそちら方向に仕切りが出来る)
+                        if bitMap_padded[i, j-1] == 0:
+                            #左壁フラグ
+                            wallFlags[0] = 1
+                        if bitMap_padded[i-1, j] == 0:
+                            #上壁フラグ
+                            wallFlags[1] = 1
+                        if bitMap_padded[i, j+1] == 0:
+                            #右壁フラグ
+                            wallFlags[2] = 1
+                        if bitMap_padded[i+1, j] == 0:
+                            #下壁フラグ
+                            wallFlags[3] = 1
+                        #次に斜めを確かめる
+                        if wallFlags[0] + wallFlags[1] == 0:
+                            #左上
+                            if bitMap_padded[i-1, j-1] == 0:
+                                #左上角壁フラグ
+                                wallFlags[4] = 1
+                        if wallFlags[1] + wallFlags[2] == 0:
+                            #右上
+                            if bitMap_padded[i-1, j+1] == 0:
+                                #右上角壁フラグ
+                                wallFlags[5] = 1
+                        if wallFlags[2] + wallFlags[3] == 0:
+                            #右下
+                            if bitMap_padded[i+1, j+1] == 0:
+                                #右下角壁フラグ
+                                wallFlags[6] = 1
+                        if wallFlags[3] + wallFlags[0] == 0:
+                            #左下
+                            if bitMap_padded[i+1, j-1] == 0:
+                                #左下角壁フラグ
+                                wallFlags[7] = 1
+                        bitMap_padded[i, j] = self.getFloorChipID(wallFlags, wall_chip_type)
+            self.floorMap = bitMap_padded[1:height+1, 1:width+1]
         self.mapInfo.mapDataGenerator(pname, self.set_gvar(), self.floorMap, isUniversal, line_info_dict, wall_chip_type)
 
     def getFloorChipID(self, arr, wall_chip_type: int):
@@ -706,7 +722,7 @@ class GenBitMap:
                            32]
         
         return floor_chip_list[wall_chip_type]
-        # # return floorGrassChipID[tuple(map(int, arr))] # stone-grass
+        # return floorGrassChipID[tuple(map(int, arr))] # stone-grass
 
     def startTracking(self):
         self.setNextNodeInfo()

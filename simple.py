@@ -315,7 +315,7 @@ def main():
         load_charachips("data", "charachip.dat")
         print("3")
         # マップチップをロード
-        load_mapchips("data", "mapchip.dat")
+        load_mapchips()
         # マップとプレイヤー作成
         print("4")
 
@@ -928,9 +928,9 @@ def load_charachips(dir, file):
 #                                      888888888888                             88                                    88                     
 # 
 
-def load_mapchips(dir, file):
+def load_mapchips():
     """マップチップをロードしてMap.imagesに格納"""
-    file = os.path.join(dir, file)
+    file = os.path.join("data", "mapchip.dat")
     with open(file, "r", encoding="utf-8") as fp:
         for line in fp:
             line = line.rstrip()
@@ -947,7 +947,19 @@ def load_mapchips(dir, file):
                 Map.images.append(load_image("mapchip", f"{mapchip_name}.png", TRANS_COLOR))
             Map.movable_type.append(movable)
 
-                                                                                         
+    file = os.path.join("data", "backgroundchip.dat")
+    with open(file, "r", encoding="utf-8") as fp:
+        for line in fp:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue  # コメント行は無視
+            data = line.split(",")
+            backgroundchip_name = data[1]
+            movable = int(data[2])  # 移動可能か？
+            transparent = int(data[3])  # 背景を透明にするか？
+            # 画像のidで若い順に画像を登録しているので画像のidは配列の添字と一致する
+            Map.bg_images.append(pygame.transform.smoothscale(load_image("backgroundchip", f"{backgroundchip_name}.png", -1).convert_alpha(), (32, 32)))
+                                                                      
 # 88                                        ,ad8888ba,  88          88                        
 # 88   ,d                                  d8"'    `"8b 88          ""                        
 # 88   88                                 d8'           88                                    
@@ -1163,6 +1175,7 @@ class Map:
     """マップオブジェクト"""
     # main()のload_mapchips()でセットされる
     images = []  # マップチップ（ID->イメージ）
+    bg_images = []
     movable_type = []  # マップチップが移動可能か？（0:移動不可, 1:移動可）
 
     def __init__(self, name):
@@ -1210,8 +1223,14 @@ class Map:
                     screen.blit(self.images[self.default],
                                 (x*GS-offsetx, y*GS-offsety))
                 else:
-                    screen.blit(self.images[self.map[y][x]],
-                                (x*GS-offsetx, y*GS-offsety))
+                    if 3200 <= self.map[y][x] <= 3299:
+                        screen.blit(self.images[32],
+                                    (x*GS-offsetx, y*GS-offsety))
+                        screen.blit(self.bg_images[self.map[y][x] % 100],
+                                    (x*GS-offsetx, y*GS-offsety))
+                    else:
+                        screen.blit(self.images[self.map[y][x]],
+                                    (x*GS-offsetx, y*GS-offsety))
 
         # このマップにあるイベントを描画
         for event in self.events:
@@ -1231,6 +1250,8 @@ class Map:
         """(x,y)は移動可能か？"""
         # マップ範囲内か？
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
+            return False
+        if 3200 <= self.map[y][x] <= 3299:
             return False
         # マップチップは移動可能か？
         if self.movable_type[self.map[y][x]] == 0:
@@ -1254,6 +1275,8 @@ class Map:
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
             return False
         # マップチップは移動可能か？
+        if 3200 <= self.map[y][x] <= 3299:
+            return False
         if self.movable_type[self.map[y][x]] == 0:
             return False
         # イベントと衝突しないか？
