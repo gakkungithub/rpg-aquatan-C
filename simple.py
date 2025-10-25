@@ -494,9 +494,9 @@ def main():
                     if cmd == "pause" and cmd == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
                         PAUSEWND.show()
-                        PAUSEWND.draw(screen)
-                        pygame.display.update()
                         while PAUSEWND.is_visible:
+                            PAUSEWND.draw(screen)
+                            pygame.display.update()
                             for event in pygame.event.get():
                                 if event.type == QUIT:
                                     server.terminate()
@@ -515,16 +515,15 @@ def main():
                                     elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
                                         cmd = ""    
                                         PAUSEWND.hide()
-                                        PLAYER.goaled = True   
-                                    # elif PAUSEWND.button_help_rect.collidepoint(local_pos):
-                                    #     cmd = ""
-                                    #     if PAUSEWND.mode == "pause":
-                                    #         PAUSEWND.mode = "help"
-                                    #     elif PAUSEWND.mode == "help":
-                                    #         PAUSEWND.mode = "pause"
-                                    #     PAUSEWND.draw(screen)
-                                    #     pygame.display.update()
-
+                                        PLAYER.goaled = True
+                                    elif PAUSEWND.button_left.rect.collidepoint(local_pos):
+                                        cmd = ""
+                                        PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
+                                    elif PAUSEWND.button_right.rect.collidepoint(local_pos):
+                                        cmd = ""
+                                        PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index + 1) % len(PAUSEWND.guide_images_list)
+                            offset = calc_offset(PLAYER)
+                            fieldmap.draw(screen, offset)
                 if mouse_down:
                     if event.type == pygame.MOUSEMOTION:
                         if code_scroll_mouse_pos:
@@ -2952,30 +2951,46 @@ class PauseWindow(Window):
     def __init__(self, rect):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
-        self.button_help_rect = pygame.Rect(self.rect.width - 80, 30, 50, 50)
-        self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 2 - 30, 200, 60)
-        self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 2 - 30, 200, 60)
+        self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 3 - 30, 200, 60)
+        self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 3 - 30, 200, 60)
         self.mode = "pause"
+        self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128)),),
+                                 (pygame.transform.smoothscale(load_image("data", "itemwindow.png"), (160, 128)),),
+                                 (pygame.transform.smoothscale(load_image("data", "itemname_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "itemname_off.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "minimapwindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "codewindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "no_rightwindow.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "game_quit.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "status.png"), (160, 128)),),
+                                 (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
+                                 ]
+        self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
+                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
+                                 [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテムを取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
+                                 [["cキーでコマンドウィンドウを開きます", "stdinコマンドで標準入力", "rollbackで処理の巻戻しです"]],
+                                 [["bキーでアイテムウィンドウを開きます", "取得したアイテム(変数)が表示されます", "カーソルで内部をスクロールできます"]],
+                                 [["iキーで宝箱の上のアイテム名の", "表示を切り替えられます"], [""]],
+                                 [["mキーで右上のウィンドウを切り替えられます", "全体マップにはキャラクターや", "宝箱などの位置が表示されています"], ["コードウィンドウでは現在の処理の", "行にハイライトが付きます", "カーソルで内部をスクロールできます"], ["右上のウィンドウが邪魔な時", "非表示にできます"]],
+                                 [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているとき", "閉じることができます"]],
+                                 [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
+                                 [["ダンジョンを進んでこの色", "ゴールキャラを目指しましょう!!"]]
+                                 ]
+        self.guide_images_index = 0
+        self.button_right = Button("arrow.png", self.rect.width // 5 * 4, (self.height - BUTTON_WIDTH)//2, 0)
+        self.button_left = Button("arrow.png", self.rect.width // 5, (self.height - BUTTON_WIDTH)//2, 180)
 
-    def draw(self, screen):
+    def draw(self, screen: pygame.Surface):
         """ポーズ画面を描画する"""
         if self.is_visible is False:
             return
 
         Window.draw(self)
-        
-        # ヘルプボタン
-        # pygame.draw.rect(self.surface, self.HELP_COLOR, self.button_help_rect)
-        # self.font.size = self.FONT_SIZE * 2
-        # label_surf_help, _ = self.font.render("?" if self.mode == "pause" else "←", self.HELP_FONT_COLOR)
-        # self.font.size = self.FONT_SIZE
-        # label_rect_help = label_surf_help.get_rect(center=self.button_help_rect.center)
-        # self.surface.blit(label_surf_help, label_rect_help)
 
         self.font.size = self.FONT_SIZE * 2
         surf, rect = self.font.render("Pause", self.TEXT_COLOR)
         self.font.size = self.FONT_SIZE
-        self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 2 - 100))
+        self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 3 - 100))
 
         # ゲームボタン
         pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
@@ -2989,14 +3004,21 @@ class PauseWindow(Window):
         label_rect_toStageSelect = label_surf_toStageSelect.get_rect(center=self.button_toStageSelect_rect.center)
         self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
 
-        y = self.rect.height // 2 + 50
-        x = self.rect.width // 2 - 150
-        for line in ["矢印キー:　移動", "shift押しながら移動:　ダッシュ", "space:　前方に対するアクション", "f:　足元に対するアクション", "c:　コマンドラインを開く",
-                        "b:　アイテムウィンドウを開く/閉じる", "i:　アイテム名を表示する/消す", "m:　マップ→コード→非表示を切り替える", 
-                        "p:　ポーズ画面を開く", "esc:　ゲームを辞める/コマンドラインを閉じる"]:
-            surf, rect = self.font.render(line, self.TEXT_COLOR)
-            self.surface.blit(surf, (x , y))
-            y += 20
+        y = self.rect.height // 3 + 50
+        image_x = self.rect.width // 2 - 210
+        text_x = self.rect.width // 2 - 30
+
+        for i, image in enumerate(self.guide_images_list[self.guide_images_index]):
+            self.surface.blit(image, (image_x, y))
+            text_y = y
+            for text in self.guide_texts_list[self.guide_images_index][i]:
+                surf, rect = self.font.render(text, self.TEXT_COLOR)
+                self.surface.blit(surf, (text_x,text_y))
+                text_y += 20
+            y += 150
+
+        self.button_left.draw(self.surface)
+        self.button_right.draw(self.surface)
 
         Window.blit(self, screen)
 
@@ -4446,7 +4468,7 @@ class ArrowButtonWindow:
         self.button_right = Button("arrow.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + BUTTON_WIDTH, 0)
         self.button_left = Button("arrow.png", self.rect[0] + 0, self.rect[1] + BUTTON_WIDTH, 180)
         self.button_up = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0,90)
-        self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH,-90)
+        self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH, -90)
         self.button_pause = Button("pause.png", self.rect[0] + 0, self.rect[1] + 0, 0)
         self.button_return = Button("return.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
 
