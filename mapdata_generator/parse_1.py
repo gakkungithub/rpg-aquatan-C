@@ -594,6 +594,54 @@ class ASTtoFlowChart:
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.createEdge(varNodeID, nodeID)
         return varNodeID
+    
+    def get_arr_index(self, cr_iter: list[ci.Cursor]):
+        not_init_list_expr = True
+        arrContNodeID_list = []
+        arr_index_list = []
+        for i, cr in enumerate(cr_iter):
+            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                # {3, 4, {2, 5}}となる場合、{{3,0}, {4,0}, {2,5}}}にする必要があるので、
+                # まずはInit_list_expr = {}があるかどうかを確認して、そのチェックを後で行えるようにする
+                not_init_list_expr = False
+                break
+
+        for i, cr in enumerate(cr_iter):
+            self.check_cursor_error(cr)
+            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                # {}の場合は、その中の配列の要素を確かめる
+                arr_index_list.append(self.get_arr_index(list(cr.get_children())))
+            # 子要素の中の要素が1つだけ
+            else:
+                arr_index_list.append([{"label": f"[{i}]" if not_init_list_expr else "[0]", "cursor": cr}])
+        
+        # 配列の子要素が全て1なら、その1つの要素を抽出する
+        if (maxNum := len(max(arrContNodeID_list, key=len))) == 1:
+            return [arrContNodeID[0] for arrContNodeID in arrContNodeID_list]
+        # 配列の中に配列(子配列)がある場合は、子配列のノードを配列のノードにくっつけていく
+        else:
+            arrNumNodeIDs = []
+            # 未定の添字があったら配列の要素数を添字に設定する
+            if depth > len(cr_index_list):
+                cr_index_list.append(maxNum)
+            for i, arrContNodeIDs in enumerate(arrContNodeID_list):
+                # 要素数が最大のものを配列の添字にする 
+                # 添字のカーソルがまだあるならそれを添字の計算式として解析する
+                arrNumNodeID = self.createNode(f"[{i}]", 'box3d')
+                # 子要素の中にある要素数を取得する
+                contNum = len(arrContNodeIDs)
+                # 子要素を一つずつ作っていく
+                for n in range(maxNum):
+                    # 初期化されている子要素はそのノードをくっつける
+                    if contNum > n:
+                        self.createEdge(arrNumNodeID, arrContNodeIDs[n])
+                    # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
+                    else:
+                        arrContNodeID = self.createNode(f"[{n}]", 'square')
+                        self.expNode_info[f'"{arrContNodeID}"'] = (str(maxNum), [], [], ['ランダムな値が設定されてます'], line)
+                        self.createEdge(arrNumNodeID, arrContNodeID)
+                arrNumNodeIDs.append(arrNumNodeID)
+            return arrNumNodeIDs
 
     # 配列(多次元も含む)の要素を取得する
     def parse_arr_contents(self, cr_iter: list[ci.Cursor], cr_index_list: list[ci.Cursor | int], arr_condition_move: list[int | str | None], line, depth=1):

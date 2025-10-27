@@ -4826,11 +4826,16 @@ class EventSender:
         while True:
             try:
                 buffer = ""
-                data = self.sock.recv(1024)
-                if not data:
-                    return None  # 接続が閉じられた
-                buffer += data.decode()
-                msg = json.loads(buffer)
+                while True:
+                    data = self.sock.recv(1024)
+                    if not data:
+                        break
+                    buffer += data.decode()
+                    try:
+                        msg = json.loads(buffer)
+                        break  # 成功したら抜ける
+                    except json.JSONDecodeError:
+                        continue  # JSONがまだ途中なら続けて読む
                 if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
                     PLAYER.status["HP"] -= 10
                     PLAYER.damage = "-10"
