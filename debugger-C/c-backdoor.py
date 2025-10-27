@@ -650,6 +650,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if len(self.memory_check_num[(self.frame_num, self.line_number)][0]) == 0:
                             self.memory_check_num.pop((self.frame_num, self.line_number))
 
+                # strcpy
                 if str(self.line_number) in self.line_data[self.func_name]["string"] and (self.frame_num, self.line_number) not in self.str_check_num:
                     self.str_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["string"][str(self.line_number)], -1)
 

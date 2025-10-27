@@ -2321,7 +2321,6 @@ class Window:
         """ウィンドウを隠す"""
         self.is_visible = False
 
-
 #                                                                                                                      
 # 88888888ba,   88                  I8,        8        ,8I 88                      88                                 
 # 88      `"8b  ""                  `8b       d8b       d8' ""                      88                                 
@@ -2870,7 +2869,6 @@ class MessageWindow(Window):
                         PLAYER.waitingMove = None
                         PLAYER.moveHistory = []
                         PLAYER.move5History = []
-                        PLAYER.status = player_history[2]["status"]
                         PLAYER.commonItembag = ItemBag()
 
                         # items = ast.literal_eval(config.get("game", "items"))
@@ -2966,15 +2964,15 @@ class PauseWindow(Window):
                                  (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
                                  ]
         self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
-                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
-                                 [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテムを取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
+                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージをくらいます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
+                                 [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
                                  [["cキーでコマンドウィンドウを開きます", "stdinコマンドで標準入力", "rollbackで処理の巻戻しです"]],
                                  [["bキーでアイテムウィンドウを開きます", "取得したアイテム(変数)が表示されます", "カーソルで内部をスクロールできます"]],
                                  [["iキーで宝箱の上のアイテム名の", "表示を切り替えられます"], [""]],
                                  [["mキーで右上のウィンドウを切り替えられます", "全体マップにはキャラクターや", "宝箱などの位置が表示されています"], ["コードウィンドウでは現在の処理の", "行にハイライトが付きます", "カーソルで内部をスクロールできます"], ["右上のウィンドウが邪魔な時", "非表示にできます"]],
-                                 [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているとき", "閉じることができます"]],
+                                 [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
                                  [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
-                                 [["ダンジョンを進んでこの色", "ゴールキャラを目指しましょう!!"]]
+                                 [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
                                  ]
         self.guide_images_index = 0
         self.button_right = Button("arrow.png", self.rect.width // 5 * 4, (self.height - BUTTON_WIDTH)//2, 0)
@@ -3594,6 +3592,7 @@ class CharaExpression(Character):
         self.func = func
         self.exps = exps_dict
         self.linenum = None
+
         self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line))) for line, exp in exps_dict.items()}
 
     def __str__(self):
@@ -3716,11 +3715,11 @@ class FuncInfoWindow(Window):
     LINE_COLOR = (255, 255, 255, 255)
     CYAN = Color(100, 248, 248, 255)
 
-    def __init__(self, funcs, warpPos, detail: dict | None = None):
+    def __init__(self, funcs: list[dict], warpPos: tuple[str, str, list[int]], detail: dict | None = None):
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
-        self.funcs: list[dict] = funcs
+        self.funcs = funcs
         self.warpPos = warpPos
         self.detail = Detail(detail, self.font) if detail else None
         self.left_arrow, _ = self.font.render("◀", (255, 255, 255, 255))
@@ -4055,9 +4054,10 @@ class SmallDoor(Door):
         self.mapchip_list = [27,688]
         self.status = 0 # close
         self.x, self.y = pos[0], pos[1]  # ドア座標
-        self.doorname = str(name)  # ドア名
+        self.doorname = name  # ドア名
         self.direction = direction
         self.key = ""
+        # self.funcInfoWindow = FuncInfoWindow([], ("", "", -1), detail)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -4856,7 +4856,7 @@ class EventSender:
                             var_dict[(var.name, var.line)] = var.vartype
                         var_list.append(var_dict)
                     
-                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "status": PLAYER.status.copy(), "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
+                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
 
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])

@@ -559,8 +559,6 @@ class ASTtoFlowChart:
                                 memberNodeID = self.createNode(member[0], 'square')
                                 self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
-                            # # 構造体のメンバの型を取得する
-                            # self.varNode_info[f'"{memberNodeID}"'] = member[1]
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
                             if member_condition_move[0] != member_crs[0].location.line:
@@ -595,7 +593,6 @@ class ASTtoFlowChart:
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.createEdge(varNodeID, nodeID)
-
         return varNodeID
 
     # 配列(多次元も含む)の要素を取得する

@@ -570,8 +570,8 @@ class GenBitMap:
             # 値が1の位置のインデックスを取得
             ones_idx = np.argwhere(self.floorMap == 1)
 
-            # その中からランダムにいくつか選ぶ（全体の1%）
-            num_to_modify = len(ones_idx) // 100
+            # その中からランダムにいくつか選ぶ（全体の2%）
+            num_to_modify = len(ones_idx) // 50
             selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
 
             # まず全体を100に置き換え
