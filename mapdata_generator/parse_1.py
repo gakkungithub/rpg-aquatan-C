@@ -219,7 +219,9 @@ class ASTtoFlowChart:
             if (next_line := self.get_next_line_in_comp(cursor_stmt_list[i+1:])):
                 self.nextLines.append((next_line, True))
             else:
-                if type_parent == "while":
+                if type_parent == "if":
+                    self.nextLines.append((cursor.extent.end.line, True))
+                elif type_parent == "while":
                     self.nextLines.append((cursor.location.line, True))
                 elif type_parent == "for_w_change":
                     self.nextLines.append((cursor.extent.end.line, True))
@@ -398,7 +400,8 @@ class ASTtoFlowChart:
                 # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
                 self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-                self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1][0]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1][0]])
+                next_line = self.get_next_line()
+                self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, next_line[0]])
                 nodeID = expNodeID
         else:
             # 最初行番を変更 
@@ -408,7 +411,8 @@ class ASTtoFlowChart:
             expNodeID = self.get_exp(cr, 'rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1][0]])
+            next_line = self.get_next_line()
+            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]])
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID
         return nodeID
@@ -1102,7 +1106,7 @@ class ASTtoFlowChart:
         return endNodeID
 
     def parse_if_branch(self, cursor: ci.Cursor, nodeID, line_track: list[int | tuple[str, list[list[str]]] | None], edgeName=""):
-        def parse_if_branch_start(cursor: ci.Cursor, parentNodeID, line_track: list[int | tuple[str, list[list[str]]] | None]):
+        def parse_if_branch_start(cursor: ci.Cursor, parentNodeID, line_track: list[int | tuple[str, list[list[str]]] | None], type: str):
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == ci.CursorKind.COMPOUND_STMT:
@@ -1110,7 +1114,7 @@ class ASTtoFlowChart:
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line])
                 else:
                     self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.extent.end.line])
-                return self.parse_comp_stmt(cursor, parentNodeID)
+                return self.parse_comp_stmt(cursor, parentNodeID, type)
             # 混合文がない = {} で囲まれない単体文
             else:
                 self.line_info_dict[self.scanning_func].setOneLine(cursor.location.line)
@@ -1140,7 +1144,7 @@ class ASTtoFlowChart:
         self.createRoomSizeEstimate(trueNodeID)
 
         # 後々 condNodeID による演算内容を設定する
-        then_end = parse_if_branch_start(then_cursor, trueNodeID, line_track)
+        then_end = parse_if_branch_start(then_cursor, trueNodeID, line_track, 'if')
 
         # trueの後の処理の終点を作る (後でif構文の終点をまとめる)
         trueEndNodeID = self.createNode("", 'terminator')
@@ -1168,7 +1172,7 @@ class ASTtoFlowChart:
                     falseNodeID = self.createNode("", 'doublecircle')
                     self.createEdge(condNodeID, falseNodeID, "False")
                     self.createRoomSizeEstimate(falseNodeID)
-                    nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track)
+                    nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track, 'else')
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
                     end_line = in_else_cursor[-1].location.line
                     self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [end_line, next_line[0]])
