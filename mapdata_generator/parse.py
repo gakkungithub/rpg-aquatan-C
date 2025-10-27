@@ -398,7 +398,8 @@ class ASTtoFlowChart:
                 # 関数に入る前で止まれるようにlineを登録しておく
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
                 self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
-                self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1][0]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, self.nextLines[-1][0]])
+                next_line = self.get_next_line()
+                self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, next_line[0]])
                 nodeID = expNodeID
         else:
             # 最初行番を変更 
@@ -408,7 +409,8 @@ class ASTtoFlowChart:
             expNodeID = self.get_exp(cr, 'rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], self.nextLines[-1][0]])
+            next_line = self.get_next_line()
+            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]])
             self.createEdge(nodeID, expNodeID, edgeName)
             nodeID = expNodeID
         return nodeID
