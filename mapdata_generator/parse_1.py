@@ -629,7 +629,6 @@ class ASTtoFlowChart:
             if depth > len(cr_index_list):
                 cr_index_list.append(maxNum)
             for i, arr_content in enumerate(arr_content_list):
-                # arrNumNodeID = self.createNode(f"[{i}]", 'box3d')
                 fixed_arr_contents = []
                 # 子要素の中にある要素数を取得する
                 contNum = len(arr_content)
@@ -637,8 +636,7 @@ class ASTtoFlowChart:
                 for n in range(maxNum):
                     # 初期化されている子要素はそのノードをくっつける
                     if contNum > n:
-                        fixed_arr_contents.append(arr_content)
-                        # self.createEdge(arrNumNodeID, arrContNodeIDs[n])
+                        fixed_arr_contents.append(arr_content[n])
                     # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
                         fixed_arr_contents.append({"label": f"[{n}]"})
