@@ -49,7 +49,7 @@ class Treasure:
         for line in line_track:
             if isinstance(line, dict) and line["type"] in ["malloc", "realloc"]:
                 # malloc, reallocのサイズを決めるためにtypeは*を1つ外す
-                line["vartype"] = self.type[:-1]
+                line["vartype"] = self.type["type"][:-1]
                 line["varname"] = self.name
             self.line_track.append(line)
         self.exps = exps
