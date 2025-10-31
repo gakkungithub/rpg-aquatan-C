@@ -1,11 +1,17 @@
 import sys
 import os
-import clang.cindex as ci
 import uuid
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+import import_lib
+
+import_lib.ensure_package("clang", "clang.cindex")
+import_lib.ensure_package("graphviz")
+
+import clang.cindex as ci
 from graphviz import Digraph
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/mapdata'
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = ROOT_DIR + '/mapdata'
 
 def parseIndex(c_files):
     index = ci.Index.create()

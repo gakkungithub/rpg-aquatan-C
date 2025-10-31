@@ -1,10 +1,20 @@
+import sys
 from typing import TypedDict
-import pydot
-import numpy as np
 import random
 import os
 import json
 import configparser
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+import import_lib
+
+import_lib.ensure_package("pydot")
+import_lib.ensure_package("numpy")
+import_lib.ensure_package("scipy", "scipy.ndimage")
+import_lib.ensure_package("matplotlib", "matplotlib.pyplot")
+import_lib.ensure_package("astar", "astar.search")
+
+import pydot
+import numpy as np
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 from astar.search import AStar, Tile

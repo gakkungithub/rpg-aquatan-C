@@ -15,14 +15,19 @@ import math
 import datetime
 from threading import Thread
 from configparser import ConfigParser
+import copy
+import time
+import import_lib
+
+# --- 外部モジュールを自動チェック ---
+import_lib.ensure_package("ephem")
+import_lib.ensure_package("pygame")
+
 import ephem
 #from genericpath import exists
 import pygame
 import pygame.freetype
 from pygame.locals import *
-import copy
-
-import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = BASE_DIR + '/mapdata'
