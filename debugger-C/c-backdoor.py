@@ -643,7 +643,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         memory_check = str(self.memory_check_num[(self.frame_num, self.line_number)][1])
                         for memory_info in self.memory_check_num[(self.frame_num, self.line_number)][0][memory_check]:
                             if memory_info["type"] in ["malloc", "realloc"]:
-                                self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue(), "fromVar": memory_info.get("fromVar", None)})
+                                self.memory_info_to_send.append({"type": memory_info["type"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "fromVar": memory_info.get("fromVar", None)})
+                                # self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue(), "fromVar": memory_info.get("fromVar", None)})
                             else:
                                 self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue()})
                         self.memory_check_num[(self.frame_num, self.line_number)][0].pop(memory_check)

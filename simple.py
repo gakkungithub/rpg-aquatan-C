@@ -2516,11 +2516,12 @@ class MessageWindow(Window):
         self.selectingIndex = 0
         self.new_std_messages = []
         self.file_message = ""
+        self.memory_message = ""
         self.str_messages = []
 
     def set(self, base_message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
-        if base_message or len(self.new_std_messages) or len(self.str_messages):
+        if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
             if selectMessages is not None:
                 PLAYER.funcInfoWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
@@ -2536,6 +2537,9 @@ class MessageWindow(Window):
             if len(self.file_message):
                 message_list.append(self.file_message)
                 self.file_message = ""
+            if len(self.memory_message):
+                message_list.append(self.memory_message)
+                self.memory_message = ""
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -4899,11 +4903,14 @@ class EventSender:
                 if "memory" in msg:
                     for memory_info in msg["memory"]:
                         if memory_info["type"] == "malloc":
-                            PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                            MSGWND.memory_message = f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                         elif memory_info["type"] == "realloc":
-                            PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                            MSGWND.memory_message = f"reallocにより、{memory_info['fromVar']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                         else:
-                            PLAYER.address_to_size.pop(memory_info["address"], None)
+                            MSGWND.memory_message = f"freeにより、アドレス{memory_info["address"]}のメモリを解放しました"
+                            # PLAYER.address_to_size.pop(memory_info["address"], None)
 
                 if ITEMWND:
                     ITEMWND.file_window.read_filelines()
