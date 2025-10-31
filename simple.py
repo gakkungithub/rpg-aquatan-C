@@ -4909,7 +4909,7 @@ class EventSender:
                             MSGWND.memory_message = f"reallocにより、{memory_info['fromVar']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
                             # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                         else:
-                            MSGWND.memory_message = f"freeにより、アドレス{memory_info["address"]}のメモリを解放しました"
+                            MSGWND.memory_message = f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
                             # PLAYER.address_to_size.pop(memory_info["address"], None)
 
                 if ITEMWND:
