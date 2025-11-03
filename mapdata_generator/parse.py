@@ -235,7 +235,10 @@ class ASTtoFlowChart:
                     self.nextLines.append((cursor.location.line, True))
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
-            nodeID = self.parse_stmt(cr, nodeID, edgeName)
+            nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
+            if i != 0 and f'"{nodeID}"' in self.varNode_info and f'"{nextNodeID}"' in self.varNode_info:
+                self.createRoomSizeEstimate(nextNodeID)
+            nodeID = nextNodeID
             edgeName = ""
             self.nextLines.pop()
         return nodeID
@@ -635,6 +638,7 @@ class ASTtoFlowChart:
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.createEdge(varNodeID, nodeID)
+        
         return varNodeID
     
     def get_arr_contents(self, cr_iter: list[ci.Cursor], cr_index_list: list[ci.Cursor | int], depth: int = 1):
@@ -923,7 +927,6 @@ class ASTtoFlowChart:
                 exp_terms = ".".join(list(reversed(member_chain)))
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
-            print(cursor.location.line)
             exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments, var=var)
         # 一項式
         elif cursor.kind == ci.CursorKind.UNARY_OPERATOR:
@@ -1003,7 +1006,6 @@ class ASTtoFlowChart:
                                     right_exp_terms = self.parse_call_expr(right_cursor, var_references, func_references, calc_order_comments, var={"varname": cursor.spelling})
             if right_exp_terms is None:
                 right_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-
             exp_terms = ' '.join([left_exp_terms, operator_spell, right_exp_terms])
             comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=left_exp_terms, right=right_exp_terms)}")

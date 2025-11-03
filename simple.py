@@ -325,9 +325,9 @@ def main():
         print("4")
 
         # region キャラクターの初期設定
-        player_chara = str(config.get("game", "player"))
-        player_x = int(config.get("game", "player_x"))
-        player_y = int(config.get("game", "player_y"))
+        init_player_chara = str(config.get("game", "player"))
+        init_player_x = int(config.get("game", "player_x"))
+        init_player_y = int(config.get("game", "player_y"))
         mapname = str(config.get("game", "map"))
 
         # グローバル変数 = 初期アイテム
@@ -338,10 +338,10 @@ def main():
 
         sender = EventSender(CODEWND)
         
-        PLAYER = Player(player_chara, (player_x, player_y), DOWN, sender)
+        PLAYER = Player(init_player_chara, (init_player_x, init_player_y), DOWN, sender)
         initialResult = sender.receive_json()
         if "end" in initialResult:
-            PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            PLAYER.fp.write("end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             PLAYER.fp.close()
             server.terminate()
             sys.exit()
@@ -610,13 +610,13 @@ def main():
                     if cmd == "":
                         continue
                     elif cmd == "rollback":
-                        if len(CODEWND.history):
+                        if len(CODEWND.history) > 1:
                             sender.send_event({"rollback": True})
                             MMAPWND.hide()
                             CODEWND.show()
                             sender.receive_json()
                         else:
-                            MSGWND.set("No history...")
+                            MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
                     elif cmd == "undo":
                         if len(PLAYER.move5History) < 1:
                             MSGWND.set("No history...")
@@ -1726,7 +1726,7 @@ class Character:
 
 class Player(Character):
     """プレイヤークラス"""
-    def __init__(self, name, pos, direction, sender):
+    def __init__(self, name, pos, direction, sender: "EventSender"):
         Character.__init__(self, name, pos, direction, False, None)
         self.prevPos = [pos, pos]
         self.damage_motion: list[int] = []
@@ -1740,6 +1740,7 @@ class Player(Character):
         self.itembag = ItemBag()
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
+        self.sender.code_window.history.append(("", 0, {"x": self.x, "y": self.y, "door": None, "ccchara": None, "checkedFuncs": {}, "func": "main", "gvars": {}, "vars": []}))
         self.itemNameShow = False
         # スモールドアを扉を閉じるために記憶
         self.door: dict | None = None 
@@ -1960,42 +1961,58 @@ class Player(Character):
                 else:
                     MSGWND.set(itemResult['message'])
             elif isinstance(event, MoveEvent):
-                ### ワープゾーンに入ろうとしていることの情報を送信する (もしfuncWarpが空でなければ戻ってきた時に関数の繰り返しの処理を行うフラグを立てる)
-                self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
-                moveResult = self.sender.receive_json()
-                if moveResult is None:
-                    return False
-                if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
-                    for skippedFunc in moveResult["skippedFunc"]:
-                        self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
-                if moveResult['status'] == "ok":
-                    # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
-                    if moveResult.get('skipCond', False):
-                        MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
-                    else:
-                        if moveResult.get('skip', False):
-                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
-                        elif (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
-                            self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
-                        dest_map = event.dest_map
-                        dest_x = event.dest_x
-                        dest_y = event.dest_y
+                if event.type != '':
+                    ### ワープゾーンに入ろうとしていることの情報を送信する (もしfuncWarpが空でなければ戻ってきた時に関数の繰り返しの処理を行うフラグを立てる)
+                    self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
+                    moveResult = self.sender.receive_json()
+                    if moveResult is None:
+                        return False
+                    if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                        for skippedFunc in moveResult["skippedFunc"]:
+                            self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
+                    if moveResult['status'] == "ok":
+                        # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
+                        if moveResult.get('skipCond', False):
+                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
+                        else:
+                            if moveResult.get('skip', False):
+                                MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                            elif (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
+                                self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
+                            dest_map = event.dest_map
+                            dest_x = event.dest_x
+                            dest_y = event.dest_y
 
-                        # region command
-                        from_map = mymap.name
-                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
-                        if len(PLAYER.move5History) > 5:
-                            PLAYER.move5History.pop(0)
-                        # endregion
-                        # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
-                        mymap.create(dest_map)  # 移動先のマップで再構成
-                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                        mymap.add_chara(PLAYER)  # マップに再登録
-                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                            # region command
+                            from_map = mymap.name
+                            PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
+                            if len(PLAYER.move5History) > 5:
+                                PLAYER.move5History.pop(0)
+                            # endregion
+                            # 暗転
+                            DIMWND.setdf(200)
+                            DIMWND.show()
+                            mymap.create(dest_map)  # 移動先のマップで再構成
+                            PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                            mymap.add_chara(PLAYER)  # マップに再登録
+                            PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    else:
+                        MSGWND.set(moveResult['message'])
                 else:
-                    MSGWND.set(moveResult['message'])
+                    dest_map = event.dest_map
+                    dest_x = event.dest_x
+                    dest_y = event.dest_y
+                    from_map = mymap.name
+                    PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return':False})
+                    if len(PLAYER.move5History) > 5:
+                        PLAYER.move5History.pop(0)
+                    # 暗転
+                    DIMWND.setdf(200)
+                    DIMWND.show()
+                    mymap.create(dest_map)  # 移動先のマップで再構成
+                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                    mymap.add_chara(PLAYER)  # マップに再登録
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             return True
         return False
 
@@ -2858,10 +2875,9 @@ class MessageWindow(Window):
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-
                 elif self.select_type == 'rollback':
                     if self.selectMsgText[self.selectingIndex] == "はい":
-                        self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index})
+                        self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
                         
                         rollbackResult = self.sender.receive_json()
 
@@ -2914,7 +2930,35 @@ class MessageWindow(Window):
                         self.sender.receive_json()
                         MSGWND.set("巻き戻しを取り止めました")
                     self.sender.code_window.rollback_index = None
-
+                elif self.select_type == 'rollback_to_init':
+                    if self.selectMsgText[self.selectingIndex] == "はい":
+                        player_history = self.sender.code_window.history[0]
+                        # 暗転
+                        DIMWND.setdf(200)
+                        DIMWND.show()
+                        PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
+                        PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+                        PLAYER.dest = {}
+                        PLAYER.place_label = "away"
+                        PLAYER.automove = []
+                        PLAYER.waitingMove = None
+                        PLAYER.moveHistory = []
+                        PLAYER.move5History = []
+                        PLAYER.door = player_history[2]["door"]
+                        PLAYER.ccchara = player_history[2]["ccchara"]
+                        PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
+                        PLAYER.funcInfoWindow_list = []
+                        PLAYER.funcInfoWindowIndex = 0
+                        PLAYER.std_messages = []
+                        PLAYER.address_to_fname = {}
+                        PLAYER.address_to_size = {}
+                        PLAYER.func = player_history[2]["func"]
+                        self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+                        fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                        MSGWND.set(f"ゲーム開始時点まで巻き戻しました")
+                    else:
+                        MSGWND.set("巻き戻しを取り止めました")
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
                 self.selectMsgText = None
@@ -3637,7 +3681,7 @@ class MoveEvent():
         self.detail: str = detail
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
+        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0] if len(fromTo) else 0), detail)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -4637,10 +4681,9 @@ class CommandWindow(Window):
 
 class MiniMapWindow(Window, Map):
     """"ミニマップウィンドウ"""
-    tile_num = 60
+    # tile_num = 60
     offset_x = 0
     offset_y = 10
-    radius = 0
     RED = (255, 0, 0)
     BLUE = (0, 0, 255)
     BLACK = (0, 0, 0)
@@ -4648,10 +4691,11 @@ class MiniMapWindow(Window, Map):
     YELLOW = (255, 255, 0)
 
     def __init__(self, rect, name):
-        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE - 10
-        self.radius = MIN_MAP_SIZE / self.tile_num
         Window.__init__(self, rect)
         Map.__init__(self, name)
+        self.tile_num = max(self.row, self.col)
+        self.offset_x = SCR_WIDTH - MIN_MAP_SIZE - 10
+        self.radius = MIN_MAP_SIZE // (self.tile_num+1)
         self.hide()
 
     def draw(self, screen, map : Map):
@@ -4667,32 +4711,33 @@ class MiniMapWindow(Window, Map):
                     tile = self.default
                 if tile not in [390, 43, 402, 31]:
                     continue
-                pos_x = x * MIN_MAP_SIZE / self.tile_num + self.offset_x
-                pos_y = y * MIN_MAP_SIZE / self.tile_num + self.offset_y
-                image = pygame.transform.scale(self.images[tile], (int(MIN_MAP_SIZE / self.tile_num), int(MIN_MAP_SIZE / self.tile_num)))
-                screen.blit(image, (pos_x, pos_y))
-        
+                tile_size = MIN_MAP_SIZE / self.tile_num
+                scaled_size = int(tile_size) + 1  # 1px拡大
+
+                image = pygame.transform.smoothscale(self.images[tile], (scaled_size, scaled_size))
+                screen.blit(image, (int(x * tile_size + self.offset_x), int(y * tile_size + self.offset_y)))
+
         # Treasureの場所を表示　青丸
         for event in map.events:
             if isinstance(event, Treasure):
-                tx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
-                ty = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                tx = event.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num  // 2
+                ty = event.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
                 pygame.draw.circle(screen, self.BLUE, (tx, ty), self.radius)
             elif isinstance(event, MoveEvent):
-                mx = event.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
-                my = event.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                mx = event.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num  // 2
+                my = event.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
                 pygame.draw.circle(screen, self.GREEN, (mx, my), self.radius)
 
         # Playerの場所を表示　赤丸
-        px = PLAYER.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
-        py = PLAYER.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+        px = PLAYER.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num  // 2
+        py = PLAYER.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
         pygame.draw.circle(screen, self.RED, (px, py), self.radius)
 
         # Player以外のCharacterの場所を表示　黒丸
         for chara in map.charas:
             if not isinstance(chara, Player):
-                cx = chara.x * MIN_MAP_SIZE / self.tile_num + self.offset_x + MIN_MAP_SIZE/ self.tile_num  // 2
-                cy = chara.y * MIN_MAP_SIZE / self.tile_num + self.offset_y+ MIN_MAP_SIZE/ self.tile_num  // 2
+                cx = chara.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num  // 2
+                cy = chara.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
                 pygame.draw.circle(screen, self.YELLOW if chara.name == "15161" else self.BLACK, (cx, cy), self.radius)
                                                                                                                                    
 #   ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
@@ -4725,7 +4770,7 @@ class CodeWindow(Window):
         self.lines = self.load_code_lines()
         self.linenum = 1
         self.is_auto_scroll = True
-        self.history: list[dict] = []
+        self.history: list[tuple] = []
         self.rollback_index: int | None = None
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
@@ -4794,7 +4839,7 @@ class CodeWindow(Window):
             return False
         
     def selectRollBackLine(self, dir: int):
-        if self.rollback_index is None or (self.rollback_index == 0 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
+        if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
             return
         
         self.rollback_index += dir
