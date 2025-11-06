@@ -40,7 +40,7 @@ class ConditionLineTrackers:
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], detail: str, mapchip: int, 
-                    type: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: list[str | dict], func_name: str):
+                    type: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], comments: list[str | dict], func_name: str):
         self.from_local_pos = from_pos
         self.to_local_pos = to_pos 
         self.detail = detail
@@ -49,10 +49,10 @@ class MoveEvent:
         self.type = type
         self.line_track = line_track
         self.func_name = func_name
-        self.exps = exps
+        self.comments = comments
 
 class Treasure:
-    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps: dict, type: dict, func_name: str):
+    def __init__(self, pos: tuple[int, int], name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], comments: dict, type: dict, func_name: str):
         self.local_pos = pos
         self.name = name
         self.type = type
@@ -63,7 +63,7 @@ class Treasure:
                 line["vartype"] = self.type["type"][:-1]
                 line["varname"] = self.name
             self.line_track.append(line)
-        self.exps = exps
+        self.comments = comments
         self.func_name = func_name
 
 class FuncWarp:
@@ -76,11 +76,11 @@ class FuncWarp:
         return (self.to_local_pos, self.args, self.line)
 
 class CharaReturn:
-    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], exps):
+    def __init__(self, pos: tuple[int, int], func_name: str, line_track: list[int | tuple[str, list[list[str]]] | dict | None], comments):
         self.to_local_pos = pos
         self.func_name = func_name
         self.line_track = line_track
-        self.exps = exps
+        self.comments = comments
 
     def get_attributes(self):
         return (self.to_local_pos, self.func_name, self.line_track)
@@ -98,23 +98,23 @@ class Door:
         self.dir = dir
 
 class CharaCheckCondition:
-    def __init__(self, func, pos, dir, type, line_track: tuple[str, list[list[str]]], detail: str, exps: list[str]):
+    def __init__(self, func, pos, dir, type, line_track: tuple[str, list[list[str]]], detail: str, comments: list[str]):
         self.func = func
         self.local_pos = pos
         self.dir = dir
         self.type = type
         self.line_track = line_track
         self.detail = detail
-        self.exps = exps
+        self.comments = comments
 
 class CharaExpression:
     def __init__(self, pos: tuple[int, int], func: str):
         self.local_pos = pos
         self.func = func
-        self.exps_dict: dict[int, dict] = {}
+        self.comments_dict: dict[int, dict] = {}
     
     def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str | dict], int]):
-        self.exps_dict[line_track[0]] = {"type": type, "comments": expNodeInfo[3], "vars": [{"name": var_reference[0], "line": var_reference[1]} for var_reference in expNodeInfo[1]], "line_track": line_track}
+        self.comments_dict[line_track[0]] = {"type": type, "exps": {"detail": f"{expNodeInfo[4]}行目の?を実行します", "hover": [expNodeInfo[0]]}, "comments": expNodeInfo[3], "vars": [{"name": var_reference[0], "line": var_reference[1]} for var_reference in expNodeInfo[1]], "line_track": line_track}
 
 class RoomInfo(TypedDict):
     room_size: tuple[int, int, int, int]
@@ -143,7 +143,7 @@ class MapInfo:
         self.file_lines: dict[str, dict[int, list[dict]]] = {}
         self.memory_lines: dict[str, dict[int, list[dict]]] = {}
         self.str_lines: dict[str, dict[int, list[dict]]] = {}
-        self.condition_exps: dict[int, list[dict]] = {}
+        self.condition_comments: dict[int, list[dict]] = {}
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -197,10 +197,10 @@ class MapInfo:
         exp_comments = expNodeInfo[3] if expNodeInfo else []
         for exp_comment in exp_comments:
             if isinstance(exp_comment, dict):
-                if c_move_fromTo[0] in self.condition_exps:
-                    self.condition_exps[c_move_fromTo[0]].append(exp_comment)
+                if c_move_fromTo[0] in self.condition_comments:
+                    self.condition_comments[c_move_fromTo[0]].append(exp_comment)
                 else:
-                    self.condition_exps[c_move_fromTo[0]] = [exp_comment]
+                    self.condition_comments[c_move_fromTo[0]] = [exp_comment]
         self.move_events.append(MoveEvent(from_local_pos, to_local_pos, warpComment, mapchip_num, c_move_type, c_move_fromTo, exp_comments, crnt_func_name))
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
@@ -246,10 +246,10 @@ class MapInfo:
         exp_comments = expNodeInfo[3] if expNodeInfo else []
         for exp_comment in exp_comments:
             if isinstance(exp_comment, dict):
-                if condition_line_tracker[1][0] in self.condition_exps:
-                    self.condition_exps[condition_line_tracker[1][0]].append(exp_comment)
+                if condition_line_tracker[1][0] in self.condition_comments:
+                    self.condition_comments[condition_line_tracker[1][0]].append(exp_comment)
                 else:
-                    self.condition_exps[condition_line_tracker[1][0]] = [exp_comment]
+                    self.condition_comments[condition_line_tracker[1][0]] = [exp_comment]
         self.chara_checkConditions.append(CharaCheckCondition(func_name, (pos[0] - self.offset["y"], pos[1] - self.offset["x"]), dir, condition_line_tracker[0], condition_line_tracker[1], detail, exp_comments))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
@@ -364,13 +364,13 @@ class MapInfo:
                 vardecl_lines[converted_fromTo[0]].append(treasure.name)
             else:
                 vardecl_lines[converted_fromTo[0]] = [treasure.name]
-            events.append({"type": "TREASURE", "x": int(treasure.local_pos[1]+self.offset["x"]), "y": int(treasure.local_pos[0]+self.offset["y"]), "item": treasure.name, "exps": treasure.exps, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": func_warp, "func": treasure.func_name})
+            events.append({"type": "TREASURE", "x": int(treasure.local_pos[1]+self.offset["x"]), "y": int(treasure.local_pos[0]+self.offset["y"]), "item": treasure.name, "comments": treasure.comments, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": func_warp, "func": treasure.func_name})
 
         # ワープイベントの情報
         for move_event in self.move_events:
             func_warp, converted_fromTo = self.line_track_transformer(move_event.line_track, move_event.func_name)
             events.append({"type": "MOVE", "x": int(move_event.from_local_pos[1]+self.offset["x"]), "y": int(move_event.from_local_pos[0]+self.offset["y"]), "mapchip": move_event.mapchip, "warpType": move_event.type, "fromTo": converted_fromTo,
-                        "dest_map": pname, "dest_x": int(move_event.to_local_pos[1]+self.offset["x"]), "dest_y": int(move_event.to_local_pos[0]+self.offset["y"]), "func": move_event.func_name, "funcWarp": func_warp, "exps": move_event.exps, "funcExps": self.condition_exps.get(converted_fromTo[0], []) if len(converted_fromTo) else [], "detail": move_event.detail})
+                        "dest_map": pname, "dest_x": int(move_event.to_local_pos[1]+self.offset["x"]), "dest_y": int(move_event.to_local_pos[0]+self.offset["y"]), "func": move_event.func_name, "funcWarp": func_warp, "comments": move_event.comments, "func_argcomments": self.condition_comments.get(converted_fromTo[0], []) if len(converted_fromTo) else [], "detail": move_event.detail})
 
         # 経路の一方通行情報
         for auto_event in self.auto_events:
@@ -385,9 +385,9 @@ class MapInfo:
             local_pos, funcName, line_track = chara_return.get_attributes()
             func_warp, converted_fromTo = self.line_track_transformer(line_track, funcName)
             if funcName == "main":
-                characters.append({"type": "CHARARETURN", "name": "15161", "x": int(local_pos[1]+self.offset["x"]), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "exps": chara_return.exps})
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": int(local_pos[1]+self.offset["x"]), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "exps": chara_return.exps})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
 
         # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
@@ -408,15 +408,15 @@ class MapInfo:
             move_dir = random.choice(move_dir_list)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": pos[1], "y": pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,
                                "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, 
-                               "funcWarp": func_warp, "exps": chara_checkCondition.exps, "funcExps": self.condition_exps.get(converted_fromTo[0], []), "detail": chara_checkCondition.detail})
+                               "funcWarp": func_warp, "comments": chara_checkCondition.comments, "func_argcomments": self.condition_comments.get(converted_fromTo[0], []), "detail": chara_checkCondition.detail})
 
         for chara_expression in self.chara_expressions.values():
-            exps_dict = {}
-            for firstLine, exps in chara_expression.exps_dict.items():
-                func_warp, converted_fromTo = self.line_track_transformer(exps["line_track"], chara_expression.func)
-                exps_dict[firstLine] = {"type": exps["type"], "fromTo": converted_fromTo, "exps": exps["comments"], "funcWarp": func_warp, "vars": exps["vars"]}
+            comments_dict = {}
+            for firstLine, comments in chara_expression.comments_dict.items():
+                func_warp, converted_fromTo = self.line_track_transformer(comments["line_track"], chara_expression.func)
+                comments_dict[firstLine] = {"type": comments["type"], "fromTo": converted_fromTo, "exps": comments["exps"], "comments": comments["comments"], "funcWarp": func_warp, "vars": comments["vars"]}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": int(chara_expression.local_pos[1]+self.offset["x"]), "y": int(chara_expression.local_pos[0]+self.offset["y"]), "dir": 0,
-                               "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "exps": exps_dict})
+                               "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "comments": comments_dict})
             
         with open(f'{DATA_DIR}/{pname}/{pname}.json', 'w') as f:
             def find_numpy_int(obj, path="root"):
@@ -945,7 +945,7 @@ class GenBitMap:
             if nodeID_list:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認に移る", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理に移ります", "hover": [exp[0]]})
                 # true
                 self.trackAST(nodeID_list[0], nodeID_list[0], nodeID)
                 # false
@@ -1091,10 +1091,6 @@ class GenBitMap:
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
             self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)
-            # toNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
-            # # 次の部屋とくっつける
-            # self.trackAST(crntRoomID, toNodeID, loopBackID)
-            # return
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
             self.trackAST(crntRoomID, toNodeID, loopBackID)
