@@ -3724,6 +3724,7 @@ class Detail:
 
         x, y = 50, 10
         # 各行（'+'区切り）を処理
+
         for i, line in enumerate(detail["detail"].split('+')):
             parts = line.split('?')
 
@@ -3751,13 +3752,19 @@ class Detail:
                 y = and_rect.bottom + 4
             elif "終了します" in line:
                 x = 50
-                next_surf, _ = font.render("次の処理に移行します", self.WHITE)
+                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.WHITE)
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
-            elif "exps" not in detail and "確認処理に移ります" not in line:
+            elif "真偽の確認処理" in line:
                 x = 50
-                end_surf, _ = font.render("ならこの先に進めます!!", self.WHITE)
+                end_surf, _ = font.render("なら先に進んでください", self.WHITE)
+                end_rect = end_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((end_surf, end_rect))
+                y = end_rect.bottom + 4        
+            elif "exps" not in detail:
+                x = 50
+                end_surf, _ = font.render("ならこの先に進めます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4

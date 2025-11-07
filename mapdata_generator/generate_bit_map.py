@@ -945,7 +945,7 @@ class GenBitMap:
             if nodeID_list:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理に移ります", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理", "hover": [exp[0]]})
                 # true
                 self.trackAST(nodeID_list[0], nodeID_list[0], nodeID)
                 # false
