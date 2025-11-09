@@ -3262,7 +3262,7 @@ class ItemWindow(Window):
             offset_y += 24
 
             if item.itemvalue.is_open:
-                offset_y, children_right_edge = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
+                offset_y, children_right_edge = self.draw_values([item.name], item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
                 right_edge = max(children_right_edge, right_edge)
             
         # ローカル変数
@@ -3324,7 +3324,7 @@ class ItemWindow(Window):
             offset_y += 24
 
             if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
-                offset_y, children_right_edge = self.draw_values(item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
+                offset_y, children_right_edge = self.draw_values([item.name], item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
                 right_edge = max(children_right_edge, right_edge)
 
         if self.is_inAction:
@@ -3337,7 +3337,7 @@ class ItemWindow(Window):
         self.file_window.draw(screen)
         Window.blit(self, screen)
 
-    def draw_values(self, itemvalue_children: dict[str, "ItemValue"], offset_y: int, offset_x: int, type_dict: dict, isLocal: bool):
+    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, "ItemValue"], offset_y: int, offset_x: int, type_dict: dict, isLocal: bool):
         right_edge = 10
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = True
@@ -3380,10 +3380,12 @@ class ItemWindow(Window):
             if constLock:
                 self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
 
-            right_edge = max(self.draw_string(text_x, offset_y+4, f"{valuename:<8}", color), right_edge)
-            name_offset = self.myfont.get_rect(valuename).width + 20
+            varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename])
+            
+            right_edge = max(self.draw_string(text_x, offset_y+4, f"{varname:<8}", color), right_edge)
+            name_offset = self.myfont.get_rect(varname).width + 20
 
-            name_offset = self.myfont.get_rect(valuename).width + text_x
+            name_offset = self.myfont.get_rect(varname).width + text_x
             # 配列などの値がないvalueは表示しない
             if itemvalue.value is not None:
                 value_color = self.BLACK if is_item_changed else self.WHITE 
@@ -3393,7 +3395,7 @@ class ItemWindow(Window):
             offset_y += 24
 
             if itemvalue.is_open:
-                offset_y, children_right_edge = self.draw_values(itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                offset_y, children_right_edge = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename], itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
                 right_edge = max(children_right_edge, right_edge)
 
         return offset_y, right_edge
@@ -3752,19 +3754,20 @@ class Detail:
                 y = and_rect.bottom + 4
             elif "終了します" in line:
                 x = 50
-                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.WHITE)
+                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.CYAN)
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
             elif "真偽の確認処理" in line:
                 x = 50
-                end_surf, _ = font.render("なら先に進んでください", self.WHITE)
+                end_surf, _ = font.render("なら先に進んでください", self.CYAN)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4        
-            elif "exps" not in detail:
+            elif ("exps" not in detail and 'continue' not in detail["detail"] and 'break' not in detail["detail"] and
+                  'do-while' not in detail["detail"] and 'case' not in detail["detail"] and 'default' not in detail["detail"]):
                 x = 50
-                end_surf, _ = font.render("ならこの先に進めます", self.WHITE)
+                end_surf, _ = font.render("ならこの先に進めます", self.CYAN)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4

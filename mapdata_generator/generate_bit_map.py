@@ -859,7 +859,7 @@ class GenBitMap:
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID, crntRoomID)
                 exp = self.getExpNodeInfo(nodeID)
-                self.createPath(crntRoomID, nodeID, {"detail": f"{exp[4]}行目のdo-while文の?の真偽の確認に進む", "hover": [exp[0]]})
+                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目のdo-while文の?の真偽の確認処理", "hover": [exp[0]]})
                 crntRoomID = nodeID
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID, crntRoomID)
@@ -957,7 +957,7 @@ class GenBitMap:
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
             exp = self.getExpNodeInfo(loopBackID)
-            self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認に移ります!!", "hover": [exp[0]]}, self.func_name, 158)
+            self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理", "hover": [exp[0]]}, self.func_name, 158)
             loopBackID = None
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
@@ -1051,13 +1051,13 @@ class GenBitMap:
             if nodeID in self.mapInfo.condition_line_trackers.tracks:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
-                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": "continueします", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": "continueで現在のループを終了します", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
                     loopBackID = None
                 # continue → do While構文の場合
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID, crntRoomID)
                     exp = self.getExpNodeInfo(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": f"continueにより、{exp[4]}行目のdo-while文の?の真偽の確認に移ります", "hover": [exp[0]]}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": f"continueにより{exp[4]}行目のdo-while文の?の真偽の確認に移ります", "hover": [exp[0]]}, self.func_name, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID, nextNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
@@ -1068,7 +1068,7 @@ class GenBitMap:
                 # breakのノードの場合
                 else:
                     self.createRoom(nextNodeID, crntRoomID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": "breakにより、現在のループから抜けます", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": "breakにより現在のループから抜けます", "hover": []}, self.func_name, 158, warpNodeID=nodeID)
         # do while構文の最初の1回
         elif self.getNodeShape(nodeID) == 'invtrapezium':
             trueNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
@@ -1188,12 +1188,12 @@ class GenBitMap:
                 if y < 1 or mapSize[0] <= y:
                     continue
                 for x in range(range_x[0], range_x[1]):
-                    if 1 <= x < mapSize[1] and convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floorMap[y:y+roomSize[0]+self.PADDING2, x:x+roomSize[1]+self.PADDING2] == 1):
+                    if 1 <= x < mapSize[1] and convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floorMap[y-self.PADDING:y+roomSize[0]+self.PADDING, x-self.PADDING:x+roomSize[1]+self.PADDING] == 1):
                         candidate_squares.append((y,x))
         else:
             for y in range(1, mapSize[0]-roomSize[0]-self.PADDING2):
                 for x in range(1, mapSize[1]-roomSize[1]-self.PADDING2):
-                    if convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floorMap[y:y+roomSize[0]+self.PADDING2, x:x+roomSize[1]+self.PADDING2] == 1):
+                    if convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floorMap[y-self.PADDING:y+roomSize[0]+self.PADDING, x-self.PADDING:x+roomSize[1]+self.PADDING] == 1):
                         candidate_squares.append((y,x))
         
         if candidate_squares:
