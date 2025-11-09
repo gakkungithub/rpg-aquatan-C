@@ -3659,7 +3659,7 @@ class CharaExpression(Character):
         self.func = func
         self.comments = comments_dict
         self.linenum = None
-        self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line)), detail={**exp["exps"], "exps": True}) for line, exp in comments_dict.items()}
+        self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line)), detail=exp["exps"]) for line, exp in comments_dict.items()}
 
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
@@ -3739,7 +3739,7 @@ class Detail:
 
                 # 条件リンクを描画（最後以外）
                 if j < len(parts) - 1:
-                    cond_surf, _ = font.render("計算式" if "exps" in detail else "条件", self.RED)
+                    cond_surf, _ = font.render("計算式" if detail["type"] == "exps" else "条件", self.RED)
                     cond_rect = cond_surf.get_rect(topleft=(x, y))
                     self.hoverLink_info_list.append((cond_surf, cond_rect))
                     x = cond_rect.right
@@ -3752,22 +3752,21 @@ class Detail:
                 and_rect = and_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((and_surf, and_rect))
                 y = and_rect.bottom + 4
-            elif "終了します" in line:
+            elif detail["type"] == "end":
                 x = 50
-                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.CYAN)
+                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.WHITE)
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
-            elif "真偽の確認処理" in line:
+            elif detail["type"] == "cond-in":
                 x = 50
-                end_surf, _ = font.render("なら先に進んでください", self.CYAN)
+                end_surf, _ = font.render("なら先に進んでください", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4        
-            elif ("exps" not in detail and 'continue' not in detail["detail"] and 'break' not in detail["detail"] and
-                  'do-while' not in detail["detail"] and 'case' not in detail["detail"] and 'default' not in detail["detail"]):
+            elif detail["type"] == "cond-check":
                 x = 50
-                end_surf, _ = font.render("ならこの先に進めます", self.CYAN)
+                end_surf, _ = font.render("ならこの先に進めます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4
