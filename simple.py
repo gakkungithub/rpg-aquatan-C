@@ -3555,6 +3555,14 @@ class CharaReturn(Character):
         self.comments = comments
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
         
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+            offsetx, offsety = offset
+            px = self.rect.topright[0] - 14
+            py = self.rect.topright[1] - 22
+            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+        
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
             f"{self.direction:d},{self.movetype:d},{self.message:s},{self.line:d}"
@@ -3609,7 +3617,15 @@ class CharaCheckCondition(Character):
         self.frame += 1
         self.image = self.images[self.name][self.direction *
                                             4 + (self.frame // self.animcycle  % 4)]
-        
+
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+            offsetx, offsety = offset
+            px = self.rect.topright[0] - 14
+            py = self.rect.topright[1] - 22
+            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+
     def set_checked(self):
         self.avoiding = True
         self.moving = True
@@ -3661,6 +3677,14 @@ class CharaExpression(Character):
         self.linenum = None
         self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line)), detail=exp["exps"]) for line, exp in comments_dict.items()}
 
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if str(PLAYER.sender.code_window.linenum) in self.funcInfoWindow_dict:
+            offsetx, offsety = offset
+            px = self.rect.topright[0] - 14
+            py = self.rect.topright[1] - 22
+            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
             f"{self.direction:d},{self.movetype:d},{self.message:s},"
@@ -3701,6 +3725,11 @@ class MoveEvent():
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
+        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+            offsetx, offsety = offset
+            px = self.rect.midtop[0] - 16
+            py = self.rect.topright[1] - 28
+            screen.blit(pygame.image.load("reaction.png").convert_alpha(), (px-offsetx, py-offsety))
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
@@ -3773,7 +3802,6 @@ class Detail:
 
         self.bottom_y = y
         
-
     def draw(self, surface: pygame.Surface):
         for baseComment_info in self.baseComment_info_list:
             surface.blit(baseComment_info[0], baseComment_info[1])
