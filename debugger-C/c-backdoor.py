@@ -916,7 +916,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         # 条件文での値の変化はここで一括で取得する
-                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))}, not (condition_type == "exp" and self.line_number in self.line_data[self.func_name]["onelines"]))
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
                         if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
@@ -1361,19 +1361,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 msgJson["str"] = self.str_info_to_send
                 self.str_info_to_send = []
                 if getLine:
-                    # target_lines = [line for line in self.varsDeclLines_list if self.line_number < int(line) < self.next_line_number]
-                    # skipped_line = None
-                    # for target_line in target_lines:
-                    #     if list(set([(var, int(target_line)) for var in self.varsDeclLines_list[target_line] 
-                    #                  if (var, int(target_line)) in self.vars_tracker.global_previous_values or (var, int(target_line)) in self.vars_tracker.previous_values[-1]]) 
-                    #                  - set(self.vars_tracker.vars_declared[-1])):
-                    #         skipped_line = int(target_line)
-                    #         break
                     if len(self.skipped_lines):
                         # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
                         msgJson["line"] = int(self.skipped_lines[0])
                     else:
-                        msgJson["line"] = self.next_line_number
+                        if self.line_loop and self.line_data[self.func_name]["loops"].get(str(self.line_loop[-1])) == self.next_line_number:
+                            msgJson["line"] = self.line_loop[-1]
+                        else:
+                            msgJson["line"] = self.next_line_number
                     # スコープから外れて除外された変数を取り除く
                     msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
                     self.vars_tracker.vars_removed = set()
