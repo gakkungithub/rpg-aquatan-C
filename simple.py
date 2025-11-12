@@ -3768,7 +3768,7 @@ class Detail:
 
                 # 条件リンクを描画（最後以外）
                 if j < len(parts) - 1:
-                    cond_surf, _ = font.render("計算式" if detail["type"] == "exps" else "条件", self.RED)
+                    cond_surf, _ = font.render("計算式" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件", self.RED)
                     cond_rect = cond_surf.get_rect(topleft=(x, y))
                     self.hoverLink_info_list.append((cond_surf, cond_rect))
                     x = cond_rect.right
@@ -3777,6 +3777,8 @@ class Detail:
             # 最後の要素でなければ「かつ」を追加して改行
             if i < len(detail["detail"].split('+')) - 1:
                 x = 50
+                if detail["type"] == "cond-in-change":
+                    continue
                 and_surf, _ = font.render("かつ", self.WHITE)
                 and_rect = and_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((and_surf, and_rect))
@@ -3787,15 +3789,15 @@ class Detail:
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
-            elif detail["type"] == "cond-in":
+            elif detail["type"] in ("cond-in", "cond-in-change"):
                 x = 50
-                end_surf, _ = font.render("なら先に進んでください", self.WHITE)
+                end_surf, _ = font.render("先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4        
             elif detail["type"] == "cond-check":
                 x = 50
-                end_surf, _ = font.render("ならこの先に進めます", self.WHITE)
+                end_surf, _ = font.render("ならこの先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4

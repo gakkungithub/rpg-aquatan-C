@@ -945,7 +945,7 @@ class GenBitMap:
             if nodeID_list:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
-                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理", "hover": [exp[0]], "type": "cond-in"})
+                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理なら", "hover": [exp[0]], "type": "cond-in"})
                 # true
                 self.trackAST(nodeID_list[0], nodeID_list[0], nodeID)
                 # false
@@ -956,8 +956,12 @@ class GenBitMap:
             self.mapInfo.setCharaReturn(crntRoomID, self.getNodeLabel(nodeID), self.func_name, nodeID, self.getExpNodeInfo(nodeID))
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
-            exp = self.getExpNodeInfo(loopBackID)
-            self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理", "hover": [exp[0]], "type": "cond-in"}, self.func_name, 158)
+            loopBack_exp = self.getExpNodeInfo(loopBackID)
+            if (change_exp := self.getExpNodeInfo(nodeID)):
+                warp_comment = {"detail": f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら+{change_exp[4]}行目の?を実行して", "hover": [loopBack_exp[0], change_exp[0]], "type": "cond-in-change"}
+            else:
+                warp_comment = {"detail": f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら", "hover": [loopBack_exp[0]], "type": "cond-in"}
+            self.mapInfo.setWarpZone(crntRoomID, loopBackID, warp_comment, self.func_name, 158)
             loopBackID = None
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
