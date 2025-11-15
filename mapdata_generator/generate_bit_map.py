@@ -1039,6 +1039,11 @@ class GenBitMap:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         # for文の初期値で変数の初期化がある場合はアイテムを作る
         elif self.getNodeShape(nodeID) == 'invhouse':
+            # 1回だけ実行
+            self.createRoom(nodeID, crntRoomID)
+            if nodeID in self.mapInfo.room_info:
+                self.createPath(crntRoomID, nodeID, {})
+                crntRoomID = nodeID
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 # ノーマル変数
                 if self.getNodeShape(toNodeID) == 'signature':

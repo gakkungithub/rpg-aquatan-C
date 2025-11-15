@@ -236,7 +236,7 @@ class ASTtoFlowChart:
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
             nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
-            if i != 0 and f'"{nodeID}"' in self.varNode_info and f'"{nextNodeID}"' in self.varNode_info:
+            if i != 0 and f'"{nextNodeID}"' in self.varNode_info:
                 self.createRoomSizeEstimate(nextNodeID)
             nodeID = nextNodeID
             edgeName = ""
@@ -1403,6 +1403,7 @@ class ASTtoFlowChart:
                 if cr.kind == ci.CursorKind.DECL_STMT:
                     initNodeID = self.createNode("", 'invhouse')
                     varNodeID = initNodeID
+                    self.createRoomSizeEstimate(varNodeID)
                     for vcr in cr.get_children():
                         self.check_cursor_error(vcr)
                         varNodeID = self.parse_var_decl(vcr, varNodeID, "")
