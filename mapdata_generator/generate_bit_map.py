@@ -986,6 +986,11 @@ class GenBitMap:
         #変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.getNodeShape(nodeID) == 'signature':
             var_type = self.varNode_info[nodeID]
+            self.createRoom(nodeID, crntRoomID)
+            # 変数用に部屋を作る必要があるなら作る
+            if nodeID in self.mapInfo.room_info:
+                self.createPath(crntRoomID, nodeID, {})
+                crntRoomID = nodeID
             for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
                 # 配列
                 if self.getNodeShape(toNodeID) == 'box3d':
@@ -1030,12 +1035,6 @@ class GenBitMap:
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": exp_comments}, var_type, self.func_name)
                 #次のノード
                 else:
-                    # 次のノードが再び変数宣言(異なる行)の場合、部屋を作ってくっつける
-                    if self.getNodeShape(toNodeID) == 'signature':
-                        self.createRoom(toNodeID, crntRoomID)
-                        if toNodeID in self.mapInfo.room_info:
-                            self.createPath(crntRoomID, toNodeID, {})
-                            crntRoomID = toNodeID
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         # for文の初期値で変数の初期化がある場合はアイテムを作る
         elif self.getNodeShape(nodeID) == 'invhouse':
