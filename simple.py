@@ -3725,7 +3725,7 @@ class MoveEvent():
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
-        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+        if len(self.fromTo) and self.fromTo[0] == PLAYER.sender.code_window.linenum:
             offsetx, offsety = offset
             px = self.rect.midtop[0] - 16
             py = self.rect.topright[1] - 28

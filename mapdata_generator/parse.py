@@ -236,7 +236,7 @@ class ASTtoFlowChart:
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
             nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
-            if i != 0 and f'"{nextNodeID}"' in self.varNode_info:
+            if i != 0 and f'"{nextNodeID}"' in self.varNode_info and f'"{nodeID}"' in self.varNode_info:
                 self.createRoomSizeEstimate(nextNodeID)
             nodeID = nextNodeID
             edgeName = ""
