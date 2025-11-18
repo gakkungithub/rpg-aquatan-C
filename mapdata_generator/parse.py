@@ -229,6 +229,8 @@ class ASTtoFlowChart:
                     self.nextLines.append((cursor.extent.end.line, True))
                 elif type_parent == "while":
                     self.nextLines.append((cursor.location.line, True))
+                elif type_parent == "do_while":
+                    self.nextLines.append((cursor.extent.end.line, True))
                 elif type_parent == "for_w_change":
                     self.nextLines.append((cursor.extent.end.line, True))
                 elif type_parent == "for_wo_change":
@@ -1355,7 +1357,7 @@ class ASTtoFlowChart:
             if cr.kind == ci.CursorKind.COMPOUND_STMT:
                 cr_in = list(cr.get_children())
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-                nodeID = self.parse_comp_stmt(cr, trueNodeID)
+                nodeID = self.parse_comp_stmt(cr, trueNodeID, edgeName="do_while")
             else:
                 if nodeID is None:
                     return None
@@ -1369,10 +1371,12 @@ class ASTtoFlowChart:
                 self.createEdge(condNodeID, trueNodeID, "True")
                 self.createEdge(condNodeID, falseNodeID, "False")
         if len(cr_in):
-            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
+            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cr_in[0].location.line])
+            # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
             self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cr.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_in[0].location.line])
         else:
-            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
+            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cursor.location.line])
+            # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
             self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cr.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
 
         next_line = self.get_next_line()

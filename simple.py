@@ -2164,6 +2164,11 @@ class Player(Character):
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
+                                        elif CCCharacterResult.get('skip', False):
+                                            MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                                            if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                                                self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
+                                            self.ccchara = chara.set_checked()
                                         else:
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                                                 self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
@@ -3557,6 +3562,7 @@ class CharaReturn(Character):
         
     def draw(self, screen, offset):
         super().draw(screen, offset)
+        # self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
         if self.fromTo[0] == PLAYER.sender.code_window.linenum:
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
@@ -3669,6 +3675,7 @@ class CharaCheckCondition(Character):
 #                                                                                    88                                                                                
 #                                                                                    88                                                                                
 
+# 話しかけると頭に計算式が浮かぶようにすると良いかも?
 class CharaExpression(Character):
     def __init__(self, name, pos, direction, movetype, message, func, comments_dict, mapname):
         super().__init__(name, pos, direction, movetype, message)
@@ -4951,6 +4958,11 @@ class CodeWindow(Window):
 # 88       `8b   d8'  8PP""""""" 88       88  88            `8b 8PP""""""" 88       88 8b       88 8PP""""""" 88          
 # 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
 # 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
+
+# if: ifはいつも通り ifEnd
+# while: 一つ前の行ならwhileIn、その行ならwhileTrue or whileFalse
+# do-while: doWhileInitはいつも通り、doWhileInは一つ前、doWhileTrue or doWhileFalseはその行
+# for: 一つ前の行(forの中身)からならforIn、一つ前の行(forの外)からなら変数の初期化、その行ならforTrue or forFalse
 
 class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):

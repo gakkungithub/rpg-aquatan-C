@@ -1157,6 +1157,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     else:
                                         line_list = list(range(self.line_number, self.line_data[self.func_name]["loops"][str(self.line_number)]+1))
                                     self.skipped_lines = [line for line in self.skipped_lines if int(line) not in line_list]
+                            elif type == 'doWhileInit':
+                                # 最初なので確定でline_loopに追加する
+                                self.line_loop.append(self.next_line_number)
+                                self.event_sender({"message": "", "status": "ok"})
+                                self.vars_tracker.trackStart(self.frame)
+                                self.vars_checker()
                             elif type == 'ifEnd':
                                 if self.line_number in self.line_data[self.func_name]["onelines"]:
                                     if self.line_number == self.crnt_oneline:
@@ -1213,13 +1219,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                                 return CONTINUE
                         elif fromTo[:2] == [None, self.next_line_number]:
-                            if type == 'doWhileInit':
-                                # 最初なので確定でline_loopに追加する
-                                self.line_loop.append(self.next_line_number)
-                                self.event_sender({"message": "", "status": "ok"})
-                                self.vars_tracker.trackStart(self.frame)
-                                self.vars_checker()
-                            elif type == 'switchEnd':
+                            # if type == 'doWhileInit':
+                            #     # 最初なので確定でline_loopに追加する
+                            #     self.line_loop.append(self.next_line_number)
+                            #     self.event_sender({"message": "", "status": "ok"})
+                            #     self.vars_tracker.trackStart(self.frame)
+                            #     self.vars_checker()
+                            if type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                         # void関数の戻り
                         elif fromTo[0] == self.line_number and fromTo[0] in self.line_data[self.func_name]["voidreturn"]:
