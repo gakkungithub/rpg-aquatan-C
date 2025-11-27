@@ -873,8 +873,8 @@ class GenBitMap:
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
                 for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-                    self.createRoom(toNodeID, crntRoomID)
                     if self.getNodeShape(toNodeID) == 'circle':
+                        self.createRoom(toNodeID, crntRoomID)
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
@@ -884,6 +884,7 @@ class GenBitMap:
                         self.createPath(crntRoomID, toNodeID, path_comment_dict, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
+                        self.createRoom(toNodeID, crntRoomID)
                         # 今までのif条件を繋げる (今まで+今回の条件が偽の場合を次のdiamondに渡す)
                         if condition_comment_dict:
                             comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
@@ -893,13 +894,30 @@ class GenBitMap:
                         nodeID_list.append((toNodeID, comment_dict))
                     elif self.getNodeShape(toNodeID) == 'invtriangle':
                         switch_exp = self.getExpNodeInfo(nodeID)
-                        if (exp := self.getExpNodeInfo(toNodeID)) is not None:
-                            warp_comment = {"detail": f"{exp[4]}行目の?が真", "hover": [f"case {exp[0]} ({switch_exp[0]} == {exp[0]})"], "type": "cond-check"}
+                        case_exp_list = []
+                        while True:
+                            if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
+                                break
+                            tempNodeID, _ = tempNode_info[0]
+                            if (exp := self.getExpNodeInfo(toNodeID)) is not None:
+                                case_exp_list.append(exp[0])
+                            else:
+                                case_exp_list = []
+                            if self.getNodeShape(tempNodeID) != 'invtriangle':
+                                break
+                            toNodeID = tempNodeID
+                        self.createRoom(toNodeID, crntRoomID)
+                        if len(case_exp_list):
+                            warp_comment = {"detail": f"{exp[4]}行目の?が真", "hover": [f"{switch_exp[0]} == {'または'.join(case_exp_list)}"], "type": "cond-check"}
                         else:
-                            warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない(default)", "hover": [switch_exp[0]], "type": "cond-check"}
+                            if self.getNodeLabel(toNodeID) == 'default':
+                                warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない(default)", "hover": [switch_exp[0]], "type": "cond-check"}
+                            else:
+                                warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない", "hover": [switch_exp[0]], "type": "cond-check"}
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
+                        self.createRoom(toNodeID, crntRoomID)
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
@@ -910,13 +928,15 @@ class GenBitMap:
                         nodeID_list.append(toNodeID)
                     # elseにて、中の処理がない場合
                     elif self.getNodeShape(toNodeID) == 'terminator':
+                        self.createRoom(toNodeID, crntRoomID)
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
                             comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
                         else:
                             comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]], "type": "cond-check"}
-                        self.trackAST(crntRoomID, toNodeID, loopBackID, comment_dict)
+                        # self.trackAST(crntRoomID, toNodeID, loopBackID, comment_dict)
+                        nodeID_list.insert(0, (toNodeID, comment_dict))
                     else:
                         print("unknown node appeared")
             for toNodeID_info in nodeID_list:
@@ -968,7 +988,7 @@ class GenBitMap:
             toNodeID, _ = self.getNextNodeInfo(nodeID)[0]
             tempNode_info = None
             # 今まではifの終了ごとにワープゾーンを作っていたが、ifの終了が連続する場合に対応できなかったので、連続するノードは飛ばすようにした
-            while 1:
+            while True:
                 if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
                     break
                 tempNodeID, _ = tempNode_info[0]
@@ -1061,7 +1081,7 @@ class GenBitMap:
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
                     self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": "continueで現在のループから脱出します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
                     loopBackID = None
-                # continue → do While構文の場合
+                # continue → doWhile構文の場合
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID, crntRoomID)
                     exp = self.getExpNodeInfo(nextNodeID)
@@ -1077,6 +1097,9 @@ class GenBitMap:
                 else:
                     self.createRoom(nextNodeID, crntRoomID)
                     self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": "breakにより現在のループから脱出します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
+                    if self.getNodeLabel(nextNodeID) == 'end':
+                        crntRoomID = nextNodeID
+                        nodeID = nextNodeID
         # do while構文の最初の1回
         elif self.getNodeShape(nodeID) == 'invtrapezium':
             trueNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
@@ -1086,16 +1109,48 @@ class GenBitMap:
             crntRoomID = trueNodeID
         # switch構文の途中のcaseまたは末尾に接続する
         elif self.getNodeShape(nodeID) == 'invtriangle' and crntRoomID != nodeID:
-            self.createRoom(nodeID, crntRoomID)
-            if "end" == self.getNodeLabel(nodeID):
-                warp_comment = {"detail": "switch文を終了します", "hover": [], "type": "end"}
-            else:
-                if (exp := self.getExpNodeInfo(nodeID)) is not None:
-                    warp_comment = {"detail": f"次が{exp[4]}行目のcaseの?に移る", "hover": [exp[0]], "type": "cond-in"}
+            case_exp_list = []
+            toNodeID = nodeID
+            while True:
+                if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
+                    break
+                tempNodeID, _ = tempNode_info[0]
+                if (exp := self.getExpNodeInfo(toNodeID)) is not None:
+                    case_exp_list.append(exp[0])
                 else:
-                    warp_comment = {"detail": "次がdefault", "hover": [], "type": "cond-in"}
-            self.mapInfo.setWarpZone(crntRoomID, nodeID, warp_comment, self.func_name, 158)
-            crntRoomID = nodeID
+                    case_exp_list = []
+                if self.getNodeShape(tempNodeID) != 'invtriangle':
+                    break
+                toNodeID = tempNodeID
+            self.createRoom(toNodeID, crntRoomID)
+            if "end" == self.getNodeLabel(toNodeID):
+                warp_comment = {"detail": "switch文を終了します", "hover": [], "type": "end"}
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158)
+                crntRoomID = toNodeID
+                nodeID = toNodeID
+            else:
+                warp_comment = {"detail": "次のcase以降の処理に進みます", "hover": [], "type": "cond-check"}
+
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158)
+                return
+        elif self.getNodeShape(nodeID) == 'triangle':
+            case_exp_list = []
+            toNodeID = nodeID
+            while True:
+                if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
+                    break
+                tempNodeID, _ = tempNode_info[0]
+                if (exp := self.getExpNodeInfo(toNodeID)) is not None:
+                    case_exp_list.append(exp[0])
+                else:
+                    case_exp_list = []
+                if self.getNodeShape(tempNodeID) != 'invtriangle' or self.getNodeLabel(toNodeID) == 'caseEnd':
+                    break
+                toNodeID = tempNodeID
+            self.createRoom(toNodeID, crntRoomID)
+            warp_comment = {"detail": "次のcase以降の処理に進みます", "hover": [], "type": "cond-check"}
+            self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, warpNodeID=nodeID)
+            return
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
             self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)

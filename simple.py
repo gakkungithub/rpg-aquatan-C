@@ -4959,10 +4959,11 @@ class CodeWindow(Window):
 # 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
 # 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
 
-# if: ifはいつも通り ifEnd
+# if: ifはいつも通り ifEndは } の時は一個前、 } ではない時はその行
 # while: 一つ前の行ならwhileIn、その行ならwhileTrue or whileFalse
 # do-while: doWhileInitはいつも通り、doWhileInは一つ前、doWhileTrue or doWhileFalseはその行
-# for: 一つ前の行(forの中身)からならforIn、一つ前の行(forの外)からなら変数の初期化、その行ならforTrue or forFalse
+# for: 一つ前の行(forの中身)からならforIn、一つ前の行(forの外)なら変数の初期化(あれば)、その行ならforTrue or forFalse
+# switch: switchCaseはいつも通り、
 
 class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):

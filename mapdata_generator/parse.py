@@ -220,6 +220,7 @@ class ASTtoFlowChart:
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
         # 次の処理の行数を取得するためにカーソルをlistとして取得する
         type_parent = edgeName
+        # if type_parent in []:
         cursor_stmt_list: list[ci.Cursor] = list(cursor.get_children())
         for i, cr in enumerate(cursor_stmt_list):
             if (next_line := self.get_next_line_in_comp(cursor_stmt_list[i+1:])):
@@ -227,14 +228,19 @@ class ASTtoFlowChart:
             else:
                 if type_parent == "if":
                     self.nextLines.append((cursor.extent.end.line, True))
+                    edgeName = ""
                 elif type_parent == "while":
                     self.nextLines.append((cursor.location.line, True))
+                    edgeName = ""
                 elif type_parent == "do_while":
                     self.nextLines.append((cursor.extent.end.line, True))
+                    edgeName = ""
                 elif type_parent == "for_w_change":
                     self.nextLines.append((cursor.extent.end.line, True))
+                    edgeName = ""
                 elif type_parent == "for_wo_change":
                     self.nextLines.append((cursor.location.line, True))
+                    edgeName = ""
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
             nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
@@ -246,7 +252,7 @@ class ASTtoFlowChart:
         return nodeID
 
     # self.condition_move用で、次の行が初期化なしまたは静的変数の変数宣言であるかどうかを確かめるための関数
-    def get_next_line_in_comp(self, cursor_stmt_list):
+    def get_next_line_in_comp(self, cursor_stmt_list) -> int | None:
         for cursor_stmt in cursor_stmt_list:
             if cursor_stmt.kind == ci.CursorKind.DECL_STMT:
                 for vcr in cursor_stmt.get_children():
@@ -270,27 +276,27 @@ class ASTtoFlowChart:
                 return cursor_stmt.location.line
         return None
     
+    #ループのbreakやcontinueの情報を保管する
+    def createLoopBreakerInfo(self):
+        self.loopBreaker_list.append({"break":[], "continue":[]})
+        if self.switchBreaker_list:
+            self.switchBreaker_list[-1]["level"] += 1
+
+    def downSwitchBreakerLevel(self):
+        if self.switchBreaker_list:
+            self.switchBreaker_list[-1]["level"] -= 1
+
+    def addLoopBreaker(self, nodeID, type, line):
+        if self.switchBreaker_list and type == "break":
+            if self.switchBreaker_list[-1]["level"]:
+                self.loopBreaker_list[-1][type].append((nodeID, line))
+            else:
+                self.switchBreaker_list[-1][type].append((nodeID, line))
+        else:
+            self.loopBreaker_list[-1][type].append((nodeID, line))
+
     # 色々な関数内や条件文内のコードの解析を行う
     def parse_stmt(self, cr: ci.Cursor, nodeID, edgeName=""):
-        #ループのbreakやcontinueの情報を保管する
-        def createLoopBreakerInfo():
-            self.loopBreaker_list.append({"break":[], "continue":[]})
-            if self.switchBreaker_list:
-                self.switchBreaker_list[-1]["level"] += 1
-
-        def downSwitchBreakerLevel():
-            if self.switchBreaker_list:
-                self.switchBreaker_list[-1]["level"] -= 1
-
-        def addLoopBreaker(nodeID, type, line):
-            if self.switchBreaker_list and type == "break":
-                if self.switchBreaker_list[-1]["level"]:
-                    self.loopBreaker_list[-1][type].append((nodeID, line))
-                else:
-                    self.switchBreaker_list[-1][type].append(nodeID)
-            else:
-                self.loopBreaker_list[-1][type].append((nodeID, line))
-
         self.check_cursor_error(cr)
 
         #break or continueの後なら何も行わない。ただし、ラベルを現在探索中でラベルを発見した時はラベルを見る
@@ -327,23 +333,17 @@ class ASTtoFlowChart:
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
-            createLoopBreakerInfo()
-            nodeID = self.parse_while_stmt(cr, nodeID, edgeName)
-            downSwitchBreakerLevel()
+            nodeID = self.parse_while_stmt(cr, nodeID, edgeName=edgeName)
         elif cr.kind == ci.CursorKind.DO_STMT:
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
-            createLoopBreakerInfo()
-            nodeID = self.parse_do_stmt(cr, nodeID, edgeName)
-            downSwitchBreakerLevel()
+            nodeID = self.parse_do_stmt(cr, nodeID, edgeName=edgeName)
         elif cr.kind == ci.CursorKind.FOR_STMT:
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
-            createLoopBreakerInfo()
-            nodeID = self.parse_for_stmt(cr, nodeID, edgeName)
-            downSwitchBreakerLevel()
+            nodeID = self.parse_for_stmt(cr, nodeID, edgeName=edgeName)
         elif cr.kind == ci.CursorKind.SWITCH_STMT:
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
@@ -352,12 +352,14 @@ class ASTtoFlowChart:
         elif cr.kind == ci.CursorKind.BREAK_STMT:
             breakNodeID = self.createNode("break", "hexagon")
             self.createEdge(nodeID, breakNodeID, edgeName)
-            addLoopBreaker(breakNodeID, "break", cr.location.line)
+            self.addLoopBreaker(breakNodeID, "break", cr.location.line)
+            self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             return None
         elif cr.kind == ci.CursorKind.CONTINUE_STMT:
             continueNodeID = self.createNode("continue", "hexagon")
             self.createEdge(nodeID, continueNodeID, edgeName)
-            addLoopBreaker(continueNodeID, "continue", cr.location.line)
+            self.addLoopBreaker(continueNodeID, "continue", cr.location.line)
+            self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             return None
         elif cr.kind == ci.CursorKind.GOTO_STMT:
             # 最初行番を変更
@@ -1277,9 +1279,11 @@ class ASTtoFlowChart:
     #子ノードを引数とする関数を呼び出し、真の場合の最後の処理をこの関数の戻り値とする
     #その戻り値を現在ノードに付ける
     #現在のノードは次のノードに付ける
-    def parse_while_stmt(self, cursor: ci.Cursor, nodeID, edgeName=""):
-        children = list(cursor.get_children())
+    def parse_while_stmt(self, cursor: ci.Cursor, nodeID, edgeName="", isFinalStmtInSwitch=False):
+        self.createLoopBreakerInfo()
         
+        children = list(cursor.get_children())
+
         self.line_info_dict[self.scanning_func].setLoop(cursor.extent.start.line, cursor.extent.end.line)
 
         # --- 条件処理 ---
@@ -1330,15 +1334,18 @@ class ASTtoFlowChart:
 
         self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
 
-        self.createEdgeForLoop(endNodeID, loop_back_node, [cond_cursor.location.line])
+        self.createEdgeForLoop(endNodeID, loop_back_node, [cursor.location.line] if isFinalStmtInSwitch else [], [cond_cursor.location.line])
 
+        self.downSwitchBreakerLevel()
         return endNodeID
 
     #do-while文
     #まずは最初の処理を示す子ノードと現在ノードを接続する
     #Doノードの子ノードはCOMPOUNDと条件部しかなく、条件部は2つ目に読まれる
     #そこで読み込まれたノードを先頭ノードと次ノードをくっつける
-    def parse_do_stmt(self, cursor: ci.Cursor, nodeID, edgeName=""):
+    def parse_do_stmt(self, cursor: ci.Cursor, nodeID, edgeName="", isFinalStmtInSwitch=False):
+        self.createLoopBreakerInfo()
+
         initNodeID = self.createNode(f"{cursor.location.line}", 'invtrapezium')
         self.createEdge(nodeID, initNodeID, edgeName)
 
@@ -1366,32 +1373,36 @@ class ASTtoFlowChart:
                 self.createRoomSizeEstimate(condNodeID)
                 self.condition_move[f'"{condNodeID}"'] = ('doWhileIn', [cr.location.line])
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-                self.createEdgeForLoop(falseNodeID, condNodeID, [cr.location.line])
+                self.createEdgeForLoop(falseNodeID, condNodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cr.location.line])
                 self.createEdge(nodeID, condNodeID)
                 self.createEdge(condNodeID, trueNodeID, "True")
                 self.createEdge(condNodeID, falseNodeID, "False")
         if len(cr_in):
             self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cr_in[0].location.line])
             # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cr.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_in[0].location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_in[0].location.line])
         else:
             self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cursor.location.line])
             # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cr.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
 
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
+        self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
         #ここでdo_whileを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(falseNodeID)
+
+        self.downSwitchBreakerLevel()
         return falseNodeID
 
     #for文
     #まずは式1に対するノードを作成(for(式1; 式2; 式3))
     #あとは、ほぼWhileと同じ。式2の子ノード(真である場合の遷移先)の最後の処理が式3であることに注意
-    def parse_for_stmt(self, cursor, nodeID, edgeName=""):
+    def parse_for_stmt(self, cursor: ci.Cursor, nodeID, edgeName="", isFinalStmtInSwitch=False):
         #for(INIT; COND; CHANGE)
         #cursor.get_childrenの最後の要素は必ず処理部の最初のカーソルであるから、それ以外のカーソルが式1~式3の候補となる。
+        self.createLoopBreakerInfo()
+
         initNodeID = None
         condNodeID = None
         changeNodeID = None
@@ -1464,11 +1475,11 @@ class ASTtoFlowChart:
             else:
                 changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
         else:
-            sys.exit(-16)
+            changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
 
         self.createEdge(nodeID, changeNodeID)
         self.createEdge(changeNodeID, condNodeID)
-        self.createEdgeForLoop(endNodeID, changeNodeID, [cursor.location.line])
+        self.createEdgeForLoop(endNodeID, changeNodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cursor.location.line])
         
         self.createEdge(condNodeID, endNodeID, "False")
         #ここでforを抜けた後の部屋情報を作る
@@ -1476,24 +1487,31 @@ class ASTtoFlowChart:
 
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{endNodeID}"'] = ('forFalse', [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
+        forFalse_condition_move = [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.extent.end.line, next_line[0]] if isFinalStmtInSwitch else [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]]
+        self.condition_move[f'"{endNodeID}"'] = ('forFalse', forFalse_condition_move)
         
+        self.downSwitchBreakerLevel()
         return endNodeID
 
-    #switch文
+    # switch文
+    # caseノード(invtriangle型)は、次に遷移する行番を取得
+    # これとエッジのラベルを組み合わせてワープのfromToを形成する
+    # endノードについても、エッジとノードのラベルでfromToを形成する
     def parse_switch_stmt(self, cursor: ci.Cursor, nodeID, edgeName=""):
         #caseはbreakだけ適応させる
         #levelが0ならbreakノードを追加する。levelは繰り返し文が入ると1上がる。
         #それ以外ならloopBreaker_listに追加する。
         def createSwitchBreakerInfo():
-            self.switchBreaker_list.append({"level":0, "break":[]})
+            self.switchBreaker_list.append({"level": 0, "break":[]})
 
         #switchのcaseのbreakノードを追加する。
         def createSwitchBreakerEdge(endNodeID):
             switchBreaker = self.switchBreaker_list.pop()
             break_list = switchBreaker["break"]
-            for breakNodeID in break_list:
+            next_line = self.get_next_line()
+            for breakNodeID, line in break_list:
                 self.createEdge(breakNodeID, endNodeID)
+                self.condition_move[f'"{breakNodeID}"'] = ('switchEnd', [line, next_line[0]])
 
         cond_cursor, comp_exec_cursor = [cr for cr in cursor.get_children() if self.check_cursor_error(cr)]
 
@@ -1503,114 +1521,255 @@ class ASTtoFlowChart:
         #switchの構造はswitch(A)のようにAは必ず必要
         condNodeID = self.get_exp(cond_cursor, shape='diamond', label='switch')
         self.createEdge(nodeID, condNodeID, edgeName)
+        nodeID = None
 
         createSwitchBreakerInfo()
 
         endNodeID = self.createNode(f"end", 'invtriangle')
 
+        isDefault = False
         #switch(A){ B }の場合
-        last_line = None
         if comp_exec_cursor.kind == ci.CursorKind.COMPOUND_STMT:
-            isNotBreak = False
-            for cr in comp_exec_cursor.get_children():
+            self.line_info_dict[self.scanning_func].setLine(comp_exec_cursor.location.line)
+            self.line_info_dict[self.scanning_func].setLine(comp_exec_cursor.extent.end.line)
+
+            comp_stmt_cursor_list = list(comp_exec_cursor.get_children())
+            cursor_list_by_case: list[tuple[list[tuple[ci.Cursor, ci.Cursor]], list[ci.Cursor]]] = []
+            begin_line_list: list[int] = []
+
+            # まずはcomp_stmt_cursor_list (B) の処理用にcaseの遷移先の行を取得する
+            while len(comp_stmt_cursor_list):
+                cr = comp_stmt_cursor_list.pop(0)
                 self.check_cursor_error(cr)
                 if cr.kind == ci.CursorKind.CASE_STMT:
-                    if last_line:
-                        self.line_info_dict[self.scanning_func].setLine(last_line)
-                    while cr.kind == ci.CursorKind.CASE_STMT:
-                        caseValue_cursor, cr = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
-                        caseNodeID = self.get_exp(caseValue_cursor, shape='invtriangle', label='case')
-                        self.createEdge(condNodeID, caseNodeID)
-                        if isNotBreak:
-                            self.createEdge(nodeID, caseNodeID)
-                        isNotBreak = True
-
-                    #switchの元の部屋のサイズを+1する
-                    switchRoomSizeEstimate[1] += 1
-                    #ここで一つのcaseの部屋情報を作る
-                    self.createRoomSizeEstimate(caseNodeID)
-                    self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cr.location.line])
-                    self.line_info_dict[self.scanning_func].setLine(comp_exec_cursor.location.line)
-
-                    if cr.kind == ci.CursorKind.COMPOUND_STMT:
-                        cr_true = list(exec_cursor.get_children())
-                        if len(cr_true):
-                            last_line = cr_true[0].location.line 
+                    if isDefault:
+                        sys.exit(-30)
+                    case_cursor_list: list[tuple[ci.Cursor, ci.Cursor]] = []
+                    while cr.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
+                        caseValue_cursor, next_cr = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
+                        case_cursor_list.append((cr, caseValue_cursor))
+                        cr = next_cr
+                    first_line = None
+                    comp_stmt_cursor_list.insert(0, cr)
+                    stmt_cursor_list_in_case: list[ci.Cursor] = []
+                    for i, stmt_cursor in enumerate(comp_stmt_cursor_list):
+                        if stmt_cursor.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT, ci.CursorKind.BREAK_STMT):
+                            break
+                        elif stmt_cursor.kind == ci.CursorKind.COMPOUND_STMT:
+                            first_line = first_line if first_line else self.get_next_line_in_comp(list(stmt_cursor.get_children())) 
                         else:
-                            last_line = cr.location.line 
-                        nodeID = self.parse_comp_stmt(cr, caseNodeID)
-                    else:
-                        last_line = cr.location.line 
-                        nodeID = self.parse_stmt(cr, caseNodeID)
+                            first_line = first_line if first_line else self.get_next_line_in_comp([stmt_cursor])
+                        stmt_cursor_list_in_case.append(stmt_cursor)
 
+                    if first_line:
+                        begin_line_list.append(first_line)
+                    else:
+                        # 最後までcaseが出ない場合
+                        if i == len(comp_stmt_cursor_list) - 1:
+                            begin_line_list.append(comp_exec_cursor.extent.end.line)
+                        # case, default, breakが途中で現れた場合
+                        else:
+                            if comp_stmt_cursor_list[i].kind == ci.CursorKind.BREAK_STMT:
+                                begin_line_list.append(comp_stmt_cursor_list[i].location.line)
+                                stmt_cursor_list_in_case.append(comp_stmt_cursor_list[i])
+                            elif comp_stmt_cursor_list[i-1].kind == ci.CursorKind.COMPOUND_STMT:
+                                begin_line_list.append(comp_stmt_cursor_list[i-1].extent.end.line)
+                            else:
+                                begin_line_list.append(comp_stmt_cursor_list[i-1].location.line)
+                    
+                    cursor_list_by_case.append((case_cursor_list, stmt_cursor_list_in_case))
+                    if stmt_cursor.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
+                        comp_stmt_cursor_list = comp_stmt_cursor_list[i:]
+                    else:
+                        comp_stmt_cursor_list = comp_stmt_cursor_list[i+1:]
+                     
                 elif cr.kind == ci.CursorKind.DEFAULT_STMT:
-                    if last_line:
-                        self.line_info_dict[self.scanning_func].setLine(last_line)
-                    defaultNodeID = self.createNode("default", 'invtriangle')
-                    self.createEdge(condNodeID, defaultNodeID)
-                    if isNotBreak:
-                        self.createEdge(nodeID, defaultNodeID)
-                    default_cursor = next(cr.get_children())
-                    self.check_cursor_error(default_cursor)
-                    #switchの元の部屋のサイズを+1する
-                    switchRoomSizeEstimate[1] += 1
-                    #ここでdefaultの部屋情報を作る
-                    self.createRoomSizeEstimate(defaultNodeID)
-                    self.condition_move[f'"{defaultNodeID}"'] = ('switchCase', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cr.location.line+1])
-                    nodeID = self.parse_stmt(default_cursor, defaultNodeID)
-                    last_line = default_cursor.location.line 
-                    isNotBreak = True
-                elif cr.kind == ci.CursorKind.BREAK_STMT:
-                    nodeID = self.parse_stmt(cr, nodeID)
-                    last_line = cr.location.line 
-                    isNotBreak = False
-                    #caseラベルと実行文の処理の階層は最初の実行文以外同じ
-                # 一つのcaseに複数の処理がある場合はくっつける
-                elif caseNodeID or defaultNodeID:
-                    nodeID = self.parse_stmt(cr, nodeID)
-                    last_line = cr.location.line 
-            self.createEdge(nodeID, endNodeID)
-        #switch(A) Bの時、Bが case C: D なら A == C でDが行われる。
-        elif comp_exec_cursor.kind == ci.CursorKind.CASE_STMT:
+                    if isDefault:
+                        sys.exit(-31)
+                    cursor_in_default = next(cr.get_children())
+                    self.check_cursor_error(cursor_in_default)
+                    isDefault = True
+                    # 混合文の中身を調べる
+                    first_line = None
+                    comp_stmt_cursor_list.insert(0, cursor_in_default)
+                    stmt_cursor_list_in_case: list[ci.Cursor] = []
+                    for i, stmt_cursor in enumerate(comp_stmt_cursor_list):
+                        if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
+                            break
+                        elif stmt_cursor.kind == ci.CursorKind.COMPOUND_STMT:
+                            first_line = first_line if first_line else self.get_next_line_in_comp(list(stmt_cursor.get_children()))
+                        else:
+                            first_line = first_line if first_line else self.get_next_line_in_comp([stmt_cursor])
+                        stmt_cursor_list_in_case.append(stmt_cursor)
+
+                    if first_line:
+                        begin_line_list.append(first_line)
+                    else:
+                        # breakが出た場合
+                        if comp_stmt_cursor_list[i].kind == ci.CursorKind.BREAK_STMT:
+                            begin_line_list.append(comp_stmt_cursor_list[i].location.line)
+                            stmt_cursor_list_in_case.append(comp_stmt_cursor_list[i])
+                        else:
+                            begin_line_list.append(comp_exec_cursor.extent.end.line)
+                    comp_stmt_cursor_list = []
+                    cursor_list_by_case.append(([(cr, cursor_in_default)], stmt_cursor_list_in_case))
+                # 複合文や文が単独で出てくる場合は対応せずにプログラムを終了する
+                else:
+                    sys.exit(-22)
+            
+            # 最後のcase(default)が終わった後にbreakがない時、switchの末尾の } に遷移するので、その行番を先頭行番リストの末尾に登録しておく
+            begin_line_list.append(comp_exec_cursor.extent.end.line)
+            # 次は取得した最初の行番リストを用いてノードを作る
+            comp_stmt_cursor_list = list(comp_exec_cursor.get_children())
+
+            for i, (case_cursor_list, stmt_cursor_list_in_case) in enumerate(cursor_list_by_case):
+                # まずはcaseノードをくっつけていく
+                prevNodeID = condNodeID
+                for j, (case_cursor, case_value_cursor) in enumerate(case_cursor_list):
+                    if case_cursor.kind == ci.CursorKind.CASE_STMT:
+                        caseNodeID = self.get_exp(case_value_cursor, shape='invtriangle', label='case')
+                    else:
+                        caseNodeID = self.createNode('default', shape='invtriangle')
+                    
+                    self.createEdge(prevNodeID, caseNodeID)
+                    if j == 0 and nodeID:
+                        middleCaseNodeID = self.createNode('switchMiddleCase', 'triangle')
+                        self.createEdge(nodeID, middleCaseNodeID)
+                        self.createEdge(middleCaseNodeID, caseNodeID)
+                        self.condition_move[f'"{middleCaseNodeID}"'] = ('switchMiddleCase', [begin_line_list[i]])
+                    prevNodeID = caseNodeID
+
+                # switchの元の部屋のサイズを+1する
+                switchRoomSizeEstimate[1] += 1
+                # ここで一つのcaseの部屋情報を作る
+                self.createRoomSizeEstimate(caseNodeID)
+                # switchの条件式からcase直下の最初の行への遷移情報を登録する
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], begin_line_list[i]])
+                
+                nodeID = caseNodeID
+                begin_line_list_by_stmt: list[int | None] = []
+                for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
+                    if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
+                        begin_line_list_by_stmt.append(stmt_cursor.location.line)
+                    elif stmt_cursor.kind == ci.CursorKind.COMPOUND_STMT:
+                        begin_line_list_by_stmt.append(self.get_next_line_in_comp(list(stmt_cursor.get_children())))
+                    else:
+                        begin_line_list_by_stmt.append(self.get_next_line_in_comp([stmt_cursor]))
+
+                for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
+                    if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
+                        nodeID = self.parse_stmt(stmt_cursor, nodeID)
+                    elif stmt_cursor.kind == ci.CursorKind.COMPOUND_STMT:
+                        cursor_list_in_comp_stmt = list(stmt_cursor.get_children())
+                        for k, cursor_stmt_in_comp_stmt in enumerate(cursor_list_in_comp_stmt):
+                            if (next_line := self.get_next_line_in_comp(cursor_list_in_comp_stmt[k+1:])):
+                                self.nextLines.append((next_line, True))
+                            else:
+                                next_line = None
+                                for next_line in begin_line_list_by_stmt[j+1:]:
+                                    if next_line:
+                                        break
+                                if next_line:
+                                    self.nextLines.append((next_line, True))
+                                else:
+                                    if i == len(cursor_list_by_case) - 1:
+                                        self.nextLines.append((comp_exec_cursor.extent.end.line, True))
+                                    else:
+                                        if stmt_cursor_list_in_case[-1].kind == ci.CursorKind.COMPOUND_STMT:
+                                            self.nextLines.append((stmt_cursor_list_in_case[-1].extent.end.line, True))
+                                        else:
+                                            self.nextLines.append((begin_line_list[i+1], True))
+                            nodeID = self.parse_stmt(cursor_stmt_in_comp_stmt, nodeID)
+                            if j != 0 or k != 0 and f'"{nodeID}"' in self.varNode_info:
+                                self.createRoomSizeEstimate(nodeID)
+                            self.nextLines.pop(-1)
+                    else:
+                        if j < len(stmt_cursor_list_in_case) - 1 and begin_line_list_by_stmt[j+1]:
+                            self.nextLines.append((begin_line_list_by_stmt[j+1], True))
+                        else:
+                            next_line = None
+                            for next_line in begin_line_list_by_stmt[j+1:]:
+                                if next_line:
+                                    break
+                            if next_line:
+                                self.nextLines.append((next_line, True))
+                            else:
+                                if i == len(cursor_list_by_case) - 1:
+                                    self.nextLines.append((comp_exec_cursor.extent.end.line, True))
+                                else:
+                                    if stmt_cursor_list_in_case[-1].kind == ci.CursorKind.COMPOUND_STMT:
+                                        self.nextLines.append((stmt_cursor_list_in_case[-1].extent.end.line, True))
+                                    else:
+                                        self.nextLines.append((begin_line_list[i+1], True))
+                        if j == len(stmt_cursor_list_in_case) - 1:
+                            if stmt_cursor.kind == ci.CursorKind.WHILE_STMT:
+                                nodeID = self.parse_while_stmt(stmt_cursor, nodeID, isFinalStmtInSwitch=True)
+                            elif stmt_cursor.kind == ci.CursorKind.DO_STMT:
+                                nodeID = self.parse_do_stmt(stmt_cursor, nodeID, isFinalStmtInSwitch=True)
+                            elif stmt_cursor.kind == ci.CursorKind.FOR_STMT:
+                                nodeID = self.parse_for_stmt(stmt_cursor, nodeID, isFinalStmtInSwitch=True)
+                            else:
+                                nodeID = self.parse_stmt(stmt_cursor, nodeID)
+                                if j != 0 and f'"{nodeID}"' in self.varNode_info:
+                                    self.createRoomSizeEstimate(nodeID)
+                        else:
+                            nodeID = self.parse_stmt(stmt_cursor, nodeID)
+                            if j != 0 and f'"{nodeID}"' in self.varNode_info:
+                                self.createRoomSizeEstimate(nodeID)
+                        self.nextLines.pop(-1)
+
+            end_line = comp_exec_cursor.extent.end.line
+
+        # switch(A) Bの時、Bが case C: D なら A == C でDが行われる。
+        # しかし、Bが case C:でないなら D は無視される。Dは複数行でも良い。
+        elif comp_exec_cursor.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
             caseValue_cursor, exec_cursor = [cr for cr in comp_exec_cursor.get_children() if self.check_cursor_error(cr)]
+            if comp_exec_cursor.kind == ci.CursorKind.DEFAULT_STMT:
+                isDefault = True
+
             caseNodeID = self.get_exp(caseValue_cursor, shape='invtriangle')
             self.createEdge(condNodeID, caseNodeID)
             createSwitchBreakerInfo()
-
             #switchの元の部屋のサイズを+1する
             switchRoomSizeEstimate[1] += 1
             #ここでDのための部屋情報を作る
             self.createRoomSizeEstimate(caseNodeID)
-            self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cr.location.line+1])
-            
+            if (next_line := self.get_next_line_in_comp([exec_cursor])):
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line])
+            else:
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], self.get_next_line()[0]])
             nodeID = self.parse_stmt(exec_cursor, caseNodeID)
-            last_line = exec_cursor.location.line 
+             
             self.line_info_dict[self.scanning_func].setLine(exec_cursor.location.line)
             self.createEdge(nodeID, endNodeID)
-        #しかし、B D なら D は無視される。Dは複数行でも良い。
-        if defaultNodeID is None:
+
+            end_line = exec_cursor.location.line
+
+        self.createEdge(nodeID, endNodeID)
+        if not isDefault:
             self.createEdge(condNodeID, endNodeID)
+
         createSwitchBreakerEdge(endNodeID)
         #ここでswitchを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(endNodeID)
         next_line = self.get_next_line()
         
-        self.condition_move[f'"{endNodeID}"'] = ('switchEnd', [None, next_line[0]])
+        self.condition_move[f'"{endNodeID}"'] = ('switchEnd', [end_line, next_line[0]])
 
-        self.line_info_dict[self.scanning_func].setLine(last_line)
         self.roomSize_info[self.scanning_func][f'"{switchRoomSizeEstimate[0]}"'] = switchRoomSizeEstimate[1]
-        return endNodeID
+        return endNodeID 
 
-    #ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
-    def createEdgeForLoop(self, breakToNodeID, continueToNodeID, continue_line_track):
+    # ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
+    def createEdgeForLoop(self, breakToNodeID: str, continueToNodeID: str, break_line_track: list[int], continue_line_track: list[int]):
         loopBreaker = self.loopBreaker_list.pop()
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
         next_line = self.get_next_line()
+        break_line_track.append(next_line[0])
 
         for breakNodeID, breakLine in break_list:
             self.createEdge(breakNodeID, breakToNodeID)
-            self.condition_move[f'"{breakNodeID}"'] = ('break', [breakLine, next_line[0]])
+            self.condition_move[f'"{breakNodeID}"'] = ('break', [breakLine] + break_line_track)
             self.line_info_dict[self.scanning_func].setLine(breakLine)
         for continueNodeID, continueLine in continue_list:
             self.createEdge(continueNodeID, continueToNodeID)
