@@ -1947,6 +1947,10 @@ class Player(Character):
                         self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
                 if itemResult['status'] == "ok":
                     if itemResult.get('skip', False):
+                        print(mymap.name)
+                        if mymap.name == "tutorial":
+                            itemResult['message'] = f"関数がある場合、関数の処理(部屋の遷移)をスキップできるかを決められます\f{itemResult['message']}"
+                            print(itemResult['message'])
                         MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
                     else:
                         # 初期化値なしの変数でコメントを初期化する
@@ -2151,7 +2155,10 @@ class Player(Character):
                                         for skippedFunc in CCCharacterResult["skippedFunc"]:
                                             self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                                     if CCCharacterResult['status'] == "ng":
-                                        MSGWND.set(CCCharacterResult['message'])
+                                        if mymap.name == "tutorial":
+                                            MSGWND.set("条件が間違ったキャラクターに話しかけると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!")
+                                        else:
+                                            MSGWND.set(CCCharacterResult['message'])
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
