@@ -172,6 +172,10 @@ def main():
                                     server = None
                                 else:
                                     SBWND.stage_selecting = not SBWND.stage_selecting
+                            elif button_name == SBWND.is_clicked(event.pos) == 'tutorial':
+                                stage_index = 0
+                                SBWND.hide()
+                                stage_name = "tutorial"                       
                             # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
                             elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
@@ -223,20 +227,22 @@ def main():
 
         # region マップデータ生成
         programpath = f"{DATA_DIR}/{stage_name}/{stage_name}"
+        cfiles = [f"{programpath}.c"]
         # 現在は一つのcファイルにしか対応してないが、複数対応する時、下記のようにリストに要素を一つだけ入れる
         # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
-        cfiles = [f"{programpath}.c"]
 
         try:
-            # cプログラムを整形する
-            subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+            # チュートリアルマップは固定のマップデータを既に生成しているのでマップデータ生成システムを起動する必要はない
+            if stage_name != "tutorial":
+                # cプログラムを整形する
+                subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
-            # cファイルを解析してマップデータを生成する
-            # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
-            cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
-            if SBWND.color_support:
-                cfcode.append("-u")
-            subprocess.run(cfcode, cwd="mapdata_generator", check=True)
+                # cファイルを解析してマップデータを生成する
+                # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
+                cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+                if SBWND.color_support:
+                    cfcode.append("-u")
+                subprocess.run(cfcode, cwd="mapdata_generator", check=True)
             subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
         except subprocess.CalledProcessError as e:
             print(f"subprocess failed with exit code {e.returncode}")
@@ -364,10 +370,9 @@ def main():
         fieldmap.add_chara(PLAYER)
 
         # region ウィンドウの設定
-        message_engine = MessageEngine()
         MSGWND = MessageWindow(
             Rect(SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
-                SCR_WIDTH // 2, SCR_HEIGHT // 4), message_engine, sender)
+                SCR_WIDTH // 2, SCR_HEIGHT // 4), MessageEngine(), sender)
         DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
         DIMWND.hide()
         LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
@@ -681,58 +686,6 @@ def main():
                         MSGWND.set(atxt)
                         atxt = "\0"
                         cmd = "\0"
-                    # elif cmd == "itemget":
-                    #     try:
-                    #         itemname = atxt.strip()
-                    #         if not itemname:
-                    #             raise ValueError("No item name provided.")
-                    #         item = PLAYER.commonItembag.find(itemname)
-                    #         if item is None:
-                    #             item = PLAYER.itembag.find(itemname)
-                    #         if item:
-                    #             if(item.get_value() != None):
-                    #                 MSGWND.set(f"アイテム {itemname} の値は {str(item.get_value())} です")
-                    #         else:
-                    #             MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                    #     except Exception:
-                    #         MSGWND.set("ERROR...")
-                    #     cmd = "\0"
-                    #     atxt = "\0"
-                    # elif cmd == "itemset":
-                    #     ## suit for integer item
-                    #     ## "itemset <var> num" ,"itemset <var> +<num>" or "item <var> ++"
-                    #     try:
-                    #         parts = atxt.split(' ', 1)
-                    #         itemname = parts[0]
-                    #         value = parts[1]
-                    #         item = PLAYER.commonItembag.find(itemname)
-                    #         if item is None:
-                    #             item = PLAYER.itembag.find(itemname)
-                    #         if item:
-                    #             current_value = item.get_value()
-                    #             if value == "++":
-                    #                 value = str(int(current_value) + 1)
-                    #             elif value == "--":
-                    #                 value = str(int(current_value) - 1)
-                    #             # この下の計算式コマンドは j = -5 と被るので今は無視
-                    #             # elif value.startswith("+"):
-                    #             #     value = str(int(current_value) + int(value[1:]))
-                    #             # elif value.startswith("-"):
-                    #             #     value = str(int(current_value) - int(value[1:]))
-
-                    #             sender.send_event({"itemset": [itemname, value]})
-                    #             itemsetResult = sender.receive_json()
-                    #             if itemsetResult is not None:
-                    #                 PLAYER.remove_itemvalue()
-                    #                 if itemsetResult['status'] == "ok":
-                    #                     item.set_value(value)
-                    #                 MSGWND.set(itemsetResult['message'])
-                    #         else:
-                    #             MSGWND.set(f"アイテム {itemname} は持っていません!!")
-                    #     except (IndexError, ValueError):
-                    #         MSGWND.set("ERROR...")
-                    #     cmd = "\0"
-                    #     atxt = "\0"
                     elif cmd == "itemsetall":
                         sender.send_event({"itemsetall": True})
 
@@ -1203,6 +1156,7 @@ class Map:
         self.map = []  # マップデータ（2次元リスト）
         self.charas: list[Character] = []  # マップにいるキャラクターリスト
         self.events = []  # マップにあるイベントリスト
+        self.helps: dict[tuple[int, int], str] = {}
         self.lights = []  # マップにある光源リスト
         self.load_json()
 
@@ -1361,13 +1315,6 @@ class Map:
             elif event_type == "SIGN":  # 任意の文字を書く看板
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
-                # 一度取得したアイテムの宝箱は現れないようにする
-                item = PLAYER.commonItembag.find(event["item"], event["fromTo"][0])
-                if item is not None:
-                    continue
-                item = PLAYER.itembag.find(event["item"], event["fromTo"][0])
-                if item is not None:
-                    continue
                 self.create_treasure_j(event)
             elif event_type == "DOOR":  # ドア
                 self.create_door_j(event)
@@ -1383,7 +1330,9 @@ class Map:
                 self.create_plpath_j(event)
             elif event_type == "PLACESET":  # 場所マーカー
                 self.create_placeset_j(event)
-
+            elif event_type == "HELP":
+                self.create_help_j(event)
+            
     def create_chara_j(self, data):
         """キャラクターを作成してcharasに追加する"""
         name = data["name"]
@@ -1420,6 +1369,14 @@ class Map:
         self.events.append(Sign((x,y),text))
 
     def create_treasure_j(self, data):
+        """一度取得したアイテムの宝箱は現れないようにする"""
+        item = PLAYER.commonItembag.find(data["item"], data["fromTo"][0])
+        if item is not None:
+            return
+        item = PLAYER.itembag.find(data["item"], data["fromTo"][0])
+        if item is not None:
+            return
+        
         """宝箱を作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         item = data["item"]
@@ -1541,6 +1498,16 @@ class Map:
         place = PlacesetEvent((x, y), mapchip, place_label)
         self.events.append(place)
 
+    def create_help_j(self, data):
+        x, y = int(data["x"]), int(data["y"])
+        if (x, y) in PLAYER.helps_aquired:
+            return
+        raw_comments_list: list[list[str]] = data["comments"]
+        comments_list: list[str] = []
+        for raw_comments_by_page in raw_comments_list:
+            comments_list.append('\n'.join(raw_comments_by_page))
+        self.helps[(x, y)] = '\f'.join(comments_list)
+
     def create_auto_j(self, data):
         """自動イベントを作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
@@ -1549,6 +1516,22 @@ class Map:
         # print(funcWarp)
         auto = AutoEvent((x, y), mapchip, sequence)
         self.events.append(auto)
+                                                                                   
+# 88        88            88             88888888ba             88                     
+# 88        88            88             88      "8b            ""              ,d     
+# 88        88            88             88      ,8P                            88     
+# 88aaaaaaaa88  ,adPPYba, 88 8b,dPPYba,  88aaaaaa8P' ,adPPYba,  88 8b,dPPYba, MM88MMM  
+# 88""""""""88 a8P_____88 88 88P'    "8a 88""""""'  a8"     "8a 88 88P'   `"8a  88     
+# 88        88 8PP""""""" 88 88       d8 88         8b       d8 88 88       88  88     
+# 88        88 "8b,   ,aa 88 88b,   ,a8" 88         "8a,   ,a8" 88 88       88  88,    
+# 88        88  `"Ybbd8"' 88 88`YbbdP"'  88          `"YbbdP"'  88 88       88  "Y888  
+#                            88                                                        
+#                            88                                                        
+
+class HelpPoint:
+    def __init__(self, pos: tuple[int, int], comments: list[str]):
+        self.x, self.y = pos[0], pos[1]
+        self.comments = comments
 
 #                                                                                                     
 #   ,ad8888ba,  88                                                                                    
@@ -1770,7 +1753,7 @@ class Player(Character):
         self.address_to_fname = {}
         self.address_to_size = {}
         self.func = None
-        
+        self.helps_aquired: list[tuple[int, int]] = []
         self.fp = open(PATH, mode='w')
 
     def update(self, mymap: Map):
@@ -1901,11 +1884,17 @@ class Player(Character):
                     nextx = self.x + 1
                 elif self.direction == UP:
                     nexty = self.y - 1
+                if event is None and (len(mymap.helps) and (self.x, self.y) in mymap.helps) and not MSGWND.is_visible:
+                    MSGWND.set(mymap.helps[(self.x, self.y)], (None, 'help'))
+                    self.helps_aquired.append((self.x, self.y))
+                    mymap.helps.pop((self.x, self.y))
+
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
                     self.funcInfoWindow_list.append(chara.funcInfoWindow)
                 elif isinstance(chara, CharaExpression) and str(self.sender.code_window.linenum) in chara.funcInfoWindow_dict:
                     self.funcInfoWindow_list.append(chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)])
+
 
             if self.moving and self.ccchara:
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
@@ -1918,6 +1907,7 @@ class Player(Character):
                             if isinstance(door, SmallDoor):
                                 door.close()
                                 self.door = None
+        
         if self.speed != 8:
             self.speed = 8
             self.status["AGI"] = 8
@@ -2160,7 +2150,10 @@ class Player(Character):
                                         for skippedFunc in CCCharacterResult["skippedFunc"]:
                                             self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                                     if CCCharacterResult['status'] == "ng":
-                                        MSGWND.set(CCCharacterResult['message'])
+                                        if mymap.name == "tutorial":
+                                            MSGWND.set("条件が間違ったキャラクターに話しかけると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!")
+                                        else:
+                                            MSGWND.set(CCCharacterResult['message'])
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
@@ -2243,9 +2236,12 @@ class Player(Character):
                 if returnResult.get('skipReturn', False):
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
+                    print(mymap.name)
+                    if mymap.name == "tutorial":
+                        returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば右下のポーズ画面を開いて確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります!!)\fでは、C言語ダンジョンを楽しんでください!!"
+                        print(returnResult['message'])
                     MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
                     self.fp.write("finished\n")
-                    MSGWND.set(chara.message)
                 return
         MSGWND.set(returnResult['message'])
     
@@ -2602,7 +2598,6 @@ class MessageWindow(Window):
                 else:
                     self.text += ch
                     p += 1
-            # self.text += "$"  # 終端文字
             self.show()
 
     def update(self):
@@ -2679,7 +2674,10 @@ class MessageWindow(Window):
         """メッセージを先に進める"""
         if (self.msgwincount > self.MSGWAIT and not (self.selectMsgText is not None and self.hide_flag)) or force_next:
             # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
-            if self.selectMsgText and self.hide_flag and self.sender is not None:
+            if self.select_type == 'help':
+                if not force_next:
+                    return
+            elif self.selectMsgText and self.hide_flag and self.sender is not None:
                 if self.select_type == 'loop_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         startLine = self.sender.code_window.linenum
@@ -2980,6 +2978,7 @@ class MessageWindow(Window):
                         MSGWND.set("巻き戻しを取り止めました")
                 elif self.select_type == 'finished':
                     PLAYER.goaled = True
+                
                 self.selectMsgText = None
                 self.select_type = None
                 self.msgwincount = 0
@@ -4430,6 +4429,7 @@ class StageButtonWindow:
         self.surface.fill((185, 148, 39))
         self.is_visible = False  # ウィンドウを表示中か？
         self.button_stages: list[StageButton] = []
+        self.tutorial_button_rect = pygame.Rect(self.rect.width - 330, 10, 100, 30)
         self.color_support_button_rect = pygame.Rect(self.rect.width - 220, 10, 100, 30)
         self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
         self.scrollX = 0
@@ -4466,6 +4466,12 @@ class StageButtonWindow:
             for button in self.button_stages:
                 button.draw(screen)
 
+            # チュートリアルボタン
+            pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
+            tutorial_label_surf, _ = self.mini_button_font.render("チュートリアル", (0, 0, 0))
+            tutorial_label_rect = tutorial_label_surf.get_rect(center=self.tutorial_button_rect.center)
+            screen.blit(tutorial_label_surf, tutorial_label_rect)
+
             # 色覚サポートのあり/なしボタン
             pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
             color_support_label_surf, _ = self.mini_button_font.render("色覚サポートあり" if self.color_support else "色覚サポートなし", (0, 0, 0) if self.color_support else (255, 255, 255))
@@ -4483,6 +4489,8 @@ class StageButtonWindow:
         for i, button in enumerate(self.button_stages):
             if button.rect.collidepoint(pos):
                 return i
+        if self.tutorial_button_rect.collidepoint(pos):
+            return 'tutorial'
         if self.color_support_button_rect.collidepoint(pos):
             return 'color support'
         if self.checking_lldb_button_rect.collidepoint(pos):
@@ -4906,7 +4914,7 @@ class CodeWindow(Window):
         digit_line = len(str(len(self.lines)))
         for i, line in enumerate(self.lines):
             # 自動調整onの時は現在の行の3行前から表示するようにする
-            if self.is_auto_scroll and i < self.linenum - 3:
+            if (self.is_auto_scroll and self.rollback_index is None) and i < self.linenum - 3:
                 continue
             if y_offset > self.maxY:
                 break
@@ -4944,11 +4952,20 @@ class CodeWindow(Window):
         else:
             return False
         
+    def set_rollback_mode(self):
+        self.rollback_index = len(self.history) - 1
+        self.is_auto_scroll = True
+        self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
+        self.scrollX = 0
+
     def selectRollBackLine(self, dir: int):
         if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
             return
         
         self.rollback_index += dir
+
+        if self.is_auto_scroll:
+            self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
 
 # 88888888888                                        ad88888ba                                  88                        
 # 88                                          ,d    d8"     "8b                                 88                        
@@ -5010,7 +5027,7 @@ class EventSender:
                         msg["message"] += '\fプレイヤーに10ダメージ !!'
                     return msg
                 if msg["status"] == "rollback":
-                    self.code_window.rollback_index = len(self.code_window.history) - 1
+                    self.code_window.set_rollback_mode()
                     MSGWND.set("右上のコードウィンドウの水色の行の処理直前まで巻き戻しますか?", (['はい', 'いいえ'], 'rollback'))
                     return msg
                 if msg["status"] == "rollbackFalse":
@@ -5028,7 +5045,6 @@ class EventSender:
                         var_list.append(var_dict)
                     
                     self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
-
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])
                 if "removed" in msg:
