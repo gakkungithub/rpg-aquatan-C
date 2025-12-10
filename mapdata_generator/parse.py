@@ -244,7 +244,7 @@ class ASTtoFlowChart:
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
             nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
-            if i != 0 and f'"{nextNodeID}"' in self.varNode_info and f'"{nodeID}"' in self.varNode_info:
+            if i != 0 and f'"{nodeID}"' in self.varNode_info:
                 self.createRoomSizeEstimate(nextNodeID)
             nodeID = nextNodeID
             edgeName = ""
@@ -904,7 +904,7 @@ class ASTtoFlowChart:
                 if len(array_children) != 2:
                     sys.exit(-9)
                 index_exp_terms_list.append(f"[{self.parse_exp_term(array_children[1], var_references, func_references, calc_order_comments)}]")
-                if array_children[0].kind == ci.CursorKind.DECL_REF_EXPR:
+                if array_children[0].kind in (ci.CursorKind.DECL_REF_EXPR, ci.CursorKind.MEMBER_REF_EXPR):
                     name_spell = array_children[0].spelling
                     break
                 if array_children[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:

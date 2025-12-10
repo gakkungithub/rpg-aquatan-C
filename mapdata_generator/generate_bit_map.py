@@ -1153,6 +1153,10 @@ class GenBitMap:
             return
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
         elif self.getNodeShape(nodeID) == 'rect':
+            self.createRoom(nodeID, crntRoomID)
+            if nodeID in self.mapInfo.room_info:
+                self.createPath(crntRoomID, nodeID, {})
+                crntRoomID = nodeID
             self.mapInfo.addExpressionToCharaExpression(crntRoomID, self.getExpNodeInfo(nodeID), nodeID, self.func_name)
 
         for toNodeID, edgeLabel in self.getNextNodeInfo(nodeID):
