@@ -4410,13 +4410,13 @@ class ItemBag:
 
 class StageButtonWindow:
     """ステージセレクトボタンウィンドウ"""
-    code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
-                  "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer", "18_stdio_input_output", "19_file_io", "20_memory_management"]
-    code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文", "関数宣言と定義", "条件文の中に関数", "一次元配列", "二次元配列", "文字列と文字配列",
-                         "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列とポインタの組合せ", "関数の引数にポインタ", "標準入出力", "ファイルの入出力", "メモリ管理"]
-    
-    # code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文\n(while, do while, for)", "関数宣言と定義", "条件文に関数が\n含まれる場合", "一次元配列", "二次元配列", "文字列と文字配列",
-    #                      "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列のポインタと\nポインタの配列", "関数の引数にポインタ", "標準入出力\n(scanf, printf)", "ファイルの入出力", "メモリ管理"]
+    # code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
+    #               "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer", "18_stdio_input_output", "19_file_io", "20_memory_management"]
+    # code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文", "関数宣言と定義", "条件文の中に関数", "一次元配列", "二次元配列", "文字列と文字配列",
+    #                      "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列とポインタの組合せ", "関数の引数にポインタ", "標準入出力", "ファイルの入出力", "メモリ管理"]
+    code_names = ["101_variables_expression", "102_functions_condition", "103_loops", "104_array_struct", "105_pointer"]
+    code_explanations = ["変数の宣言と計算", "条件文と関数", "繰り返し文", "配列と構造体", "ポインタ"]
+
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
@@ -4432,6 +4432,7 @@ class StageButtonWindow:
         self.tutorial_button_rect = pygame.Rect(self.rect.width - 330, 10, 100, 30)
         self.color_support_button_rect = pygame.Rect(self.rect.width - 220, 10, 100, 30)
         self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
+        self.bg_image = load_image("data", "c_background.png", -1)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
         self.load_sb()
@@ -4462,6 +4463,8 @@ class StageButtonWindow:
     def draw(self, screen: pygame.Surface):
         if self.is_visible:
             self.blit(screen)
+
+            screen.blit(self.bg_image, (0, 0))
             self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択" if self.stage_selecting else "lldb　処理チェック", self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
@@ -4555,9 +4558,9 @@ class StageButtonWindow:
 
 class StageButton:
     """ボタン"""
-    BG_COLOR = (0, 0, 255)
-    WHITE = (255, 255, 255)
-    BLACK = (255, 255, 0)
+    BG_COLOR = (0, 255, 255)
+    STAGE_NAME_COLOR = (0, 0, 0)
+    STAGE_EXPLANTION_COLOR = (0, 31, 63)
 
     def __init__(self, code_name, code_explanation, stage_num, pos_x, pos_y, button_w, button_h):
         self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
@@ -4569,11 +4572,11 @@ class StageButton:
     
     def draw(self, surface: pygame.Surface):
         pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
-        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.WHITE)
+        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.STAGE_NAME_COLOR)
         text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
         self.surface.blit(text_surf, text_rect)
         self.font.size = 12
-        explanation_surf, _ = self.font.render(self.code_explanation, self.BLACK)
+        explanation_surf, _ = self.font.render(self.code_explanation, self.STAGE_EXPLANTION_COLOR)
         explanation_rect = explanation_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2 + 30))
         self.surface.blit(explanation_surf, explanation_rect)
         self.font.size = 24
