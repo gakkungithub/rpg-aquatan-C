@@ -3751,11 +3751,12 @@ class MoveEvent():
 
 class Detail:
     CYAN = Color(100, 248, 248, 255)
-    RED = Color(255, 0, 0, 255)
+    HOVER_TEXT_COLOR = Color(255, 255, 255, 255)
+    HOVER_BG_COLOR = Color(255, 0, 0, 255)
     WHITE = Color(255, 255, 255, 255)
 
     def __init__(self, detail: dict, font: pygame.freetype.Font):
-        self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
+        self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect, pygame.Rect]] = []
         self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
         self.hoverComment_list = detail["hover"]
 
@@ -3774,10 +3775,16 @@ class Detail:
 
                 # 条件リンクを描画（最後以外）
                 if j < len(parts) - 1:
-                    cond_surf, _ = font.render("計算式" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件", self.RED)
-                    cond_rect = cond_surf.get_rect(topleft=(x, y))
-                    self.hoverLink_info_list.append((cond_surf, cond_rect))
-                    x = cond_rect.right
+                    cond_surf, _ = font.render("計算式 ▼" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件 ▼", self.HOVER_TEXT_COLOR)
+                    text_rect = cond_surf.get_rect(topleft=(x+6, y))
+                    outer_rect = pygame.Rect(
+                        x+2,
+                        y-2,
+                        text_rect.width + 8,
+                        text_rect.height + 4
+                    )
+                    self.hoverLink_info_list.append((cond_surf, text_rect, outer_rect))
+                    x = outer_rect.right + 2
 
             y = base_rect.bottom + 4
             # 最後の要素でなければ「かつ」を追加して改行
@@ -3814,6 +3821,8 @@ class Detail:
         for baseComment_info in self.baseComment_info_list:
             surface.blit(baseComment_info[0], baseComment_info[1])
         for hoverLink_info in self.hoverLink_info_list:
+            pygame.draw.rect(surface, self.HOVER_BG_COLOR, hoverLink_info[2], border_radius=10)
+            pygame.draw.rect(surface, self.HOVER_TEXT_COLOR, hoverLink_info[2], width=2, border_radius=10)
             surface.blit(hoverLink_info[0], hoverLink_info[1])
 
 # 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
