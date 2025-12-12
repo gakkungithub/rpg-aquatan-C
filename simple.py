@@ -248,9 +248,12 @@ def main():
             print(f"subprocess failed with exit code {e.returncode}")
             sys.exit(1)   # 呼び出し元プログラムを終了
 
+        entry_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "stage_entry.wav"))
+        entry_sound.play()
+        pause_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_open.wav"))
+        pause_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_close.wav"))
         # サーバを立てる
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
-
         # endregion
 
         # region マップの初期設定
@@ -513,6 +516,7 @@ def main():
                     end_timer()
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
+                        pause_open_sound.play()
                         PAUSEWND.show()
                         while PAUSEWND.is_visible:
                             PAUSEWND.draw(screen)
@@ -529,8 +533,10 @@ def main():
                                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
                                     local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
                                     if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
+                                        pause_close_sound.play()
                                         PAUSEWND.hide()
-                                    elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):   
+                                    elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):  
+                                        pause_close_sound.play() 
                                         PAUSEWND.hide()
                                         PLAYER.goaled = True
                                     elif PAUSEWND.button_left.rect.collidepoint(local_pos):
@@ -1400,7 +1406,6 @@ class Map:
         x, y = int(data["x"]), int(data["y"])
         name = data["doorname"]
         door = Door((x, y), name)
-        door.close()
         self.events.append(door)
 
     def create_smalldoor_j(self, data):
@@ -1409,7 +1414,6 @@ class Map:
         name = data["doorname"]
         direction = data["dir"]
         door = SmallDoor((x, y), name, direction)
-        door.close()
         self.events.append(door)
 
     def create_obj_j(self, data):
@@ -1724,8 +1728,10 @@ class Character:
 
 class Player(Character):
     """プレイヤークラス"""
+    FONT_SIZE = 12
     def __init__(self, name, pos, direction, sender: "EventSender"):
         Character.__init__(self, name, pos, direction, False, None)
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.prevPos = [pos, pos]
         self.damage_motion: list[int] = []
         self.dest = {}
@@ -1754,18 +1760,25 @@ class Player(Character):
         self.address_to_size = {}
         self.func = None
         self.helps_aquired: list[tuple[int, int]] = []
+        self.isFootActionValid = False
+        self.isFowardActionValid = False
         self.fp = open(PATH, mode='w')
+        self.walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "walk.wav"))
+        self.goal_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "goal.wav"))
 
     def update(self, mymap: Map):
         """プレイヤー状態を更新する。
         mapは移動可能かの判定に必要。"""
         self.funcInfoWindow_list = []
+        self.isFootActionValid = False
+        self.isFowardActionValid = False
         # プレイヤーの移動処理
         if self.moving:
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
             self.rect.move_ip(self.vx, self.vy)
             if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
-                ##self.fp.write( str(self.x)+", " + str(self.y) + "\n")
+                self.walk_sound.play()
+                # self.fp.write( str(self.x)+", " + str(self.y) + "\n")
                 self.moving = False
                 self.x = self.rect.left // GS
                 self.y = self.rect.top // GS
@@ -1825,10 +1838,8 @@ class Player(Character):
 
             if pressed_keys and (pressed_keys[K_LSHIFT] or pressed_keys[K_RSHIFT]):
                 self.speed = 16
-                self.status["AGI"] = 16
             else:
                 self.speed = 8
-                self.status["AGI"] = 8
 
             if direction == 'd' or (pressed_keys and pressed_keys[K_DOWN]):
                 self.direction = DOWN  # 移動できるかに関係なく向きは変える
@@ -1875,14 +1886,18 @@ class Player(Character):
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent) or isinstance(event, Treasure):
                     self.funcInfoWindow_list.append(event.funcInfoWindow)
-                nextx, nexty = self.x, self.y
+                    self.isFootActionValid = True
                 if self.direction == DOWN:
+                    nextx = self.x
                     nexty = self.y + 1
                 elif self.direction == LEFT:
                     nextx = self.x - 1
+                    nexty = self.y
                 elif self.direction == RIGHT:
                     nextx = self.x + 1
-                elif self.direction == UP:
+                    nexty = self.y
+                else:
+                    nextx = self.x
                     nexty = self.y - 1
                 if event is None and (len(mymap.helps) and (self.x, self.y) in mymap.helps) and not MSGWND.is_visible:
                     MSGWND.set(mymap.helps[(self.x, self.y)], (None, 'help'))
@@ -1892,9 +1907,13 @@ class Player(Character):
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
                     self.funcInfoWindow_list.append(chara.funcInfoWindow)
+                    self.isFowardActionValid = True
                 elif isinstance(chara, CharaExpression) and str(self.sender.code_window.linenum) in chara.funcInfoWindow_dict:
                     self.funcInfoWindow_list.append(chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)])
-
+                    self.isFowardActionValid = True
+                event = mymap.get_event(nextx, nexty)
+                if isinstance(event, SmallDoor) and not event.status:
+                    self.isFowardActionValid = True
 
             if self.moving and self.ccchara:
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
@@ -1910,11 +1929,30 @@ class Player(Character):
         
         if self.speed != 8:
             self.speed = 8
-            self.status["AGI"] = 8
+
         # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
         self.frame += 1
         self.image = self.images[self.name][self.direction *
                                             4+(self.frame // self.animcycle % 4)]
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        super().draw(screen, offset)
+        if self.isFootActionValid or self.isFowardActionValid:
+
+            offsetx, offsety = offset
+            px = self.rect.topright[0] + 2
+            py = self.rect.bottomright[1] + 2
+
+            if self.isFootActionValid:
+                text_surf, _ = self.font.render("fキー: 足元へのアクション", (0, 0, 0), (255, 255, 255))
+                text_rect = text_surf.get_rect(topleft=(px - offsetx, py - offsety))
+                screen.blit(text_surf, text_rect)
+                py += self.FONT_SIZE + 4
+
+            if self.isFowardActionValid:
+                text_surf, _ = self.font.render("spaceキー: 前方へのアクション", (0, 0, 0), (255, 255, 255))
+                text_rect = text_surf.get_rect(topleft=(px - offsetx, py - offsety))
+                screen.blit(text_surf, text_rect)
 
     def get_next_automove(self):
         """次の移動先を得る"""
@@ -2236,10 +2274,9 @@ class Player(Character):
                 if returnResult.get('skipReturn', False):
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
-                    print(mymap.name)
+                    self.goal_sound.play()
                     if mymap.name == "tutorial":
                         returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば右下のポーズ画面を開いて確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります!!)\fでは、C言語ダンジョンを楽しんでください!!"
-                        print(returnResult['message'])
                     MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
                     self.fp.write("finished\n")
                 return
@@ -2555,10 +2592,12 @@ class MessageWindow(Window):
         self.file_message = ""
         self.memory_message = ""
         self.str_messages = []
+        self.message_window_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "message_window.wav"))
 
     def set(self, base_message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
+            self.message_window_sound.play()
             if selectMessages is not None:
                 PLAYER.funcInfoWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
@@ -2991,6 +3030,7 @@ class MessageWindow(Window):
                     self.hide()
                 # ▼が表示されてれば次のページへ
                 if self.next_flag:
+                    self.message_window_sound.play()
                     self.cur_page += 1
                     self.cur_pos = 0
                     self.next_flag = False
@@ -3775,7 +3815,7 @@ class Detail:
 
                 # 条件リンクを描画（最後以外）
                 if j < len(parts) - 1:
-                    cond_surf, _ = font.render("計算式 ▼" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件 ▼", self.HOVER_TEXT_COLOR)
+                    cond_surf, _ = font.render("計算式 ▷" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件 ▷", self.HOVER_TEXT_COLOR)
                     text_rect = cond_surf.get_rect(topleft=(x+6, y))
                     outer_rect = pygame.Rect(
                         x+2,
@@ -4019,10 +4059,11 @@ class Treasure():
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "treasure_open.wav"))
 
     def open(self, data: dict, line: int, comments: list[str]):
         """宝箱をあける"""
-        # sounds["treasure"].play()
+        self.open_sound.play()
         # アイテムを追加する処理
         item = Item(self.item, line, data, comments, self.vartype)
         PLAYER.itembag.items[-1].append(item)
@@ -4185,8 +4226,9 @@ class SmallDoor(Door):
         self.x, self.y = pos[0], pos[1]  # ドア座標
         self.doorname = name  # ドア名
         self.direction = direction
+        self.door_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "door_open.wav"))
+        self.door_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "door_close.wav"))
         self.key = ""
-        # self.funcInfoWindow = FuncInfoWindow([], ("", "", -1), detail)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
@@ -4196,6 +4238,16 @@ class SmallDoor(Door):
         px = rect.topleft[0]
         py = rect.topleft[1]
         screen.blit(image, (px-offsetx, py-offsety))
+
+    def open(self):
+        """ドアをあける"""
+        self.door_open_sound.play()
+        self.status = 1 # open
+
+    def close(self):
+        """ドアを閉める"""
+        self.door_close_sound.play()
+        self.status = 0 # close
 
     def __str__(self):
         return f"SDOOR,{self.x},{self.y},{self.doorname}"
@@ -4997,6 +5049,7 @@ class CodeWindow(Window):
 class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
         self.code_window = code_window
+        self.incorrect_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "incorrect_action.wav"))
 
         start = time.time()
         last_error = None
@@ -5032,6 +5085,7 @@ class EventSender:
                     except json.JSONDecodeError:
                         continue  # JSONがまだ途中なら続けて読む
                 if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
+                    self.incorrect_sound.play()
                     PLAYER.status["HP"] -= 10
                     PLAYER.damage = "-10"
                     PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
