@@ -499,7 +499,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 while True:
                     if (event := self.event_reciever()) is None:
                         continue
-                    if event.get('return', None) is not None:
+                    if event.get('type', None) == 'return' and event['fromTo'][0] == self.line_number:
                         self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                         raise ProgramFinished()
                     else:
@@ -1098,6 +1098,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                             retVal = thread.GetStopReturnValue().GetValue()
                                             self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                            if len(funcWarp) == 1:
+                                                while True:
+                                                    if (event := self.event_reciever()) is None:
+                                                        continue
+                                                    if event.get('type', None) == 'return' and event['fromTo'][0] == self.next_line_number:
+                                                        self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
+                                                        raise ProgramFinished()
+                                                    else:
+                                                        self.event_sender({"message": "returnキャラに話しかけてください!!", "status": "ng"})
                                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
                                 # スキップしない
@@ -1116,7 +1125,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             continue
                                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
-                                    
                                 line_number_track.append(self.next_line_number)
                             else:
                                 self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
@@ -1333,6 +1341,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                 else:
+                    print(event)
                     self.event_sender({"message": "異なる処理に対するアクションをしました!!", "status": "ng"})
                     return CONTINUE
 

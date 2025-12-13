@@ -2286,13 +2286,13 @@ class Player(Character):
                 return
         # mainのreturnキャラ
         else:
-            self.sender.send_event({"return": fromTo})
+            self.sender.send_event({"type": 'return', "fromTo": fromTo + [0] if len(chara.funcWarp) else fromTo, "funcWarp": chara.funcWarp, 'main': True})
             returnResult = self.sender.receive_json()
-            if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
-                for skippedFunc in returnResult["skippedFunc"]:
-                    self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
+                    if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
+                        for skippedFunc in returnResult["skippedFunc"]:
+                            self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
                     self.goal_sound.play()
