@@ -13,7 +13,8 @@ graphvizをインストールする必要があります。
 ## how to play this game
 「python simple.py」とコマンドを打つことでゲームシステムが起動します。
 タイトル画面のステージをクリックで選ぶと、そのステージが描画され、遊ぶことができます。
-![alt text](<Screenshot 2025-12-13 at 23.18.31-1.png>)
+![IMAGE ALT TEXT](README_imgs/title.png)
+![IMAGE ALT TEXT](README_imgs/title.png)
 
 青帽子のキャラクターを動かして、黒帽子のオレンジ肌のキャラクターに話しかけられたらゴールです。
 「矢印キー」で移動です。
@@ -22,6 +23,7 @@ graphvizをインストールする必要があります。
 「bキー」でアイテム(変数)一覧ウィンドウ、「mキー」でミニマップウィンドウとコードウィンドウの表示非表示を切り替えられます。
 「cキー」でコマンドラインを開け、以下のコマンドを入力できます。
 rollback: 特定の行番まで今までの処理を巻き戻すことが可能
+![IMAGE ALT TEXT](README_imgs/title.png)
 stdin s+: 標準入力 (stdin 3 4のように入力)
 up, down, right, left   : 指定の方向へ動けるならば１マス動く
 
