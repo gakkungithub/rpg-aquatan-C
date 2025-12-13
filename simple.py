@@ -1308,18 +1308,18 @@ class Map:
         if self.floor != json_data["floor"]:
             # bgm設定
             pygame.mixer.music.stop()
-            if json_data["floor"] == 31:
+            if self.name == "tutorial":
+                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "tutorial.wav"))
+            elif json_data["floor"] == 31:
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_stage_bgm.wav"))
-                pygame.mixer.music.set_volume(0.7)
-                pygame.mixer.music.play(-1)
             elif json_data["floor"] == 390:
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "brick_stage_bgm.wav"))
-                pygame.mixer.music.set_volume(0.7)
-                pygame.mixer.music.play(-1)
             elif json_data["floor"] == 43:
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_stage_bgm.wav"))
-                pygame.mixer.music.set_volume(0.7)
-                pygame.mixer.music.play(-1)
+            else: # 402 = iron
+                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "iron_stage_bgm.wav"))
+            pygame.mixer.music.set_volume(0.7)
+            pygame.mixer.music.play(-1)
         self.floor = json_data["floor"]
         self.map = json_data["map"]
         self.events = []
