@@ -76,6 +76,10 @@ tips for developing this system
 
 コード内の巨大アスキーアートは「VScode Banner Comment Generator」拡張機能で生成できます.
 拡張機能を追加した後、figletを忘れずにインストールしてください.
+
+効果音:
+otosozai.com　https://otosozai.com/ (商用でのご利用の際は、メールフォームより連絡すること。)
+OtoLogic
 =========================
 
 >>>>>>> 4a58b39d7f3c703ddffc2ef1a0809085e7d3db6c

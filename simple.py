@@ -147,6 +147,8 @@ def main():
         server = None
         
         try:
+            button_io_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "button_io.wav"))
+            scroll_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "scroll.wav"))
             while stage_name is None:
                 for event in pygame.event.get():
                     if event.type == QUIT:
@@ -165,8 +167,10 @@ def main():
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
                             if button_name == SBWND.is_clicked(event.pos) == 'color support':
+                                button_io_sound.play()
                                 SBWND.color_support = not SBWND.color_support
                             elif button_name == SBWND.is_clicked(event.pos) == 'check lldb':
+                                button_io_sound.play()
                                 if server is not None:
                                     SBWND.close()
                                     server = None
@@ -195,6 +199,8 @@ def main():
                                     subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
                                     SBWND.start_checking_lldb()
+                            elif scroll_start == True:
+                                scroll_sound.play()
                             mouse_down = False
                             scroll_start = False
                     if mouse_down and event.type == pygame.MOUSEMOTION:
