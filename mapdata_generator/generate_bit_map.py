@@ -266,11 +266,12 @@ class MapInfo:
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
         defaultMapChips = [503, 343, 160, 32]
-        floorMap = np.where(floorMap == 0, random.choice([390, 43, 402, 31]), floorMap) 
+        floorMapChip = random.choice([390, 43, 402, 31])
+        floorMap = np.where(floorMap == 0, floorMapChip, floorMap) 
         # 390 = gray thick brick, 43 = grass floor, 402 = gray thin iron brick, or 31 = dungeon_floor
 
         self.writeMapIni(pname, self.player_init_local_pos, gvar_str)
-        self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type])
+        self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type], floorMapChip)
         self.writeLineFile(pname, line_info)
 
         plt.imshow(floorMap, cmap='gray', interpolation='nearest')
@@ -349,7 +350,7 @@ class MapInfo:
 
         return func_warp, converted_fromTo
 
-    def writeMapJson(self, pname, bitMap, isUniversal, defaultMapChip=503):
+    def writeMapJson(self, pname: str, bitMap, isUniversal: bool, defaultMapChip: int, floorMapChip: int):
         events = []
         characters = []
         vardecl_lines: dict[int, list[str]] = {}
@@ -429,7 +430,7 @@ class MapInfo:
                     for i, v in enumerate(obj):
                         find_numpy_int(v, f"{path}[{i}]")
 
-            fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
+            fileContent = {"row": bitMap.shape[0], "col": bitMap.shape[1], "default": defaultMapChip, "floor": floorMapChip, "map": bitMap.astype(int).tolist(), "characters": characters, "events": events}
             find_numpy_int(fileContent)
             json.dump(fileContent, f) 
 

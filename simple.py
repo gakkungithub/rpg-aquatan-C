@@ -822,6 +822,7 @@ def main():
             MSGWND.next(fieldmap)
             pygame.display.flip()
 
+        pygame.mixer.music.stop()
         server.terminate()
 
 #                                                                                                                                                                                         
@@ -1170,6 +1171,7 @@ class Map:
         self.events = []  # マップにあるイベントリスト
         self.helps: dict[tuple[int, int], str] = {}
         self.lights = []  # マップにある光源リスト
+        self.floor: int = 0
         self.load_json()
 
     def create(self, dest_map):
@@ -1303,6 +1305,22 @@ class Map:
         self.row = json_data["row"]
         self.col = json_data["col"]
         self.default = json_data["default"]
+        if self.floor != json_data["floor"]:
+            # bgm設定
+            pygame.mixer.music.stop()
+            if json_data["floor"] == 31:
+                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_stage_bgm.wav"))
+                pygame.mixer.music.set_volume(0.7)
+                pygame.mixer.music.play(-1)
+            elif json_data["floor"] == 390:
+                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "brick_stage_bgm.wav"))
+                pygame.mixer.music.set_volume(0.7)
+                pygame.mixer.music.play(-1)
+            elif json_data["floor"] == 43:
+                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_stage_bgm.wav"))
+                pygame.mixer.music.set_volume(0.7)
+                pygame.mixer.music.play(-1)
+        self.floor = json_data["floor"]
         self.map = json_data["map"]
         self.events = []
         self.charas = []
