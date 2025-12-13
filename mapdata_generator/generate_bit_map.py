@@ -267,7 +267,7 @@ class MapInfo:
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
         defaultMapChips = [503, 343, 160, 32]
         floorMap = np.where(floorMap == 0, random.choice([390, 43, 402, 31]), floorMap) 
-        # 390 = gray thick brick, 43 = grass floor, 402 = gray thin brick, or 31 = dungeon_floor
+        # 390 = gray thick brick, 43 = grass floor, 402 = gray thin iron brick, or 31 = dungeon_floor
 
         self.writeMapIni(pname, self.player_init_local_pos, gvar_str)
         self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type])
@@ -611,7 +611,7 @@ class GenBitMap:
             num_to_modify = len(ones_idx) // 50
             selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
 
-            # まず全体を100に置き換え
+            # まず全体を160に置き換え
             self.floorMap = np.where(self.floorMap == 1, 160, self.floorMap)
 
             # 選ばれた一部に花タイルを設置する
@@ -625,7 +625,7 @@ class GenBitMap:
             num_to_modify = len(ones_idx) // 50
             selected_idx = ones_idx[np.random.choice(len(ones_idx), num_to_modify, replace=False)]
 
-            # まず全体を32に置き換え
+            # まず全体を343に置き換え
             self.floorMap = np.where(self.floorMap == 1, 343, self.floorMap)
 
             # 選ばれた一部に694(反転色タイル)を代入

@@ -1764,6 +1764,11 @@ class Player(Character):
         self.isFowardActionValid = False
         self.fp = open(PATH, mode='w')
         self.walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "walk.wav"))
+        self.walk_sound.set_volume(0.2)
+        self.grass_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_walk.wav"))
+        self.sand_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_walk.wav"))
+        self.iron_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "iron_walk.wav"))
+        self.steel_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "steel_walk.wav"))
         self.goal_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "goal.wav"))
 
     def update(self, mymap: Map):
@@ -1777,11 +1782,21 @@ class Player(Character):
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
             self.rect.move_ip(self.vx, self.vy)
             if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
-                self.walk_sound.play()
                 # self.fp.write( str(self.x)+", " + str(self.y) + "\n")
                 self.moving = False
                 self.x = self.rect.left // GS
                 self.y = self.rect.top // GS
+
+                if mymap.map[self.y][self.x] == 43:
+                    self.grass_walk_sound.play()
+                elif mymap.map[self.y][self.x] == 31:
+                    self.sand_walk_sound.play()
+                elif mymap.map[self.y][self.x] == 402:
+                    self.iron_walk_sound.play()
+                elif mymap.map[self.y][self.x] == 390:
+                    self.steel_walk_sound.play()
+                else:
+                    self.walk_sound.play()
 
                 if (self.door and 
                     ((self.door["direction"] == DOWN and (self.door["x"], self.door["y"]-1) == (self.x, self.y)) or (self.door["direction"] == UP and (self.door["x"], self.door["y"]+1) == (self.x, self.y)) or
@@ -2421,6 +2436,7 @@ class DimWindow:
         self.is_visible = False  # ウィンドウを表示中か？
         self.df = 0
         self.target_df = 0
+        self.warp_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "warp.wav"))
 
     def dim(self):
         """ウィンドウを描画"""
@@ -2441,6 +2457,7 @@ class DimWindow:
 
     def show(self):
         """ウィンドウを表示"""
+        self.warp_sound.play()
         self.is_visible = True
 
     def hide(self):
