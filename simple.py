@@ -547,8 +547,10 @@ def main():
                                         PLAYER.goaled = True
                                     elif PAUSEWND.button_left.rect.collidepoint(local_pos):
                                         PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
+                                        scroll_sound.play()
                                     elif PAUSEWND.button_right.rect.collidepoint(local_pos):
                                         PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index + 1) % len(PAUSEWND.guide_images_list)
+                                        scroll_sound.play()
                             offset = calc_offset(PLAYER)
                             fieldmap.draw(screen, offset)
                 if mouse_down:
@@ -656,8 +658,7 @@ def main():
                             if move["return"]:
                                 PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
                             # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
+                            DIMWND.show(200, 'warp')
                             fieldmap.create(move['mapname'])  # 移動先のマップで再構成
                             PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
                             PLAYER.commonItembag.items[-1] = move['cItems']
@@ -670,8 +671,7 @@ def main():
                         try:
                             move = PLAYER.moveHistory.pop()
                             # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
+                            DIMWND.show(200, 'warp')
                             fieldmap.create(move['mapname'])  # 移動先のマップで再構成
                             PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
                             fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -686,8 +686,7 @@ def main():
                         dest_y = int(config.get("game", "player_y"))
                         dest_map =  str(config.get("game", "map"))
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'warp')
                         fieldmap.create(dest_map)
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -709,8 +708,7 @@ def main():
                         dest_x = int(parts[0])
                         dest_y = int(parts[1])
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'warp')
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         cmd = "\0"
@@ -1839,8 +1837,7 @@ class Player(Character):
             dest_y = self.waitingMove.dest_y
             self.waitingMove = None
             # 暗転
-            DIMWND.setdf(200)
-            DIMWND.show()
+            DIMWND.show(200, 'warp')
             mymap.create(dest_map)  # 移動先のマップで再構成
             self.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
             mymap.add_chara(self)  # マップに再登録
@@ -2071,8 +2068,7 @@ class Player(Character):
                                 PLAYER.move5History.pop(0)
                             # endregion
                             # 暗転
-                            DIMWND.setdf(200)
-                            DIMWND.show()
+                            DIMWND.show(200, 'warp')
                             mymap.create(dest_map)  # 移動先のマップで再構成
                             PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                             mymap.add_chara(PLAYER)  # マップに再登録
@@ -2088,8 +2084,7 @@ class Player(Character):
                     if len(PLAYER.move5History) > 5:
                         PLAYER.move5History.pop(0)
                     # 暗転
-                    DIMWND.setdf(200)
-                    DIMWND.show()
+                    DIMWND.show(200, 'warp')
                     mymap.create(dest_map)  # 移動先のマップで再構成
                     PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                     mymap.add_chara(PLAYER)  # マップに再登録
@@ -2460,7 +2455,10 @@ class DimWindow:
         self.is_visible = False  # ウィンドウを表示中か？
         self.df = 0
         self.target_df = 0
+        self.sound_type = None
         self.warp_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "warp.wav"))
+        self.skip_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "skip.wav"))
+        self.rollback_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "rollback.wav"))
 
     def dim(self):
         """ウィンドウを描画"""
@@ -2471,17 +2469,24 @@ class DimWindow:
         else:
             self.target_df = 0
             self.df = 0
+            if self.sound_type in ('skip', 'rollback'):
+                pygame.mixer.music.unpause()
             self.hide()
         self.surface.fill(Color(0, 0, 0, self.df))
         self.screen.blit(self.surface, (self.x, self.y))
 
-    def setdf(self, df):
-        """薄暗さの設定"""
+    def show(self, df: int, sound_type: str | None = None):
+        """薄暗さを設定してウィンドウを表示"""
         self.target_df = df
-
-    def show(self):
-        """ウィンドウを表示"""
-        self.warp_sound.play()
+        if sound_type == 'warp':
+            self.warp_sound.play()
+        elif sound_type == 'skip':
+            pygame.mixer.music.pause()
+            self.skip_sound.play()
+        elif sound_type == 'rollback':
+            pygame.mixer.music.pause()
+            self.rollback_sound.play()
+        self.sound_type = sound_type
         self.is_visible = True
 
     def hide(self):
@@ -2768,8 +2773,7 @@ class MessageWindow(Window):
                             for event in fieldmap.events:
                                 if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
                                     # 暗転
-                                    DIMWND.setdf(200)
-                                    DIMWND.show()
+                                    DIMWND.show(200, 'skip')
                                     fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                                     PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
                                     fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -2808,8 +2812,7 @@ class MessageWindow(Window):
                             else:
                                 PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'skip')
                         fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                         PLAYER.set_pos(PLAYER.x, PLAYER.y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -2846,8 +2849,7 @@ class MessageWindow(Window):
                                     arg_index += 1
                             PLAYER.itembag.items.append(newItems)
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200)
                         fieldmap.create(dest_map)  # 移動先のマップで再構成
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -2855,6 +2857,7 @@ class MessageWindow(Window):
                 elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"skip": True})
+                        DIMWND.show(200, 'skip')
                         skipResult = self.sender.receive_json()
                         self.set(skipResult['message'])
                         PLAYER.remove_itemvalue()
@@ -2966,8 +2969,7 @@ class MessageWindow(Window):
                         PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
                         
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'warp')
                         fieldmap.create(dest_map)  # 移動先のマップで再構成
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -2975,14 +2977,11 @@ class MessageWindow(Window):
                 elif self.select_type == 'rollback':
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
-                        
                         rollbackResult = self.sender.receive_json()
-
                         player_history = self.sender.code_window.history[self.sender.code_window.rollback_index]
                         self.sender.code_window.linenum = player_history[1]
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'rollback')
                         PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
                         PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
                         PLAYER.dest = {}
@@ -3031,8 +3030,7 @@ class MessageWindow(Window):
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         player_history = self.sender.code_window.history[0]
                         # 暗転
-                        DIMWND.setdf(200)
-                        DIMWND.show()
+                        DIMWND.show(200, 'rollback')
                         PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
                         PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
                         PLAYER.dest = {}
