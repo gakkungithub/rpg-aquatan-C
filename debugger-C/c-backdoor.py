@@ -388,7 +388,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.str_check_num = {}
             self.str_info_to_send = []
             self.skipped_lines = []
-            self.crnt_oneline = None
             self.events_history: list[dict] = []
 
         def set_process_and_thread(self, process: lldb.SBProcess, thread: lldb.SBThread, rollback_index: int | None) -> None:
@@ -787,6 +786,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             values_changed.append(varname)
                                     # その後、varsChangedをキーとしてvars_changedの変更値を取得する
                                     value_changed_dict = self.get_new_values(values_changed)
+                                    # 変数が初期化されない時、スキップされるので、それも読み取る
+                                    vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
+
+                                    self.skipped_lines = [
+                                        line
+                                        for line in self.varsDeclLines_list
+                                        if (self.line_number < int(line) < self.next_line_number)
+                                        and {
+                                            (var, int(line))
+                                            for var in self.varsDeclLines_list[line]
+                                            if (var, int(line)) not in vars_declared
+                                        }
+                                    ]
                                     self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
@@ -853,32 +865,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 if len(values_changed) != 0:
                     if self.line_number in self.line_data[self.func_name]["lines"]:
                         self.vars_tracker.vars_changed = {var: self.vars_tracker.vars_changed[var] for var in values_changed}
-                    else:
-                        vars_event = []
-                        errorCnt = 0
-                        while True:
-                            if (event := self.event_reciever()) is None:
-                                continue
-                            if event.get('itemsetall', False):
-                                value_changed_dict = self.get_new_values(values_changed)
-                                self.event_sender({"message": "新しいアイテムの値を設定しました!!", "status": "ok", "values": value_changed_dict})
-                                break
-                            errorCnt += 1
-                            self.event_sender({"message": "異なる行動をしようとしています2!!", "status": "ng"})
+                        # 変数が初期化されない時、スキップされるので、それも読み取る
+                        vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
 
-            # 変数が初期化されない時、スキップされるので、それも読み取る
-            vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
-
-            self.skipped_lines = [
-                line
-                for line in self.varsDeclLines_list
-                if (self.line_number < int(line) < self.next_line_number)
-                and {
-                    (var, int(line))
-                    for var in self.varsDeclLines_list[line]
-                    if (var, int(line)) not in vars_declared
-                }
-            ]
+                        self.skipped_lines = [
+                            line
+                            for line in self.varsDeclLines_list
+                            if (self.line_number < int(line) < self.next_line_number)
+                            and {
+                                (var, int(line))
+                                for var in self.varsDeclLines_list[line]
+                                if (var, int(line)) not in vars_declared
+                            }
+                        ]
 
         def analyze_frame(self, backToLine: int = None) -> int: # Literal[PROGRESS, CONTINUE]
             def check_condition(condition_type: str, fromTo: list[int], funcWarp: list[dict]) -> None:
@@ -927,7 +926,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         # 条件文での値の変化はここで一括で取得する
-                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))}, not (condition_type == "exp" and self.line_number in self.line_data[self.func_name]["onelines"]))
+                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                         self.vars_tracker.trackStart(self.frame)
                         self.vars_checker(condition_type == 'forFalse')
                         if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
@@ -1174,11 +1173,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if len(fromTo) >= 2:
                         if fromTo[:2] == [self.line_number, self.next_line_number]:
                             if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
-                                if type == "exp" and self.line_number in self.line_data[self.func_name]["onelines"]:
-                                    if self.crnt_oneline == self.line_number:
-                                        self.event_sender({"message": "計算式ではありません", "status": "ng"})
-                                        return CONTINUE
-                                    self.crnt_oneline = self.line_number
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse', 'forFalse', 'doWhileFalse']:
@@ -1194,14 +1188,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "", "status": "ok"})
                                 self.vars_tracker.trackStart(self.frame)
                                 self.vars_checker()
-                            elif type == 'ifEnd':
-                                if self.line_number in self.line_data[self.func_name]["onelines"]:
-                                    if self.line_number == self.crnt_oneline:
-                                        self.crnt_oneline = None
-                                    else:
-                                        self.event_sender({"message": "ここはif文の終点ではありません\n(最終行の計算式が完了していません)", "status": "ng"})
-                                        return CONTINUE
-                                self.event_sender({"message": "", "status": "ok"})
                             elif type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'continue':
@@ -1210,16 +1196,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     skipStart = self.next_line_number
                                     skipEnd = self.line_data[self.func_name]["loops"][str(self.next_line_number)]
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while or for", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
+                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "type": "while or for", "finalLine": self.line_number})
                                         return CONTINUE
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "while or for"})
                                 # type == do_whileの場合
                                 else:
                                     # まずは条件文に行って次がTrueかFalseかを見る
@@ -1229,17 +1215,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         skipStart = self.line_number
                                         skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                         # ここでスキップするかどうかを確認する
-                                        self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True})
+                                        self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= self.next_line_number <= skipEnd:
                                                 # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                                 self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
+                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                         else:
-                                            self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"})
+                                            self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "doWhile"})
                                     else:
-                                        self.event_sender({"message": "", "status": "ok"})
+                                        self.event_sender({"message": "", "type": "doWhile", "status": "ok"})
                                     return CONTINUE
                             elif type == 'break':
                                 # self.event_sender({"message": "", "status": "ok"})
@@ -1267,7 +1253,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True}, False)
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
@@ -1275,18 +1261,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             self.step_conditionally()
                                         self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"}, False)
+                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "while"}, False)
                                 else:
-                                    self.event_sender({"message": "", "status": "ok"})
+                                    self.event_sender({"message": "", "status": "ok", "type": "while"})
                             else:
-                                self.event_sender({"message": "", "status": "ok"}, False)
+                                self.event_sender({"message": "", "status": "ok", "type": "while"}, False)
                                 self.line_loop.append(self.line_number)
                         elif type == 'doWhileIn':
                             if len(self.line_loop) and self.line_loop[-1] == self.next_line_number:
                                 # ここでスキップするかどうを確認する
                                 skipStart = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 skipEnd = self.line_number
-                                self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True}, False)
+                                self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
                                 event = self.event_reciever()
                                 if event.get('skip', False):
                                     while skipStart <= self.next_line_number <= skipEnd:
@@ -1294,9 +1280,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         self.step_conditionally()
                                     self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
                                 else:
-                                    self.event_sender({"message": "スキップをキャンセルしました", "status": "ok"}, False)
+                                    self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "doWhile"}, False)
                             else:
-                                self.event_sender({"message": "", "status": "ok"}, False)
+                                self.event_sender({"message": "", "status": "ok", "type": "doWhile"}, False)
                         elif type == 'forIn':
                             values = self.get_new_values(self.vars_tracker.vars_changed.keys())
                             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
@@ -1304,7 +1290,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "skip": True, "values": values, "line": self.line_number}, False)
+                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         line_list: list[int] = [skipStart]
@@ -1318,19 +1304,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                                 if (event := self.event_reciever()) is None:
                                                     break
                                                 elif (fromTo := event.get('fromTo')) is None:
-                                                    self.event_sender({"message": "異なる行動をしようとしています!!for", "status": "ng"}, False)
+                                                    self.event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"}, False)
                                                 elif (type := event.get('type')) != 'forFalse':
-                                                    self.event_sender({"message": "異なる行動をしようとしています!!for", "status": "ng"}, False)
+                                                    self.event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"}, False)
                                                 if fromTo == [*line_list[-2:], self.next_line_number]:
                                                     skipped_func = []
-                                                    self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                                                    self.event_sender({"message": "", "status": "ok", "type": "for", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                                                     break
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "values": values}, False)
+                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "for", "values": values}, False)
                                 else:
-                                    self.event_sender({"message": "", "status": "ok", "values": values})
+                                    self.event_sender({"message": "", "status": "ok", "type": "for", "values": values})
                             else:
-                                self.event_sender({"message": "", "status": "ok", "values": values}, False)
+                                self.event_sender({"message": "", "status": "ok", "type": "for", "values": values}, False)
                                 self.line_loop.append(self.line_number)
                         elif type == 'switchMiddleCase':
                             self.event_sender({"message": "", "status": "ok"}, False)
@@ -1341,13 +1327,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                 else:
-                    print(event)
                     self.event_sender({"message": "異なる処理に対するアクションをしました!!", "status": "ng"})
                     return CONTINUE
 
-            if self.crnt_oneline is None:
-                self.step_conditionally()
-                self.vars_checker()
+            self.step_conditionally()
+            self.vars_checker()
 
             return PROGRESS
 
@@ -1383,7 +1367,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.str_check_num = {}
                     self.str_info_to_send = []
                     self.skipped_lines = []
-                    self.crnt_oneline = None
                     self.events_history[:] = self.events_history[:event["index"]]
                     raise RollBack()
                 else:

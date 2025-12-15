@@ -1,6 +1,7 @@
 import importlib
 import ensurepip
 import subprocess
+import shutil
 import sys
 
 def ensure_pip():
@@ -37,3 +38,16 @@ def ensure_package(package_name, import_name=None):
             sys.exit(1)
     finally:
         globals()[import_name] = importlib.import_module(import_name)
+
+def ensure_dot_for_graphviz():
+    if shutil.which("dot"):
+        return True
+
+    if not shutil.which("brew"):
+        print("❌ Homebrew が見つかりません")
+        print("▶ https://brew.sh/ を先にインストールしてください")
+        return False
+
+    print("🔧 Graphviz を brew でインストールします...")
+    subprocess.check_call(["brew", "install", "graphviz"])
+    return True

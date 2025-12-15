@@ -147,6 +147,9 @@ def main():
         server = None
         
         try:
+            pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "stage_button_window.wav"))
+            pygame.mixer.music.set_volume(0.7)
+            pygame.mixer.music.play(-1)
             button_io_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "button_io.wav"))
             scroll_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "scroll.wav"))
             while stage_name is None:
@@ -254,10 +257,12 @@ def main():
             print(f"subprocess failed with exit code {e.returncode}")
             sys.exit(1)   # 呼び出し元プログラムを終了
 
+        pygame.mixer.music.stop()
         entry_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "stage_entry.wav"))
         entry_sound.play()
         pause_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_open.wav"))
         pause_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_close.wav"))
+        game_over_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "game_over.wav"))
         # サーバを立てる
         server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
         # endregion
@@ -420,6 +425,8 @@ def main():
             clock.tick(MAX_FRAME_PER_SEC)
 
             if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
+                pygame.mixer.music.stop()
+                game_over_sound.play()
                 MSGWND.set("プレイヤーのライフが尽きました、、、\nGAME OVER !!", (['ステージ選択画面に戻る'], 'finished'))
 
             # メッセージウィンドウ表示中は更新を中止
@@ -820,6 +827,7 @@ def main():
             MSGWND.next(fieldmap)
             pygame.display.flip()
 
+        sender.hp_warning_sound.stop()
         pygame.mixer.music.stop()
         server.terminate()
 
@@ -1170,6 +1178,7 @@ class Map:
         self.helps: dict[tuple[int, int], str] = {}
         self.lights = []  # マップにある光源リスト
         self.floor: int = 0
+        self.red_overlay = pygame.Surface((SCR_WIDTH, SCR_HEIGHT), pygame.SRCALPHA)
         self.load_json()
 
     def create(self, dest_map):
@@ -1234,6 +1243,10 @@ class Map:
                 PLAYER.funcInfoWindowIndex = len(PLAYER.funcInfoWindow_list) - 1
             else:
                 PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
+
+        if PLAYER.status["HP"] <= 30:
+            self.red_overlay.fill((255, 0, 0, 110 - PLAYER.status["HP"] * 3))
+            screen.blit(self.red_overlay, (0, 0))
 
     def is_movable(self, x, y):
         """(x,y)は移動可能か？"""
@@ -1308,15 +1321,16 @@ class Map:
             pygame.mixer.music.stop()
             if self.name == "tutorial":
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "tutorial.wav"))
-            elif json_data["floor"] == 31:
+                pygame.mixer.music.set_volume(0.3)
+            elif json_data["floor"] == 31: # sand
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_stage_bgm.wav"))
-            elif json_data["floor"] == 390:
+            elif json_data["floor"] == 390: # brick
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "brick_stage_bgm.wav"))
-            elif json_data["floor"] == 43:
+            elif json_data["floor"] == 43: # grass
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_stage_bgm.wav"))
+                pygame.mixer.music.set_volume(0.3)
             else: # 402 = iron
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "iron_stage_bgm.wav"))
-            pygame.mixer.music.set_volume(0.7)
             pygame.mixer.music.play(-1)
         self.floor = json_data["floor"]
         self.map = json_data["map"]
@@ -1784,6 +1798,7 @@ class Player(Character):
         self.helps_aquired: list[tuple[int, int]] = []
         self.isFootActionValid = False
         self.isFowardActionValid = False
+        self.isLoopStatementInBefore = False
         self.fp = open(PATH, mode='w')
         self.walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "walk.wav"))
         self.walk_sound.set_volume(0.2)
@@ -2308,6 +2323,7 @@ class Player(Character):
                 if returnResult.get('skipReturn', False):
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 elif returnResult.get('finished', False):
+                    pygame.mixer.music.stop()
                     self.goal_sound.play()
                     if mymap.name == "tutorial":
                         returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば右下のポーズ画面を開いて確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります!!)\fでは、C言語ダンジョンを楽しんでください!!"
@@ -2765,6 +2781,8 @@ class MessageWindow(Window):
             elif self.selectMsgText and self.hide_flag and self.sender is not None:
                 if self.select_type == 'loop_skip':
                     if self.selectMsgText[self.selectingIndex] == "はい":
+                        # 暗転
+                        DIMWND.show(200, 'skip')
                         startLine = self.sender.code_window.linenum
                         self.sender.send_event({"skip": True})
                         skipResult = self.sender.receive_json()
@@ -2772,8 +2790,6 @@ class MessageWindow(Window):
                         if startLine != skipResult["finalLine"]:
                             for event in fieldmap.events:
                                 if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
-                                    # 暗転
-                                    DIMWND.show(200, 'skip')
                                     fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                                     PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
                                     fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -2849,7 +2865,7 @@ class MessageWindow(Window):
                                     arg_index += 1
                             PLAYER.itembag.items.append(newItems)
                         # 暗転
-                        DIMWND.show(200)
+                        DIMWND.show(200, 'warp')
                         fieldmap.create(dest_map)  # 移動先のマップで再構成
                         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                         fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -3705,6 +3721,8 @@ class CharaCheckCondition(Character):
     def draw(self, screen, offset):
         super().draw(screen, offset)
         if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+            if (('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore):
+                return
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
@@ -3811,6 +3829,8 @@ class MoveEvent():
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
         if len(self.fromTo) and self.fromTo[0] == PLAYER.sender.code_window.linenum:
+            if (('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore):
+                return
             offsetx, offsety = offset
             px = self.rect.midtop[0] - 16
             py = self.rect.topright[1] - 28
@@ -5089,6 +5109,7 @@ class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
         self.code_window = code_window
         self.incorrect_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "incorrect_action.wav"))
+        self.hp_warning_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "hp_warning.wav"))
 
         start = time.time()
         last_error = None
@@ -5130,6 +5151,10 @@ class EventSender:
                     PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
                     if "message" in msg:
                         msg["message"] += '\fプレイヤーに10ダメージ !!'
+                    if PLAYER.status["HP"] == 30:
+                        self.hp_warning_sound.play(loops=-1)
+                    elif PLAYER.status["HP"] == 0:
+                        self.hp_warning_sound.stop()
                     return msg
                 if msg["status"] == "rollback":
                     self.code_window.set_rollback_mode()
@@ -5149,7 +5174,8 @@ class EventSender:
                             var_dict[(var.name, var.line)] = var.vartype
                         var_list.append(var_dict)
                     
-                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
+                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore}))
+                    PLAYER.isLoopStatementInBefore = False
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])
                 if "removed" in msg:
@@ -5194,7 +5220,8 @@ class EventSender:
                         else:
                             MSGWND.memory_message = f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
                             # PLAYER.address_to_size.pop(memory_info["address"], None)
-
+                if "type" in msg:
+                    PLAYER.isLoopStatementInBefore = True
                 if ITEMWND:
                     ITEMWND.file_window.read_filelines()
                 return msg

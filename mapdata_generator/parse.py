@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import import_lib
 
 import_lib.ensure_package("clang", "clang.cindex")
+import_lib.ensure_dot_for_graphviz()
 import_lib.ensure_package("graphviz")
 
 import clang.cindex as ci
@@ -60,7 +61,6 @@ class LineInfo:
         self.loops = {}
         self.returns = {}
         self.void_returns = []
-        self.one_lines = set()
         self.start = 0
 
     def setLine(self, line: int):
@@ -74,9 +74,6 @@ class LineInfo:
 
     def setVoidReturn(self, line: int):
         self.void_returns.append(line)
-
-    def setOneLine(self, line: int):
-        self.one_lines.add(line)
 
     def setStart(self, line: int, not_to_set: bool = False):
         if self.start or not_to_set:
@@ -1194,7 +1191,6 @@ class ASTtoFlowChart:
                 return self.parse_comp_stmt(cursor, parentNodeID, type)
             # 混合文がない = {} で囲まれない単体文
             else:
-                self.line_info_dict[self.scanning_func].setOneLine(cursor.location.line)
                 self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line])
                 return self.parse_stmt(cursor, parentNodeID)
             
@@ -1209,7 +1205,8 @@ class ASTtoFlowChart:
 
         line_track.append(cond_cursor.location.line)
         line_track += self.expNode_info[f'"{condNodeID}"'][2]
-        self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
+        if edgeName != "False":
+            self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
 
         # --- then節の処理 ---
         then_cursor = children[1]
@@ -1229,7 +1226,6 @@ class ASTtoFlowChart:
 
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd', [end_line, next_line[0]])
         self.createEdge(then_end, trueEndNodeID)
 
         # --- else節の処理（ある場合） ---
@@ -1252,10 +1248,7 @@ class ASTtoFlowChart:
                     nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track, 'else')
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
                     end_line = in_else_cursor[-1].location.line
-                    self.condition_move[f'"{falseEndNodeID}"'] = ('ifEnd', [end_line, next_line[0]])
                     self.line_info_dict[self.scanning_func].setLine(end_line)
-                    if f'"{nodeID}"' in self.condition_move and self.condition_move[f'"{nodeID}"'][0] == 'exp':
-                        self.line_info_dict[self.scanning_func].setOneLine(end_line)
                     self.createEdge(nodeID, falseEndNodeID)
                 else:
                     nodeID = condNodeID
@@ -1416,10 +1409,11 @@ class ASTtoFlowChart:
             self.check_cursor_error(cr)
             if cr.location.offset < semi_offset[0]:
                 if cr.kind == ci.CursorKind.DECL_STMT:
-                    initNodeID = self.createNode("", 'invhouse')
+                    var_list = list(cr.get_children())
+                    initNodeID = self.createNode(len(var_list), 'invhouse')
                     varNodeID = initNodeID
                     self.createRoomSizeEstimate(varNodeID)
-                    for vcr in cr.get_children():
+                    for vcr in var_list:
                         self.check_cursor_error(vcr)
                         varNodeID = self.parse_var_decl(vcr, varNodeID, "")
                 # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する

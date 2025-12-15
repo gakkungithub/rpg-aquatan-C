@@ -268,7 +268,7 @@ class MapInfo:
         defaultMapChips = [503, 343, 160, 32]
         floorMapChip = random.choice([390, 43, 402, 31])
         floorMap = np.where(floorMap == 0, floorMapChip, floorMap) 
-        # 390 = gray thick brick, 43 = grass floor, 402 = gray thin iron brick, or 31 = dungeon_floor
+        # 390 = gray thick brick, 43 = grass floor, 402 = gray thin iron brick, or 31 = sand
 
         self.writeMapIni(pname, self.player_init_local_pos, gvar_str)
         self.writeMapJson(pname, floorMap, isUniversal, defaultMapChips[wall_chip_type], floorMapChip)
@@ -468,7 +468,6 @@ class MapInfo:
         line_info_json = {funcname: 
             {
                 "lines": sorted(list(line_info.lines)),
-                "onelines": sorted(list(line_info.one_lines)),
                 "loops": line_info.loops, 
                 "start": line_info.start, 
                 "return": line_info.returns,
@@ -1000,7 +999,7 @@ class GenBitMap:
             if condition_comment_dict:
                 self.mapInfo.setWarpZone(crntRoomID, toNodeID, condition_comment_dict, self.func_name, 158, warpNodeID=nodeID)
             else:
-                self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
+                self.mapInfo.setWarpZone(crntRoomID, toNodeID, {}, self.func_name, 158, warpNodeID=nodeID)
             if tempNode_info:
                 self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return
@@ -1059,7 +1058,6 @@ class GenBitMap:
                     self.trackAST(crntRoomID, toNodeID, loopBackID)
         # for文の初期値で変数の初期化がある場合はアイテムを作る
         elif self.getNodeShape(nodeID) == 'invhouse':
-            # 1回だけ実行
             self.createRoom(nodeID, crntRoomID)
             if nodeID in self.mapInfo.room_info:
                 self.createPath(crntRoomID, nodeID, {})
