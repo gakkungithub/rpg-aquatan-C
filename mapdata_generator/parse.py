@@ -1410,7 +1410,7 @@ class ASTtoFlowChart:
             if cr.location.offset < semi_offset[0]:
                 if cr.kind == ci.CursorKind.DECL_STMT:
                     var_list = list(cr.get_children())
-                    initNodeID = self.createNode(len(var_list), 'invhouse')
+                    initNodeID = self.createNode(str(len(var_list)), 'invhouse')
                     varNodeID = initNodeID
                     self.createRoomSizeEstimate(varNodeID)
                     for vcr in var_list:

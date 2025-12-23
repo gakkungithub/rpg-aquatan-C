@@ -281,13 +281,14 @@ def main():
         TXTBOX_HEIGHT = 40
         TXTBOX_RECT = Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
 
+        RIGHT_WND_WIDTH = 300
         ## ミニマップの表示座標を設定する
-        MIN_MAP_SIZE = 300
-        MMAP_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_MAP_SIZE)
+        MIN_MAP_SIZE = 256
+        MMAP_RECT = Rect(SCR_WIDTH - RIGHT_WND_WIDTH - MIN_MAP_SIZE - 20, SCR_HEIGHT // 4 * 3 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE, MIN_MAP_SIZE)
 
         ## デバッグコードの表示座標を設定する
-        MIN_CODE_SIZE_Y = 600
-        MCODE_RECT = Rect(SCR_WIDTH - MIN_MAP_SIZE - 10, 10, MIN_MAP_SIZE, MIN_CODE_SIZE_Y)
+        MIN_CODE_SIZE_Y = 440
+        MCODE_RECT = Rect(SCR_WIDTH - RIGHT_WND_WIDTH - 10, SCR_HEIGHT - MIN_CODE_SIZE_Y - 10, RIGHT_WND_WIDTH, MIN_CODE_SIZE_Y)
 
         if os.uname()[0] != 'Darwin':
             drivers = ['fbcon', 'directfb', 'svgalib']
@@ -355,6 +356,7 @@ def main():
 
         ## コードウィンドウを作る
         CODEWND = CodeWindow(MCODE_RECT, mapname)
+        CODEWND.show()
 
         sender = EventSender(CODEWND)
         
@@ -368,40 +370,47 @@ def main():
         
         PLAYER.func = initialResult["firstFunc"]
 
-        ITEMWND_RECT = Rect(10, 10 + SCR_HEIGHT // 5, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 * 3 - 10)
+        ITEMWND_RECT = Rect(SCR_WIDTH - RIGHT_WND_WIDTH - 10, 10, RIGHT_WND_WIDTH, SCR_HEIGHT - MIN_CODE_SIZE_Y - 30)
         ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
-        ITEMWND.hide()
+        ITEMWND.show()
 
         for gvar_name, item_info in initialResult["items"].items():
             for line, values in item_info.items():
                 PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
-
-        BTNWND = ArrowButtonWindow()
-        BTNWND.show()
-        mouse_down = False
 
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
 
         # region ウィンドウの設定
         MSGWND = MessageWindow(
-            Rect(SCR_WIDTH // 4 , SCR_HEIGHT // 3 * 2, 
-                SCR_WIDTH // 2, SCR_HEIGHT // 4), MessageEngine(), sender)
+            Rect(BUTTON_WIDTH * 3 + 70 , SCR_HEIGHT // 4 * 3, 
+                SCR_WIDTH // 2 - 30, SCR_HEIGHT // 4 - 10), MessageEngine(), sender)
         DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
         DIMWND.hide()
         LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
         LIGHTWND.set_color_scene("normal")
         LIGHTWND.show()
 
-        STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, SCR_HEIGHT // 5 - 10), PLAYER, stage_index)
+        STATUSWND = StatusWindow(Rect(10, 10, SCR_WIDTH // 5 - 10, 100), PLAYER, stage_index)
         STATUSWND.show()
-
-        CMNDWND = CommandWindow(TXTBOX_RECT)
-        CMNDWND.show()
 
         ## ミニマップを作る
         MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
         MMAPWND.show()
+
+        CMNDWND = CommandWindow(TXTBOX_RECT)
+        CMNDWND.hide()
+
+        # 操作説明ウィンドウ
+        CTRLGWND = ControllerGuideWindow(Rect(10, 120, SCR_WIDTH // 5 - 10, 150), MMAPWND, CMNDWND)
+        CTRLGWND.show()
+
+        LOGWND = LogWindow(Rect(10, 280, SCR_WIDTH // 5 - 10, 370))
+        LOGWND.show()
+
+        BTNWND = ArrowButtonWindow()
+        BTNWND.show()
+        mouse_down = False
 
         # endregion
         clock = pygame.time.Clock()
@@ -459,6 +468,8 @@ def main():
             LIGHTWND.draw(offset)
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
+            CTRLGWND.draw(screen)
+            LOGWND.draw(screen)
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
             MMAPWND.draw(screen, fieldmap)
@@ -470,6 +481,137 @@ def main():
 
             if MSGWND.is_visible:
                 MSGWND.msgwincount += 1
+
+            if cmd == "command":
+                cmd = ""
+                mouse_down = False
+                if MSGWND.is_visible:
+                    break
+                
+                atxt = CMNDWND.draw(screen, font)
+                CMNDWND.hide()
+
+                if atxt is None:
+                    break
+                parts = atxt.split(' ', 1)
+                cmd = parts[0]
+                atxt = parts[1] if len(parts) > 1 else ''
+
+                if cmd == "":
+                    continue
+                elif cmd == "rollback":
+                    if len(CODEWND.history) > 1:
+                        sender.send_event({"rollback": True})
+                        # MMAPWND.hide()
+                        # CODEWND.show()
+                        sender.receive_json()
+                    else:
+                        MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
+                elif cmd == "undo":
+                    if len(PLAYER.move5History) < 1:
+                        MSGWND.set("No history...")
+                    else:
+                        move = PLAYER.move5History.pop()
+                        if move["return"]:
+                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                        # 暗転
+                        DIMWND.show(200, 'warp')
+                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                        PLAYER.commonItembag.items[-1] = move['cItems']
+                        PLAYER.itembag.items[-1] = move['items']
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "break":
+                    try:
+                        move = PLAYER.moveHistory.pop()
+                        # 暗転
+                        DIMWND.show(200, 'warp')
+                        fieldmap.create(move['mapname'])  # 移動先のマップで再構成
+                        PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
+                        fieldmap.add_chara(PLAYER)  # マップに再登録
+                    except IndexError:
+                        MSGWND.set("No history.")
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "restart":
+                    # ゲームを最初から始める
+                    dest_x = int(config.get("game", "player_x"))
+                    dest_y = int(config.get("game", "player_y"))
+                    dest_map =  str(config.get("game", "map"))
+                    # 暗転
+                    DIMWND.show(200, 'warp')
+                    fieldmap.create(dest_map)
+                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write("restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "echo":
+                    MSGWND.set(atxt)
+                    atxt = "\0"
+                    cmd = "\0"
+                elif cmd == "itemsetall":
+                    sender.send_event({"itemsetall": True})
+
+                    itemsetAllResult = sender.receive_json()
+                    MSGWND.set(itemsetAllResult['message'])
+                elif cmd == "goto":
+                    ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
+                    parts = atxt.split(",", 1)
+                    dest_x = int(parts[0])
+                    dest_y = int(parts[1])
+                    # 暗転
+                    DIMWND.show(200, 'warp')
+                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "stdin":
+                    try:
+                        parts = atxt.split(' ', 1)
+                        value = " ".join(parts)
+                        sender.send_event({"stdin": f"{value}\n"})
+                        stdinResult = sender.receive_json()
+                        if stdinResult["status"] == "ok":
+                            # 今回更新した変数以外の計算コメントは全て消去する
+                            PLAYER.remove_itemvalue()
+                            for name, item_info in stdinResult["items"].items():
+                                for line, value in item_info.items():
+                                    item = PLAYER.commonItembag.find(name, int(line))
+                                    if item is None:
+                                        item = PLAYER.itembag.find(name, int(line))
+                                    if item is not None:
+                                        item.update_value(value)
+                        MSGWND.set(stdinResult['message'])
+                    except (IndexError, ValueError):
+                        MSGWND.set("ERROR...")
+                    cmd = "\0"
+                    atxt = "\0"
+                elif cmd == "jump":
+                    # 関数の入り口まで飛ばしてくれる　同じマップ内だけ 
+                    # 部屋と関数名の関連付けを取得できるようになったらこのコマンドを有効にする
+                    # jumpするなら、デバッグモードに移行するなどを考える
+                    MSGWND.set("not valid yet...")
+                    # MSGWND.set("Function \'"+atxt+"\' is not found...")
+                    cmd = "\0"
+                    atxt = "\0"
+                elif cmd == "aquatan":
+                    MSGWND.set("Make aquatan\nGrate Again!!!")
+                    atxt = "\0"
+                    cmd = "\0"
+                elif cmd == "down" or cmd == "left" or cmd == "right" or cmd == "up":
+                    if atxt != "":
+                        cmd = "\0"
+                    continue
+                else:
+                    MSGWND.set("Undefined command")
+                    atxt = "\0"
+                    cmd = "\0"
 
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -501,19 +643,15 @@ def main():
                                 item_expand_mouse_pos = event.pos
                             elif action_type == 'scroll':
                                 item_scroll_mouse_pos = event.pos
-                    if MMAPWND.is_visible:
-                        if MMAPWND.auto_scroll_button_rect.collidepoint(event.pos):
-                            MMAPWND.is_auto_scroll = True
-                            MMAPWND.offset_x = min(MMAPWND.x - PLAYER.x * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.x)
-                            MMAPWND.offset_y = min(MMAPWND.y - PLAYER.y * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.y)
-                        elif MMAPWND.isCursorInWindow(event.pos):
-                            mmap_scroll_mouse_pos = event.pos
-
-                    cmd = BTNWND.is_clicked(event.pos) if code_scroll_mouse_pos or item_expand_mouse_pos or item_scroll_mouse_pos or mmap_scroll_mouse_pos else ""
-
+                    # if MMAPWND.is_visible:
+                    #     if MMAPWND.auto_scroll_button_rect.collidepoint(event.pos):
+                    #         MMAPWND.is_auto_scroll = True
+                    #         MMAPWND.offset_x = min(MMAPWND.x - PLAYER.x * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.x)
+                    #         MMAPWND.offset_y = min(MMAPWND.y - PLAYER.y * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.y)
+                    #     elif MMAPWND.isCursorInWindow(event.pos):
+                    #         mmap_scroll_mouse_pos = event.pos
                     if len(PLAYER.funcInfoWindow_list):
                         PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
-                        cmd = ""
                     
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     mouse_down = False
@@ -574,22 +712,22 @@ def main():
                             else:
                                 CODEWND.scrollX = 0
                             code_scroll_mouse_pos = event.pos
-                        elif item_expand_mouse_pos:
-                            dy = event.pos[1] - item_expand_mouse_pos[1]
-                            dx = event.pos[0] - item_expand_mouse_pos[0]
-                            if SCR_WIDTH // 5 - 10 <= ITEMWND.rect[2] + dx <= SCR_WIDTH // 2 and not (dx >= 0 and ITEMWND.is_right_edge):
-                                ITEMWND.rect[2] += dx
-                                ITEMWND.width += dx
-                            else:
-                                dx = 0
-                            if SCR_HEIGHT // 5 * 3 - 10 <= ITEMWND.rect[3] + dy <= SCR_WIDTH - 10 and not (dy >= 0 and ITEMWND.is_bottom_edge):
-                                ITEMWND.rect[3] += dy
-                                ITEMWND.height += dy 
-                            else:
-                                dy = 0
-                            if dx != 0 or dy != 0:
-                                ITEMWND.surface = pygame.transform.smoothscale(ITEMWND.surface, (ITEMWND.width, ITEMWND.height))
-                            item_expand_mouse_pos = event.pos
+                        # elif item_expand_mouse_pos:
+                        #     # dy = event.pos[1] - item_expand_mouse_pos[1]
+                        #     dx = event.pos[0] - item_expand_mouse_pos[0]
+                        #     if SCR_WIDTH // 5 - 10 <= ITEMWND.rect[2] + dx <= SCR_WIDTH // 2 and not (dx >= 0 and ITEMWND.is_right_edge):
+                        #         ITEMWND.rect[2] += dx
+                        #         ITEMWND.width += dx
+                        #     else:
+                        #         dx = 0
+                        #     # if SCR_HEIGHT // 5 * 3 - 10 <= ITEMWND.rect[3] + dy <= SCR_WIDTH - 10 and not (dy >= 0 and ITEMWND.is_bottom_edge):
+                        #     #     ITEMWND.rect[3] += dy
+                        #     #     ITEMWND.height += dy 
+                        #     # else:
+                        #     #     dy = 0
+                        #     if dx != 0 or dy != 0:
+                        #         ITEMWND.surface = pygame.transform.smoothscale(ITEMWND.surface, (ITEMWND.width, ITEMWND.height))
+                        #     item_expand_mouse_pos = event.pos
                         elif item_scroll_mouse_pos:
                             dy = event.pos[1] - item_scroll_mouse_pos[1]
                             dx = event.pos[0] - item_scroll_mouse_pos[0]
@@ -602,19 +740,20 @@ def main():
                             elif dx >= 0:
                                 ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
                             item_scroll_mouse_pos = event.pos
-                        elif mmap_scroll_mouse_pos:
-                            dy = event.pos[1] - mmap_scroll_mouse_pos[1]
-                            dx = event.pos[0] - mmap_scroll_mouse_pos[0]
-                            if (MMAPWND.offset_y > 10 and dy > 0) or (MMAPWND.offset_y - MMAPWND.rect[3] < 10 - (MMAPWND.row-1) * MMAPWND.tile_size and dy < 0):
-                                dy = 0
-                            if (MMAPWND.offset_x > SCR_WIDTH - MIN_MAP_SIZE - 10 and dx > 0) or (MMAPWND.offset_x - MMAPWND.rect[2] < SCR_WIDTH - MIN_MAP_SIZE - 10 - (MMAPWND.col-1) * MMAPWND.tile_size and dx < 0):
-                                dx = 0
-                            MMAPWND.offset_y += dy
-                            MMAPWND.offset_x += dx
-                            mmap_scroll_mouse_pos = event.pos
-                    
+                        # elif mmap_scroll_mouse_pos:
+                        #     dy = event.pos[1] - mmap_scroll_mouse_pos[1]
+                        #     dx = event.pos[0] - mmap_scroll_mouse_pos[0]
+                        #     if (MMAPWND.offset_y > 10 and dy > 0) or (MMAPWND.offset_y - MMAPWND.rect[3] < 10 - (MMAPWND.row-1) * MMAPWND.tile_size and dy < 0):
+                        #         dy = 0
+                        #     if (MMAPWND.offset_x > SCR_WIDTH - MIN_MAP_SIZE - 10 and dx > 0) or (MMAPWND.offset_x - MMAPWND.rect[2] < SCR_WIDTH - MIN_MAP_SIZE - 10 - (MMAPWND.col-1) * MMAPWND.tile_size and dx < 0):
+                        #         dx = 0
+                        #     MMAPWND.offset_y += dy
+                        #     MMAPWND.offset_x += dx
+                        #     mmap_scroll_mouse_pos = event.pos
                     elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None and mmap_scroll_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
+                        if cmd == "command":
+                            CMNDWND.show()
                 # endregion
                 
                 # region keydown event
@@ -622,146 +761,22 @@ def main():
                 if event.type == KEYDOWN and event.key == K_i:
                     PLAYER.set_game_mode("item")
 
-                if event.type == KEYDOWN and event.key == K_b:
-                    ITEMWND.is_visible = not ITEMWND.is_visible
+                # if event.type == KEYDOWN and event.key == K_b:
+                #     ITEMWND.is_visible = not ITEMWND.is_visible
 
                 if event.type == KEYDOWN and event.key == K_m:
-                    if MMAPWND.is_visible:
-                        MMAPWND.hide()
-                        CODEWND.show()
-                    elif CODEWND.is_visible:
-                        CODEWND.hide()
-                    else:
-                        MMAPWND.show()
+                    # if MMAPWND.is_visible:
+                    #     MMAPWND.hide()
+                    #     CODEWND.show()
+                    # elif CODEWND.is_visible:
+                    #     CODEWND.hide()
+                    # else:
+                    #     MMAPWND.show()
+                    MMAPWND.is_visible = not MMAPWND.is_visible
 
-                if event.type == KEYDOWN and event.key == K_c:
-                    if MSGWND.is_visible:
-                        break
-                    atxt = CMNDWND.draw(screen, font)
-
-                    #atxt=txtbox.tbox(screen,font,0,SCR_HEIGHT,SCR_WIDTH,TXTBOX_HEIGHT,20)
-                    cmd = ""
-                    if atxt is None:
-                        break
-                    parts = atxt.split(' ', 1)
-                    cmd = parts[0]
-                    atxt = parts[1] if len(parts) > 1 else ''
-
-                    if cmd == "":
-                        continue
-                    elif cmd == "rollback":
-                        if len(CODEWND.history) > 1:
-                            sender.send_event({"rollback": True})
-                            MMAPWND.hide()
-                            CODEWND.show()
-                            sender.receive_json()
-                        else:
-                            MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
-                    elif cmd == "undo":
-                        if len(PLAYER.move5History) < 1:
-                            MSGWND.set("No history...")
-                        else:
-                            move = PLAYER.move5History.pop()
-                            if move["return"]:
-                                PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
-                            # 暗転
-                            DIMWND.show(200, 'warp')
-                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                            PLAYER.commonItembag.items[-1] = move['cItems']
-                            PLAYER.itembag.items[-1] = move['items']
-                            fieldmap.add_chara(PLAYER)  # マップに再登録
-                        cmd = "\0"
-                        atxt = "\0"
-                        PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    elif cmd == "break":
-                        try:
-                            move = PLAYER.moveHistory.pop()
-                            # 暗転
-                            DIMWND.show(200, 'warp')
-                            fieldmap.create(move['mapname'])  # 移動先のマップで再構成
-                            PLAYER.set_pos(move['x'], move['y'], DOWN)  # プレイヤーを移動先座標へ
-                            fieldmap.add_chara(PLAYER)  # マップに再登録
-                        except IndexError:
-                            MSGWND.set("No history.")
-                        cmd = "\0"
-                        atxt = "\0"
-                        PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    elif cmd == "restart":
-                        # ゲームを最初から始める
-                        dest_x = int(config.get("game", "player_x"))
-                        dest_y = int(config.get("game", "player_y"))
-                        dest_map =  str(config.get("game", "map"))
-                        # 暗転
-                        DIMWND.show(200, 'warp')
-                        fieldmap.create(dest_map)
-                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        cmd = "\0"
-                        atxt = "\0"
-                        PLAYER.fp.write("restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    elif cmd == "echo":
-                        MSGWND.set(atxt)
-                        atxt = "\0"
-                        cmd = "\0"
-                    elif cmd == "itemsetall":
-                        sender.send_event({"itemsetall": True})
-
-                        itemsetAllResult = sender.receive_json()
-                        MSGWND.set(itemsetAllResult['message'])
-                    elif cmd == "goto":
-                        ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
-                        parts = atxt.split(",", 1)
-                        dest_x = int(parts[0])
-                        dest_y = int(parts[1])
-                        # 暗転
-                        DIMWND.show(200, 'warp')
-                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        cmd = "\0"
-                        atxt = "\0"
-                        PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                    elif cmd == "stdin":
-                        try:
-                            parts = atxt.split(' ', 1)
-                            value = " ".join(parts)
-                            sender.send_event({"stdin": f"{value}\n"})
-                            stdinResult = sender.receive_json()
-                            if stdinResult["status"] == "ok":
-                                # 今回更新した変数以外の計算コメントは全て消去する
-                                PLAYER.remove_itemvalue()
-                                for name, item_info in stdinResult["items"].items():
-                                    for line, value in item_info.items():
-                                        item = PLAYER.commonItembag.find(name, int(line))
-                                        if item is None:
-                                            item = PLAYER.itembag.find(name, int(line))
-                                        if item is not None:
-                                            item.update_value(value)
-                            MSGWND.set(stdinResult['message'])
-                        except (IndexError, ValueError):
-                            MSGWND.set("ERROR...")
-                        cmd = "\0"
-                        atxt = "\0"
-                    elif cmd == "jump":
-                        # 関数の入り口まで飛ばしてくれる　同じマップ内だけ 
-                        # 部屋と関数名の関連付けを取得できるようになったらこのコマンドを有効にする
-                        # jumpするなら、デバッグモードに移行するなどを考える
-                        MSGWND.set("not valid yet...")
-                        # MSGWND.set("Function \'"+atxt+"\' is not found...")
-                        cmd = "\0"
-                        atxt = "\0"
-                    elif cmd == "aquatan":
-                        MSGWND.set("Make aquatan\nGrate Again!!!")
-                        atxt = "\0"
-                        cmd = "\0"
-                    elif cmd == "down" or cmd == "left" or cmd == "right" or cmd == "up":
-                        if atxt != "":
-                            cmd = "\0"
-                        continue
-                    else:
-                        MSGWND.set("Undefined command")
-                        atxt = "\0"
-                        cmd = "\0"
+                if (event.type == KEYDOWN and event.key == K_c):
+                    cmd = "command"
+                    CMNDWND.show()
 
                 if event.type == KEYDOWN and event.key == K_p:
                     PAUSEWND.show()
@@ -805,7 +820,8 @@ def main():
                     if CODEWND.rollback_index is not None:
                         CODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
 
-                if event.type == KEYDOWN and event.key == K_f:
+                if (event.type == KEYDOWN and event.key == K_f) or cmd == "foot":
+                    cmd = ""
                     # 足元にあるのが宝箱かワープゾーンかを調べる
                     if not MSGWND.is_visible and PLAYER.search(fieldmap):
                         continue
@@ -1781,7 +1797,7 @@ class Player(Character):
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
         self.sender.code_window.history.append(("", 0, {"x": self.x, "y": self.y, "door": None, "ccchara": None, "checkedFuncs": {}, "func": "main", "gvars": {}, "vars": []}))
-        self.itemNameShow = False
+        self.itemNameShow = True
         # スモールドアを扉を閉じるために記憶
         self.door: dict | None = None 
         # プレイヤーが条件式通過した後に条件式確認キャラが元の位置に戻るために記憶する
@@ -1986,25 +2002,6 @@ class Player(Character):
         self.image = self.images[self.name][self.direction *
                                             4+(self.frame // self.animcycle % 4)]
 
-    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
-        super().draw(screen, offset)
-        if self.isFootActionValid or self.isFowardActionValid:
-
-            offsetx, offsety = offset
-            px = self.rect.topright[0] + 2
-            py = self.rect.bottomright[1] + 2
-
-            if self.isFootActionValid:
-                text_surf, _ = self.font.render("fキー: 足元へのアクション", (0, 0, 0), (255, 255, 255))
-                text_rect = text_surf.get_rect(topleft=(px - offsetx, py - offsety))
-                screen.blit(text_surf, text_rect)
-                py += self.FONT_SIZE + 4
-
-            if self.isFowardActionValid:
-                text_surf, _ = self.font.render("spaceキー: 前方へのアクション", (0, 0, 0), (255, 255, 255))
-                text_rect = text_surf.get_rect(topleft=(px - offsetx, py - offsety))
-                screen.blit(text_surf, text_rect)
-
     def get_next_automove(self):
         """次の移動先を得る"""
         if len(self.automove) > 0:
@@ -2105,7 +2102,9 @@ class Player(Character):
                     mymap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             return True
-        return False
+        else:
+            MSGWND.set("足元には何もない。")
+            return False
 
     def unlock(self, mymap: Map):
         """キャラクターが向いている方向にドアがあるか調べる"""
@@ -2420,18 +2419,20 @@ class Window:
         self.inner_rect = self.rect.inflate(-self.EDGE_WIDTH, -self.EDGE_WIDTH)
         self.is_visible = False  # ウィンドウを表示中か？
 
-    def draw(self):
+    def draw(self, bg: bool = True):
         """ウィンドウを描画"""
         if self.is_visible is False:
             return
-        # pygame.draw.rect(, (255,255,255), self.rect, 0)
-        self.surface.fill(Color(0, 0, 0, 150))
-        pygame.draw.lines(self.surface, Color(255, 255, 255, 255), True,
+        if bg:
+            self.surface.fill(Color(0, 0, 0, 150))
+            pygame.draw.lines(self.surface, Color(255, 255, 255, 255), True,
                             [[0, 0],
                              [0, self.height-(self.EDGE_WIDTH/2)],
                              [self.width-(self.EDGE_WIDTH/2), self.height-(self.EDGE_WIDTH/2)],
                              [self.width-(self.EDGE_WIDTH/2), 0] ],
                              self.EDGE_WIDTH)
+        else:
+            self.surface.fill(Color(0, 0, 0, 0))
 
     def blit(self, screen):
         """blit"""
@@ -3944,7 +3945,9 @@ class FuncInfoWindow(Window):
     CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, funcs: list[dict], warpPos: tuple[str, str, list[int]], detail: dict | None = None):
-        Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - MIN_MAP_SIZE - 20, MIN_MAP_SIZE))
+        # 300は右ウィンドウのサイズに合わせている(後々変えるかを考える)
+        # 200は適当
+        Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - 300 - 20, 200))
         # 日本語対応フォントの指定
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.funcs = funcs
@@ -4026,8 +4029,9 @@ class FuncInfoWindow(Window):
             if len(y_pos_list) == 0:
                 y_offset += self.FONT_SIZE + 10
 
-        self.surface.blit(self.left_arrow, self.left_rect)
-        self.surface.blit(self.right_arrow, self.right_rect)
+        if len(PLAYER.funcInfoWindow_list) != 1:
+            self.surface.blit(self.left_arrow, self.left_rect)
+            self.surface.blit(self.right_arrow, self.right_rect)
 
         Window.blit(self, screen)
 
@@ -4714,15 +4718,17 @@ class StageButton:
 class ArrowButtonWindow:
     """矢印ボタンウィンドウ"""
     def __init__(self):
-        self.rect = pygame.Rect(SCR_WIDTH - 3*BUTTON_WIDTH, SCR_HEIGHT - 2*BUTTON_WIDTH, BUTTON_WIDTH, BUTTON_WIDTH)
+        self.rect = pygame.Rect(10, SCR_HEIGHT - BUTTON_WIDTH * 2 - 10, BUTTON_WIDTH, BUTTON_WIDTH)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
-        self.is_visible = False  # ウィンドウを表示中か？
+        self.is_visible = False
         self.button_right = Button("arrow.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + BUTTON_WIDTH, 0)
         self.button_left = Button("arrow.png", self.rect[0] + 0, self.rect[1] + BUTTON_WIDTH, 180)
         self.button_up = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0,90)
         self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH, -90)
         self.button_pause = Button("pause.png", self.rect[0] + 0, self.rect[1] + 0, 0)
         self.button_return = Button("return.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
+        self.button_foot = Button("foot.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1], 0)
+        self.button_command = Button("command.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1] + BUTTON_WIDTH, 0)
 
     def blit(self,screen):
         """blit"""
@@ -4742,6 +4748,8 @@ class ArrowButtonWindow:
         self.button_down.draw(screen)
         self.button_pause.draw(screen)
         self.button_return.draw(screen)
+        self.button_foot.draw(screen)
+        self.button_command.draw(screen)
         self.blit(screen)
     
     def is_clicked(self,pos):
@@ -4757,6 +4765,10 @@ class ArrowButtonWindow:
             return "pause"
         elif self.button_return.rect.collidepoint(pos):
             return "action"
+        elif self.button_foot.rect.collidepoint(pos):
+            return "foot"
+        elif self.button_command.rect.collidepoint(pos):
+            return "command"
         else:
             return None
                                                  
@@ -4860,13 +4872,90 @@ class CommandWindow(Window):
         return self.txt
 
     def draw(self, screen, font):
+        Window.draw(self)
+        Window.blit(self, screen)
+        result = self.read(screen, font)
+        return result
+                                                                                                                                                                                                                                   
+#   ,ad8888ba,                                                        88 88                         ,ad8888ba,              88          88          I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                          ,d                           88 88                        d8"'    `"8b             ""          88          `8b       d8b       d8' ""                      88                                 
+# d8'                                    88                           88 88                       d8'                                   88           "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,  8b,dPPYba, MM88MMM 8b,dPPYba,  ,adPPYba,  88 88  ,adPPYba, 8b,dPPYba, 88            88       88 88  ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a 88P'   `"8a  88    88P'   "Y8 a8"     "8a 88 88 a8P_____88 88P'   "Y8 88      88888 88       88 88 a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 88       88  88    88         8b       d8 88 88 8PP""""""" 88         Y8,        88 88       88 88 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" 88       88  88,   88         "8a,   ,a8" 88 88 "8b,   ,aa 88          Y8a.    .a88 "8a,   ,a88 88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'  88       88  "Y888 88          `"YbbdP"'  88 88  `"Ybbd8"' 88           `"Y88888P"   `"YbbdP'Y8 88  `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+
+class ControllerGuideWindow(Window):
+    FONT_SIZE = 12
+    TEXT_COLOR = Color(255, 255, 255, 255)
+
+    def __init__(self, rect, mmapwnd: "MiniMapWindow", cmndwnd: "CommandWindow"):
+        Window.__init__(self, rect)
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.mmapwnd = mmapwnd
+        self.cmndwnd = cmndwnd
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.TEXT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+
+    def draw(self, screen):
         if not self.is_visible:
             return
         Window.draw(self)
-        result = self.read(screen, font)
+        offset_x = 10
+        offset_y = 10
+        if PLAYER.isFootActionValid:
+            self.draw_string(offset_x, offset_y, "f: 足元へのアクション")
+            offset_y += self.FONT_SIZE + 4
+        if PLAYER.isFowardActionValid:
+            self.draw_string(offset_x, offset_y, "space: 前方へのアクション")
+            offset_y += self.FONT_SIZE + 4
+        self.draw_string(offset_x, offset_y, "i: アイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
+        offset_y += self.FONT_SIZE + 4
+        self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
+        offset_y += self.FONT_SIZE + 4
+        self.draw_string(offset_x, offset_y, "c: コマンドウィンドウを非表示" if self.cmndwnd.is_visible else "c: コマンドウィンドウを表示")
         Window.blit(self, screen)
-        return result
-                                                                                                                                                        
+                                                                                                               
+# 88                               I8,        8        ,8I 88                      88                                 
+# 88                               `8b       d8b       d8' ""                      88                                 
+# 88                                "8,     ,8"8,     ,8"                          88                                 
+# 88          ,adPPYba,   ,adPPYb,d8 Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88         a8"     "8a a8"    `Y88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88         8b       d8 8b       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88         "8a,   ,a8" "8a,   ,d88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88888888888 `"YbbdP"'   `"YbbdP"Y8    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                         aa,    ,88                                                                                  
+#                          "Y8bbdP"                                                                                   
+
+class LogWindow(Window):
+    FONT_SIZE = 12
+    TEXT_COLOR = Color(255, 255, 255, 255)
+
+    def __init__(self, rect):
+        Window.__init__(self, rect)
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.log_list: list[str] = []
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.TEXT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        offset_x = 10
+        offset_y = 10
+        for log in self.log_list:
+            self.draw_string(offset_x, offset_y, log)
+            offset_y += self.FONT_SIZE + 4
+        Window.blit(self, screen)
+
 # 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
 # 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
 # 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 
@@ -4905,12 +4994,14 @@ class MiniMapWindow(Window, Map):
     def draw(self, screen, map : Map):
         if not self.is_visible:
             return
-        Window.draw(self)
+        Window.draw(self, False)
         Window.blit(self, screen)
 
         if self.is_auto_scroll:
-            self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.x)
-            self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.y)
+            self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 3 * 2, self.x)
+            self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 3 * 2, self.y)
+            # self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.x)
+            # self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.y)
 
         for y in range(0, self.row):
             if int(y * self.tile_size + self.offset_y) < self.y:
@@ -4926,7 +5017,8 @@ class MiniMapWindow(Window, Map):
                 if tile not in [390, 43, 402, 31]:
                     continue
                 scaled_size = int(self.tile_size) + 1  # 1px拡大
-                image = pygame.transform.smoothscale(self.images[tile], (scaled_size, scaled_size))
+                image = pygame.transform.smoothscale(self.images[426], (scaled_size, scaled_size))
+                image.set_alpha(192)
                 screen.blit(image, (int(x * self.tile_size + self.offset_x), int(y * self.tile_size + self.offset_y)))
 
         # Treasureの場所を表示　青丸
@@ -5011,7 +5103,6 @@ class CodeWindow(Window):
         self.rollback_index: int | None = None
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
-        self.hide()
 
     def load_code_lines(self):
         """Cファイルからコードを読み込む"""
