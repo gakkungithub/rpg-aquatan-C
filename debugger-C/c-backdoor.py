@@ -1172,7 +1172,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # こうしないとどこのエリアに行っても条件構文に関する受信待ちが永遠に続いてしまう
                     if len(fromTo) >= 2:
                         if fromTo[:2] == [self.line_number, self.next_line_number]:
-                            if type in ['if', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
+                            if type in ['if', 'else', 'ifAllFalse', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
                                 funcWarp = event['funcWarp']
                                 check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse', 'forFalse', 'doWhileFalse']:

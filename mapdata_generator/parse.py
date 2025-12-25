@@ -1185,13 +1185,13 @@ class ASTtoFlowChart:
             children = list(cursor.get_children())
             if cursor.kind == ci.CursorKind.COMPOUND_STMT:
                 if len(children):
-                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [children[0].location.line])
+                    self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [children[0].location.line])
                 else:
-                    self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.extent.end.line])
+                    self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [cursor.extent.end.line])
                 return self.parse_comp_stmt(cursor, parentNodeID, type)
             # 混合文がない = {} で囲まれない単体文
             else:
-                self.condition_move[f'"{parentNodeID}"'] = ('if', line_track + [cursor.location.line])
+                self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [cursor.location.line])
                 return self.parse_stmt(cursor, parentNodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
@@ -1253,14 +1253,14 @@ class ASTtoFlowChart:
                 else:
                     nodeID = condNodeID
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
-                    self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [next_line[0]])
+                    self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', line_track + [next_line[0]])
                     self.createEdge(nodeID, falseEndNodeID, "False")
                 nodeIDs = [trueEndNodeID, falseEndNodeID]
         else:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
             # elseがない場合は仮ifとしてcondition_moveを取得する
-            self.condition_move[f'"{falseEndNodeID}"'] = ('if', line_track + [cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else line_track + [next_line[0]])
+            self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', line_track + [cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else line_track + [next_line[0]])
             self.line_info_dict[self.scanning_func].setLine(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
