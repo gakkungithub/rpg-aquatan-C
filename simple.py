@@ -386,6 +386,14 @@ def main():
         MSGWND = MessageWindow(
             Rect(BUTTON_WIDTH * 3 + 70 , SCR_HEIGHT // 4 * 3, 
                 SCR_WIDTH // 2 - 30, SCR_HEIGHT // 4 - 10), MessageEngine(), sender)
+        
+        if fieldmap.name == "tutorial":
+            mission_message_list: list[str] = []
+            for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                mission_message_list.append('\n'.join(help_message_list))
+            PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
+            MSGWND.set('\f'.join(mission_message_list))
+
         DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
         DIMWND.hide()
         LIGHTWND = LightWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
@@ -443,6 +451,13 @@ def main():
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
                 fieldmap.update()
+                # チュートリアルステージならhelp_dictのサイズが1以上
+                if fieldmap.name == "tutorial" and PLAYER.sender.code_window.linenum not in PLAYER.help_line_number_aquired:
+                    mission_message_list: list[str] = []
+                    for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                        mission_message_list.append('\n'.join(help_message_list))
+                    PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
+                    MSGWND.set('\f'.join(mission_message_list))
             elif PLAYER.damage_motion:
                 PLAYER.update(fieldmap)
 
@@ -471,11 +486,14 @@ def main():
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
             CTRLGWND.draw(screen)
-            LOGWND.draw(screen)
+            
+            LOGWND.draw(screen, fieldmap.name == "tutorial")
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
+            # ミニマップだけは、メッセージウィンドウと被る場所に表示されるので、メッセージウィンドウ表示中には表示しない
             if not MSGWND.is_visible:
                 MMAPWND.draw(screen, fieldmap)
+
             CODEWND.draw(screen)
 
             draw_string(screen, SCR_WIDTH-60, 10,
@@ -764,9 +782,6 @@ def main():
                 if event.type == KEYDOWN and event.key == K_i:
                     PLAYER.set_game_mode("item")
 
-                # if event.type == KEYDOWN and event.key == K_b:
-                #     ITEMWND.is_visible = not ITEMWND.is_visible
-
                 if event.type == KEYDOWN and event.key == K_m:
                     # if MMAPWND.is_visible:
                     #     MMAPWND.hide()
@@ -805,15 +820,7 @@ def main():
                                     elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
                                         cmd = ""    
                                         PAUSEWND.hide()
-                                        PLAYER.goaled = True
-                                    # elif PAUSEWND.button_help_rect.collidepoint(local_pos):
-                                    #     cmd = ""
-                                    #     if PAUSEWND.mode == "pause":
-                                    #         PAUSEWND.mode = "help"
-                                    #     elif PAUSEWND.mode == "help":
-                                    #         PAUSEWND.mode = "pause"
-                                    #     PAUSEWND.draw(screen)
-                                    #     pygame.display.update()      
+                                        PLAYER.goaled = True     
 
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
                     if MSGWND.selectMsgText is not None:
@@ -1249,12 +1256,23 @@ class Map:
                         screen.blit(self.images[self.map[y][x]],
                                     (x*GS-offsetx, y*GS-offsety))
 
-        # このマップにあるイベントを描画
-        for event in self.events:
-            event.draw(screen, offset)
-        # このマップにいるキャラクターを描画
-        for chara in self.charas:
-            chara.draw(screen, offset)
+        if self.name == "tutorial":
+            is_visible = (pygame.time.get_ticks() // 300) % 5 != 0
+            # このマップにあるイベントを描画
+            for event in self.events:
+                if is_visible or not (PLAYER.sender.code_window.linenum in PLAYER.help_dict and (event.x, event.y) == PLAYER.help_dict[PLAYER.sender.code_window.linenum][2]):
+                    event.draw(screen, offset)
+            # このマップにいるキャラクターを描画
+            for chara in self.charas:
+                if isinstance(chara, Player) or is_visible or not (PLAYER.sender.code_window.linenum in PLAYER.help_dict and (chara.x, chara.y) == PLAYER.help_dict[PLAYER.sender.code_window.linenum][2]):
+                    chara.draw(screen, offset)
+        else:
+            # このマップにあるイベントを描画
+            for event in self.events:
+                event.draw(screen, offset)
+            # このマップにいるキャラクターを描画
+            for chara in self.charas:
+                chara.draw(screen, offset)
 
         # 条件・関数ウィンドウはイベント・キャラクターより上に描画したいので、上のループの後に描画する
         if len(PLAYER.funcInfoWindow_list):
@@ -1391,8 +1409,8 @@ class Map:
                 self.create_plpath_j(event)
             elif event_type == "PLACESET":  # 場所マーカー
                 self.create_placeset_j(event)
-            elif event_type == "HELP":
-                self.create_help_j(event)
+            # elif event_type == "HELP":
+            #     self.create_help_j(event)
             
     def create_chara_j(self, data):
         """キャラクターを作成してcharasに追加する"""
@@ -1678,29 +1696,30 @@ class Character:
                 self.lim_lu = (self.x - 3, self.y - 3)
                 self.lim_rd = (self.x + 3, self.y + 3)
                 self.speed = 8
-        elif self.movetype == MOVE and random.random() < PROB_MOVE:
-            # 移動中でないならPROB_MOVEの確率でランダム移動開始
-            self.direction = random.randint(0, 3)  # 0-3のいずれか
-            if self.direction == DOWN:
-                if self.y < self.lim_rd[1]:
-                    if mymap.is_movable(self.x, self.y+1):
-                        self.vx, self.vy = 0, self.speed
-                        self.moving = True
-            elif self.direction == LEFT:
-                if self.x > self.lim_lu[0]:
-                    if mymap.is_movable(self.x-1, self.y):
-                        self.vx, self.vy = -self.speed, 0
-                        self.moving = True
-            elif self.direction == RIGHT:
-                if self.x < self.lim_rd[0]:
-                    if mymap.is_movable(self.x+1, self.y):
-                        self.vx, self.vy = self.speed, 0
-                        self.moving = True
-            elif self.direction == UP:
-                if self.y > self.lim_lu[1]:
-                    if mymap.is_movable(self.x, self.y-1):
-                        self.vx, self.vy = 0, -self.speed
-                        self.moving = True
+        # elif self.movetype == MOVE and random.random() < PROB_MOVE:
+        #     # 移動中でないならPROB_MOVEの確率でランダム移動開始
+        #     self.direction = random.randint(0, 3)  # 0-3のいずれか
+        #     if self.direction == DOWN:
+        #         if self.y < self.lim_rd[1]:
+        #             if mymap.is_movable(self.x, self.y+1):
+        #                 self.vx, self.vy = 0, self.speed
+        #                 self.moving = True
+        #     elif self.direction == LEFT:
+        #         if self.x > self.lim_lu[0]:
+        #             if mymap.is_movable(self.x-1, self.y):
+        #                 self.vx, self.vy = -self.speed, 0
+        #                 self.moving = True
+        #     elif self.direction == RIGHT:
+        #         if self.x < self.lim_rd[0]:
+        #             if mymap.is_movable(self.x+1, self.y):
+        #                 self.vx, self.vy = self.speed, 0
+        #                 self.moving = True
+        #     elif self.direction == UP:
+        #         if self.y > self.lim_lu[1]:
+        #             if mymap.is_movable(self.x, self.y-1):
+        #                 self.vx, self.vy = 0, -self.speed
+        #                 self.moving = True
+        
         # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
         self.frame += 1
         self.image = self.images[self.name][self.direction *
@@ -1820,6 +1839,17 @@ class Player(Character):
         self.isFowardActionValid = False
         self.isLoopStatementInBefore = False
         self.log_lists: list[list[str]] = []
+        self.help_dict: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
+            3: ([["関数をスキップしなければ、その関数に応じた部屋に遷移します!!"]], ["再び計算式キャラクターに", "話せ!!"], (13,6)),
+            4: ([["黒色のキャラクターに話しかけると「return」に対応して元の部屋に戻ることができます!!"]], ["黒色のキャラクターに話しかけて", "ワープ前の部屋に戻れ!!"], (13,3)),
+            9: ([["ようこそ!C言語ダンジョンの世界へ!!"],["青の帽子のキャラクターがあなたです!!"],["これからチュートリアルを開始します!!"],["まずは右にある宝箱を取ってみましょう!!"]], ["アイテム「test」を取得せよ!!"], (27,27)),
+            11: ([["取得したアイテムは右上のアイテムウィンドウで確認できます!!"], ["次は左上のアイテムを取りに行きましょう!!(「shift」キーを押しながら移動でダッシュできます)"]], ["アイテム「c」を取得せよ!!"], (19,20)),
+            14: ([["アイテムには種類(変数の型)があり、", "アイコンが異なります!!"], ["値が更新されたアイテムにはハイライトが引かれており、", "クリックでその内容を確認できます!!"], ["次はドアを開けて、キャラクターに話しかけてみましょう!!"], ["条件が正しいキャラクターに話しかけるとその先に進めます!!(今回は右のキャラが正しいです!!)"]], ["右のキャラクターに話しかけよ!!"], (26,19)),
+            20: ([["次は全身白色のキャラクターに話しかけてみましょう!!"], ["彼らはプログラムの計算式を司っていて、話しかけるとその計算式を実行してくれます!!"]], ["計算式キャラクターに", "話しかけよ!!"], (27,17)),
+            24: ([["次はアイテム「finalResult」を取得しましょう!!"], ["どうやら計算式にtestCheckという関数が含まれているそうですね、、、"]], ["アイテム「finalResult」を", "取得せよ!!"], (5,11)),
+            27: ([["あとは、茶色のキャラクターに話しかけてゴールするだけです!!"], ["操作に不安があるなら今までの処理を逆戻し(rollback)して確認してみましょう!!"]], ["ゴールキャラクターに", "話しかけろ!!"], (6,9)),
+        }
+        self.help_line_number_aquired: list[int] = []
         self.fp = open(PATH, mode='w')
         self.walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "walk.wav"))
         self.walk_sound.set_volume(0.2)
@@ -2344,7 +2374,6 @@ class Player(Character):
                         return False
                 elif isinstance(chara, CharaReturn):
                     PLAYER.set_waitingMove_return(mymap, chara)
-            
             return True
         else:
             MSGWND.set("そのほうこうには　だれもいない。")
@@ -2754,8 +2783,7 @@ class MessageWindow(Window):
         self.max_chars_per_line = self.text_rect[2]//msg_eng.FONT_WIDTH
         # max_lines_per_page # 1行の最大行数（4行目は▼用）
         self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
-        self.max_chars_per_page = self.max_chars_per_line * \
-            self.max_lines_per_page  # 1ページの最大文字数
+        self.max_chars_per_page = self.max_chars_per_line * self.max_lines_per_page  # 1ページの最大文字数
         self.msgwincount = 0
         self.selectMsgText = None
         self.select_type = None
@@ -5023,6 +5051,8 @@ class ControllerGuideWindow(Window):
         if PLAYER.isFowardActionValid:
             self.draw_string(offset_x, offset_y, "space: 前方へのアクション")
             offset_y += self.FONT_SIZE + 4
+        self.draw_string(offset_x, offset_y, "shift押下中に移動: ダッシュ")
+        offset_y += self.FONT_SIZE + 4
         self.draw_string(offset_x, offset_y, "i: アイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
         offset_y += self.FONT_SIZE + 4
         self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
@@ -5049,17 +5079,28 @@ class LogWindow(Window):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
 
-    def draw_string(self, x, y, string):
+    def draw_string(self, x: int, y: int, string: str, color = None):
         """文字列出力"""
-        surf, rect = self.font.render(string, self.TEXT_COLOR)
+        surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
 
-    def draw(self, screen):
+    def draw(self, screen, isTutorial):
         if not self.is_visible:
             return
         Window.draw(self)
         offset_x = 10
         offset_y = 10
+        
+        if isTutorial and PLAYER.sender.code_window.linenum in PLAYER.help_dict:
+            self.font.size = 20
+            self.draw_string(offset_x, offset_y, "MISSION", Color(255, 0, 0, 255))
+            self.font.size = self.FONT_SIZE
+            offset_y += 20
+            for help_message_part in PLAYER.help_dict[PLAYER.sender.code_window.linenum][1]:
+                self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
+                offset_y += self.FONT_SIZE + 4
+            offset_y += self.FONT_SIZE + 4
+
         for log_list in PLAYER.log_lists:
             for log in log_list:
                 self.draw_string(offset_x, offset_y, log)
@@ -5178,7 +5219,6 @@ class MiniMapWindow(Window, Map):
             return True
         
         return False
-
 
 #   ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
 #  d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
@@ -5378,6 +5418,7 @@ class EventSender:
                     
                     self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists}))
                     PLAYER.isLoopStatementInBefore = False
+
                 if "line" in msg:
                     self.code_window.update_code_line(msg["line"])
                 if "removed" in msg:
