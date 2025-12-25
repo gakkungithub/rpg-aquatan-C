@@ -35,6 +35,15 @@ stdin s+: 標準入力 (stdin 3 4のように入力).
 
 up, down, right, left   : 指定の方向へ動けるならば１マス動く.
 
+## current game image
+![IMAGE ALT TEXT](README_imgs/current_game_image.png)
+12/26/2025地点でのゲーム画像です.
+
+ミニマップとコードウィンドウを同時に表示できるようにしました.
+
+操作説明用のウィンドウ、今までのアクションをログで表示するためのウィンドウを追加しました.
+
+コマンドウィンドウを開く、足元を調べるアクションを、キーではなくボタンを押すことでも可能にしました.
 
 ## tips for developing this system
 コード内の巨大アスキーアートは「VScode Banner Comment Generator」拡張機能で生成できます.
