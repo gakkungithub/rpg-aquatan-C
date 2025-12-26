@@ -228,7 +228,6 @@ def main():
                     
                     SBWND.draw(screen)
                     pygame.display.update()
-
         except Exception as e:
             if e == SystemExit:
                 return
@@ -451,7 +450,7 @@ def main():
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
                 fieldmap.update()
-                # チュートリアルステージならhelp_dictのサイズが1以上
+                # チュートリアルステージではhelp用のメッセージがあり、それを表示させる
                 if fieldmap.name == "tutorial" and PLAYER.sender.code_window.linenum not in PLAYER.help_line_number_aquired:
                     mission_message_list: list[str] = []
                     for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
@@ -485,8 +484,7 @@ def main():
             LIGHTWND.draw(offset)
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
-            CTRLGWND.draw(screen)
-            
+            CTRLGWND.draw(screen, MSGWND.selectMsgText is not None)
             LOGWND.draw(screen, fieldmap.name == "tutorial")
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
@@ -779,18 +777,18 @@ def main():
                 
                 # region keydown event
                 ## open map
-                if event.type == KEYDOWN and event.key == K_i:
-                    PLAYER.set_game_mode("item")
+                # if event.type == KEYDOWN and event.key == K_i:
+                #     PLAYER.set_game_mode("item")
 
-                if event.type == KEYDOWN and event.key == K_m:
-                    # if MMAPWND.is_visible:
-                    #     MMAPWND.hide()
-                    #     CODEWND.show()
-                    # elif CODEWND.is_visible:
-                    #     CODEWND.hide()
-                    # else:
-                    #     MMAPWND.show()
-                    MMAPWND.is_visible = not MMAPWND.is_visible
+                # if event.type == KEYDOWN and event.key == K_m:
+                #     # if MMAPWND.is_visible:
+                #     #     MMAPWND.hide()
+                #     #     CODEWND.show()
+                #     # elif CODEWND.is_visible:
+                #     #     CODEWND.hide()
+                #     # else:
+                #     #     MMAPWND.show()
+                #     MMAPWND.is_visible = not MMAPWND.is_visible
 
                 if (event.type == KEYDOWN and event.key == K_c):
                     cmd = "command"
@@ -1593,22 +1591,6 @@ class Map:
         # print(funcWarp)
         auto = AutoEvent((x, y), mapchip, sequence)
         self.events.append(auto)
-                                                                                   
-# 88        88            88             88888888ba             88                     
-# 88        88            88             88      "8b            ""              ,d     
-# 88        88            88             88      ,8P                            88     
-# 88aaaaaaaa88  ,adPPYba, 88 8b,dPPYba,  88aaaaaa8P' ,adPPYba,  88 8b,dPPYba, MM88MMM  
-# 88""""""""88 a8P_____88 88 88P'    "8a 88""""""'  a8"     "8a 88 88P'   `"8a  88     
-# 88        88 8PP""""""" 88 88       d8 88         8b       d8 88 88       88  88     
-# 88        88 "8b,   ,aa 88 88b,   ,a8" 88         "8a,   ,a8" 88 88       88  88,    
-# 88        88  `"Ybbd8"' 88 88`YbbdP"'  88          `"YbbdP"'  88 88       88  "Y888  
-#                            88                                                        
-#                            88                                                        
-
-class HelpPoint:
-    def __init__(self, pos: tuple[int, int], comments: list[str]):
-        self.x, self.y = pos[0], pos[1]
-        self.comments = comments
 
 #                                                                                                     
 #   ,ad8888ba,  88                                                                                    
@@ -5034,30 +5016,51 @@ class ControllerGuideWindow(Window):
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
 
-    def draw_string(self, x, y, string):
+    def draw_string(self, x, y, string, color = None):
         """文字列出力"""
-        surf, rect = self.font.render(string, self.TEXT_COLOR)
+        surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
 
-    def draw(self, screen):
+    def draw(self, screen: pygame.Surface, isSelectMsgText: bool):
         if not self.is_visible:
             return
         Window.draw(self)
         offset_x = 10
         offset_y = 10
-        if PLAYER.isFootActionValid:
-            self.draw_string(offset_x, offset_y, "f: 足元へのアクション")
+        if self.cmndwnd.is_visible:
+            self.draw_string(offset_x, offset_y, "escape:")
+            offset_y += self.FONT_SIZE
+            self.draw_string(offset_x, offset_y, "　コマンドウィンドウを非表示")
+            offset_y += (self.FONT_SIZE + 4) * 2
+            self.draw_string(offset_x, offset_y, "入力コマンド:", Color(255, 0, 0, 255))
             offset_y += self.FONT_SIZE + 4
-        if PLAYER.isFowardActionValid:
-            self.draw_string(offset_x, offset_y, "space: 前方へのアクション")
+            self.draw_string(offset_x, offset_y, "rollback: 処理の巻き戻し")
+            # offset_y += self.FONT_SIZE + 4
+            # self.draw_string(offset_x, offset_y, "stdio A B...:")
+            # offset_y += self.FONT_SIZE
+            # self.draw_string(offset_x, offset_y, "　A B...を標準入力")
+            # offset_y += self.FONT_SIZE + 4
+        elif isSelectMsgText:
+            self.draw_string(offset_x, offset_y, "←/→: 選択")
             offset_y += self.FONT_SIZE + 4
-        self.draw_string(offset_x, offset_y, "shift押下中に移動: ダッシュ")
-        offset_y += self.FONT_SIZE + 4
-        self.draw_string(offset_x, offset_y, "i: アイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
-        offset_y += self.FONT_SIZE + 4
-        self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
-        offset_y += self.FONT_SIZE + 4
-        self.draw_string(offset_x, offset_y, "c: コマンドウィンドウを非表示" if self.cmndwnd.is_visible else "c: コマンドウィンドウを表示")
+            self.draw_string(offset_x, offset_y, "space: 決定")
+            if PLAYER.sender.code_window.rollback_index is not None:
+                offset_y += self.FONT_SIZE + 4
+                self.draw_string(offset_x, offset_y, "↑/↓: 行を選ぶ")
+        else:
+            if PLAYER.isFootActionValid:
+                self.draw_string(offset_x, offset_y, "f: 足元へのアクション")
+                offset_y += self.FONT_SIZE + 4
+            if PLAYER.isFowardActionValid:
+                self.draw_string(offset_x, offset_y, "space: 前方へのアクション")
+                offset_y += self.FONT_SIZE + 4
+            self.draw_string(offset_x, offset_y, "shift押下中に移動: ダッシュ")
+            offset_y += self.FONT_SIZE + 4
+            # self.draw_string(offset_x, offset_y, "i: 宝箱上のアイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
+            # offset_y += self.FONT_SIZE + 4
+            # self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
+            # offset_y += self.FONT_SIZE + 4
+            self.draw_string(offset_x, offset_y, "c: コマンドウィンドウを表示")
         Window.blit(self, screen)
                                                                                                                
 # 88                               I8,        8        ,8I 88                      88                                 
@@ -5251,6 +5254,7 @@ class CodeWindow(Window):
         self.linenum = 1
         self.is_auto_scroll = True
         self.history: list[tuple] = []
+        self.history_index_not_allowed_chosen_list = []
         self.rollback_index: int | None = None
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
@@ -5319,6 +5323,8 @@ class CodeWindow(Window):
         
     def set_rollback_mode(self):
         self.rollback_index = len(self.history) - 1
+        while self.rollback_index in self.history_index_not_allowed_chosen_list:
+            self.rollback_index -= 1
         self.is_auto_scroll = True
         self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
         self.scrollX = 0
@@ -5326,8 +5332,18 @@ class CodeWindow(Window):
     def selectRollBackLine(self, dir: int):
         if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
             return
-        
-        self.rollback_index += dir
+
+        if dir == -1:
+            self.rollback_index -= 1
+            while self.rollback_index in self.history_index_not_allowed_chosen_list:
+                self.rollback_index -= 1
+        else:
+            crnt_rollback_index = self.rollback_index
+            self.rollback_index += 1
+            while self.rollback_index in self.history_index_not_allowed_chosen_list:
+                self.rollback_index += 1
+            if self.rollback_index == len(self.history) - 1:
+                self.rollback_index = crnt_rollback_index
 
         if self.is_auto_scroll:
             self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
@@ -5415,8 +5431,10 @@ class EventSender:
                         for var in item_list:
                             var_dict[(var.name, var.line)] = var.vartype
                         var_list.append(var_dict)
-                    
-                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists}))
+
+                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists[:-1]}))
+                    if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
+                        self.code_window.history_index_not_allowed_chosen_list.append(len(self.code_window.history))
                     PLAYER.isLoopStatementInBefore = False
 
                 if "line" in msg:
