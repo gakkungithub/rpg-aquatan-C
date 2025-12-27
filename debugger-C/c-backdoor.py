@@ -1188,6 +1188,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "", "status": "ok"})
                                 self.vars_tracker.trackStart(self.frame)
                                 self.vars_checker()
+                            elif type == 'ifEnd':
+                                self.event_sender({"message": "", "status": "ok"})
                             elif type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'continue':

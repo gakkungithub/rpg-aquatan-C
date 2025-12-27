@@ -999,7 +999,10 @@ class GenBitMap:
             if condition_comment_dict:
                 self.mapInfo.setWarpZone(crntRoomID, toNodeID, condition_comment_dict, self.func_name, 158, warpNodeID=nodeID)
             else:
-                self.mapInfo.setWarpZone(crntRoomID, toNodeID, {}, self.func_name, 158, warpNodeID=nodeID)
+                if self.mapInfo.condition_line_trackers.get_condition_line_tracker(nodeID)[0] == '':
+                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {}, self.func_name, 158, warpNodeID=nodeID)
+                else:
+                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
             if tempNode_info:
                 self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return

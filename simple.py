@@ -505,8 +505,10 @@ def main():
                 cmd = ""
                 mouse_down = False
                 if MSGWND.is_visible:
-                    break
-                
+                    CMNDWND.hide()
+                    continue
+
+                CMNDWND.show()
                 atxt = CMNDWND.draw(screen, font)
                 CMNDWND.hide()
 
@@ -662,13 +664,6 @@ def main():
                                 item_expand_mouse_pos = event.pos
                             elif action_type == 'scroll':
                                 item_scroll_mouse_pos = event.pos
-                    # if MMAPWND.is_visible:
-                    #     if MMAPWND.auto_scroll_button_rect.collidepoint(event.pos):
-                    #         MMAPWND.is_auto_scroll = True
-                    #         MMAPWND.offset_x = min(MMAPWND.x - PLAYER.x * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.x)
-                    #         MMAPWND.offset_y = min(MMAPWND.y - PLAYER.y * MIN_MAP_SIZE // MMAPWND.tile_num + MIN_MAP_SIZE // 2, MMAPWND.y)
-                    #     elif MMAPWND.isCursorInWindow(event.pos):
-                    #         mmap_scroll_mouse_pos = event.pos
                     if len(PLAYER.funcInfoWindow_list):
                         PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
                     
@@ -777,9 +772,6 @@ def main():
                 
                 # region keydown event
                 ## open map
-                # if event.type == KEYDOWN and event.key == K_i:
-                #     PLAYER.set_game_mode("item")
-
                 # if event.type == KEYDOWN and event.key == K_m:
                 #     # if MMAPWND.is_visible:
                 #     #     MMAPWND.hide()
@@ -4932,6 +4924,8 @@ class CommandWindow(Window):
         self.myfont = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.txt = ""
+        self.command_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "command_open.wav"))
+        self.command_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "command_close.wav"))
 
     def read(self,screen,font):
         self.txt = ""
@@ -4946,6 +4940,7 @@ class CommandWindow(Window):
                     elif event.key == K_ESCAPE:
                         self.txt = ""
                         isEnd = True
+                        self.command_close_sound.play()
                     elif event.key in (K_LEFT, K_BACKSPACE):
                         self.txt = self.txt[:-1]
 
@@ -4994,6 +4989,7 @@ class CommandWindow(Window):
     def draw(self, screen, font):
         Window.draw(self)
         Window.blit(self, screen)
+        self.command_open_sound.play()
         result = self.read(screen, font)
         return result
                                                                                                                                                                                                                                    
