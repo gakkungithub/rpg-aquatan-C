@@ -512,6 +512,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             # 変数が合致していればstepinを実行して次に進む
+
             while len(self.skipped_lines):
                 line = self.skipped_lines.pop(0)
                 skipped_varDecls = list([(var, int(line)) for var in self.varsDeclLines_list[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
@@ -720,6 +721,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             varsDeclLines_copy = varsDeclLines[:]
 
+            print(varsDeclLines_copy)
             if len(varsDeclLines_copy):
                 # やはり、変数は順番に取得させる
                 while len(varsDeclLines_copy):
@@ -830,6 +832,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             self.func_checked.append([self.func_crnt_name])
                                             back_line_number = self.line_number
                                             back_frame_num = self.frame_num
+                                            # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                             self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                             while 1:
                                                 if self.analyze_frame(back_line_number):
@@ -985,6 +988,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     ]
                                     # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                     self.step_conditionally()
+
+                                    # 遷移先の関数に変数宣言がある場合のために変数確認する
+                                    self.vars_checker()
                                     while 1:
                                         if self.analyze_frame(fromTo[0]):
                                             continue
@@ -1117,8 +1123,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     back_frame_num = self.frame_num
+                                    
                                     self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                     self.step_conditionally()
+                                    # 遷移先の関数に変数宣言がある場合のために変数確認する
+                                    self.vars_checker()
                                     while 1:
                                         if self.analyze_frame(fromTo[0]):
                                             continue

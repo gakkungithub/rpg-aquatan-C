@@ -166,12 +166,12 @@ class MapInfo:
     # 話しかけると戻るキャラの設定
     def setCharaReturn(self, roomNodeID, line, func_name, funcNodeID, expNodeInfo):
         local_y, local_x, height, width = self.room_info[roomNodeID]["room_size"]
-        zero_elements = np.argwhere(self.eventMap[local_y+self.offset["y"]:local_y+self.offset["y"]+height, local_x+self.offset["x"]:local_x+self.offset["x"]+width] == 0)
+        zero_elements = np.argwhere(self.eventMap[local_y+self.offset["y"]+1:local_y+self.offset["y"]+height-1, local_x+self.offset["x"]+1:local_x+self.offset["x"]+width-1] == 0)
         y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-        self.eventMap[local_y+self.offset["y"]+y, local_x+self.offset["x"]+x] = self.ISEVENT
+        self.eventMap[local_y+self.offset["y"]+y+1, local_x+self.offset["x"]+x+1] = self.ISEVENT
         _, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(funcNodeID)
         exp_comments = expNodeInfo[3] if expNodeInfo else []
-        self.chara_returns.append(CharaReturn((local_y+y, local_x+x), func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
+        self.chara_returns.append(CharaReturn((local_y+y+1, local_x+x+1), func_name, [int(line)] + c_move_fromTo if len(c_move_fromTo) else [int(line)], exp_comments))
 
     # ワープゾーンの設定 (条件式については、とりあえず関数だけを確認する)
     # expNodeInfo = exp_str, var_refs, func_refs, exp_comments, exp_line_num
@@ -257,10 +257,10 @@ class MapInfo:
         type, line_track = self.condition_line_trackers.get_condition_line_tracker(lineNodeID)
         if crntRoomID not in self.chara_expressions:
             local_y, local_x, height, width = self.room_info[crntRoomID]["room_size"]
-            zero_elements = np.argwhere(self.eventMap[local_y+self.offset["y"]:local_y+self.offset["y"]+height, local_x+self.offset["x"]:local_x+self.offset["x"]+width] == 0)
+            zero_elements = np.argwhere(self.eventMap[local_y+self.offset["y"]+1:local_y+self.offset["y"]+height-1, local_x+self.offset["x"]+1:local_x+self.offset["x"]+width-1] == 0)
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
-            self.eventMap[local_y+self.offset["y"]+y, local_x+self.offset["x"]+x] = self.ISEVENT
-            self.chara_expressions[crntRoomID] = CharaExpression((local_y+y, local_x+x), func)
+            self.eventMap[local_y+self.offset["y"]+y+1, local_x+self.offset["x"]+x+1] = self.ISEVENT
+            self.chara_expressions[crntRoomID] = CharaExpression((local_y+y+1, local_x+x+1), func)
         self.chara_expressions[crntRoomID].addExp(type, line_track, expNodeInfo)
 
     # マップデータの生成
@@ -398,13 +398,15 @@ class MapInfo:
             # d, l, r, u = 0, 1, 2, 3
             move_dir_list = []
             pos = (int(chara_checkCondition.local_pos[0] + self.offset["y"]), int(chara_checkCondition.local_pos[1] + self.offset["x"]))
-            if bitMap[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
+            
+            max_y, max_x = bitMap.shape
+            if max_y != pos[0] + 1 and bitMap[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(0)
-            if bitMap[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
+            if pos[1] != 0 and bitMap[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(1)
-            if bitMap[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
+            if max_x != pos[1] + 1 and bitMap[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(2)
-            if bitMap[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
+            if pos[0] != 0 and bitMap[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(3)
             move_dir = random.choice(move_dir_list)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": pos[1], "y": pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,

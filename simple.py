@@ -2527,6 +2527,7 @@ class Window:
             (self.width, self.height), pygame.SRCALPHA)
         # self.surface.convert_alpha()
         self.rect = Rect(0, 0, self.width, self.height)  # 一番外側の白い矩形
+        
         # 内側の黒い矩形
         self.inner_rect = self.rect.inflate(-self.EDGE_WIDTH, -self.EDGE_WIDTH)
         self.is_visible = False  # ウィンドウを表示中か？
@@ -2546,7 +2547,8 @@ class Window:
         else:
             self.surface.fill(Color(0, 0, 0, 0))
 
-    def blit(self, screen):
+    # 画面上に本ウィンドウを描画する
+    def blit(self, screen: pygame.Surface):
         """blit"""
         screen.blit(self.surface, (self.x, self.y))
 
@@ -3230,13 +3232,32 @@ class PauseWindow(Window):
         self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 3 - 30, 200, 60)
         self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 3 - 30, 200, 60)
         self.mode = "pause"
+        # self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128)),),
+        #                          (pygame.transform.smoothscale(load_image("data", "itemwindow.png"), (160, 128)),),
+        #                          (pygame.transform.smoothscale(load_image("data", "itemname_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "itemname_off.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "minimapwindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "codewindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "no_rightwindow.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "game_quit.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128))),
+        #                          (pygame.transform.smoothscale(load_image("data", "status.png"), (160, 128)),),
+        #                          (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
+        #                          ]
+        # self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
+        #                          [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージをくらいます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
+        #                          [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
+        #                          [["cキーでコマンドウィンドウを開きます", "stdinコマンドで標準入力", "rollbackで処理の巻戻しです"]],
+        #                          [["bキーでアイテムウィンドウを開きます", "取得したアイテム(変数)が表示されます", "カーソルで内部をスクロールできます"]],
+        #                          [["iキーで宝箱の上のアイテム名の", "表示を切り替えられます"], [""]],
+        #                          [["mキーで右上のウィンドウを切り替えられます", "全体マップにはキャラクターや", "宝箱などの位置が表示されています"], ["コードウィンドウでは現在の処理の", "行にハイライトが付きます", "カーソルで内部をスクロールできます"], ["右上のウィンドウが邪魔な時", "非表示にできます"]],
+        #                          [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
+        #                          [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
+        #                          [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
+        #                          ]
         self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128)),),
-                                 (pygame.transform.smoothscale(load_image("data", "itemwindow.png"), (160, 128)),),
-                                 (pygame.transform.smoothscale(load_image("data", "itemname_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "itemname_off.png"), (160, 128))),
-                                 (pygame.transform.smoothscale(load_image("data", "minimapwindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "codewindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "no_rightwindow.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "game_quit.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "status.png"), (160, 128)),),
                                  (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
@@ -3244,10 +3265,7 @@ class PauseWindow(Window):
         self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
                                  [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージをくらいます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
                                  [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
-                                 [["cキーでコマンドウィンドウを開きます", "stdinコマンドで標準入力", "rollbackで処理の巻戻しです"]],
-                                 [["bキーでアイテムウィンドウを開きます", "取得したアイテム(変数)が表示されます", "カーソルで内部をスクロールできます"]],
-                                 [["iキーで宝箱の上のアイテム名の", "表示を切り替えられます"], [""]],
-                                 [["mキーで右上のウィンドウを切り替えられます", "全体マップにはキャラクターや", "宝箱などの位置が表示されています"], ["コードウィンドウでは現在の処理の", "行にハイライトが付きます", "カーソルで内部をスクロールできます"], ["右上のウィンドウが邪魔な時", "非表示にできます"]],
+                                 [["cキーでコマンドウィンドウを開きます", "\"rollback\"と打つと、過去の処理に戻れます"]],
                                  [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
                                  [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
                                  [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
@@ -3425,6 +3443,9 @@ class ItemWindow(Window):
         Window.draw(self)
         offset_y = self.offset_y
         offset_x = self.offset_x
+
+        self.draw_string(10, 8, "アイテム", self.CYAN, 20)
+        offset_y += 24
 
         right_edge = self.offset_x
         # グローバル変数
@@ -3616,12 +3637,12 @@ class ItemWindow(Window):
         if self.is_inAction:
             return None
         
-        # アイテムウィンドウの拡大
         local_pos = (pos[0] - self.x, pos[1] - self.y)
 
-        if self.rect[2] - 20 <= local_pos[0] <= self.rect[2] and self.rect[3] - 20 <= local_pos[1] <= self.rect[3]:
-            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
-            return 'expand'
+        # # アイテムウィンドウの拡大
+        # if self.rect[2] - 20 <= local_pos[0] <= self.rect[2] and self.rect[3] - 20 <= local_pos[1] <= self.rect[3]:
+        #     pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
+        #     return 'expand'
         
         for filename, button in self.file_buttons.items():
             if button.collidepoint(local_pos):
@@ -3641,11 +3662,11 @@ class ItemWindow(Window):
             self.item_changed_lines = set()
             return None
         
-        if self.x <= local_pos[0] <= self.rect[2] and y_line in self.item_changed_lines and not MSGWND.is_visible:
+        if 10 <= local_pos[0] <= self.rect[2] and y_line in self.item_changed_lines and not MSGWND.is_visible:
             self.check_comments_line = (y_line, False)
             return None
         
-        if self.x <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
+        if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
             self.item_changed_lines = set()
             self.action_trigger_line_dict = {}
             return 'scroll'
@@ -4243,7 +4264,7 @@ class Treasure():
         item = Item(self.item, line, data, comments, self.vartype)
         PLAYER.itembag.items[-1].append(item)
 
-    def draw(self, screen, offset):
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
         """オフセットを考慮してイベントを描画"""
         offsetx, offsety = offset
         px = self.rect.topleft[0]
@@ -5005,6 +5026,7 @@ class CommandWindow(Window):
 class ControllerGuideWindow(Window):
     FONT_SIZE = 12
     TEXT_COLOR = Color(255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect, mmapwnd: "MiniMapWindow", cmndwnd: "CommandWindow"):
         Window.__init__(self, rect)
@@ -5012,10 +5034,14 @@ class ControllerGuideWindow(Window):
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
 
-    def draw_string(self, x, y, string, color = None):
+    def draw_string(self, x: int, y: int, string: str, color: pygame.Color = None, size=None):
         """文字列出力"""
+        if size:
+            self.font.size = size
         surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+        if size:
+            self.font.size = self.FONT_SIZE
 
     def draw(self, screen: pygame.Surface, isSelectMsgText: bool):
         if not self.is_visible:
@@ -5023,6 +5049,9 @@ class ControllerGuideWindow(Window):
         Window.draw(self)
         offset_x = 10
         offset_y = 10
+        self.draw_string(10, 10+4, "操作", self.CYAN, 20)
+        offset_y += 24
+
         if self.cmndwnd.is_visible:
             self.draw_string(offset_x, offset_y, "escape:")
             offset_y += self.FONT_SIZE
@@ -5030,7 +5059,7 @@ class ControllerGuideWindow(Window):
             offset_y += (self.FONT_SIZE + 4) * 2
             self.draw_string(offset_x, offset_y, "入力コマンド:", Color(255, 0, 0, 255))
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "rollback: 処理の巻き戻し")
+            self.draw_string(offset_x, offset_y, "rollback: 過去に戻れる")
             # offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "stdio A B...:")
             # offset_y += self.FONT_SIZE
@@ -5052,6 +5081,14 @@ class ControllerGuideWindow(Window):
                 offset_y += self.FONT_SIZE + 4
             self.draw_string(offset_x, offset_y, "shift押下中に移動: ダッシュ")
             offset_y += self.FONT_SIZE + 4
+            self.draw_string(offset_x, offset_y, "カーソル:")
+            offset_y += self.FONT_SIZE
+            self.draw_string(offset_x, offset_y, "　クリックでボタンを押す")
+            offset_y += self.FONT_SIZE
+            self.draw_string(offset_x, offset_y, "　または")
+            offset_y += self.FONT_SIZE
+            self.draw_string(offset_x, offset_y, "　ウィンドウ内をスクロール")
+            offset_y += (self.FONT_SIZE + 4) * 2
             # self.draw_string(offset_x, offset_y, "i: 宝箱上のアイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
             # offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
@@ -5073,15 +5110,20 @@ class ControllerGuideWindow(Window):
 class LogWindow(Window):
     FONT_SIZE = 12
     TEXT_COLOR = Color(255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
 
-    def draw_string(self, x: int, y: int, string: str, color = None):
+    def draw_string(self, x: int, y: int, string: str, color=None, size=None):
         """文字列出力"""
+        if size:
+            self.font.size = size
         surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+        if size:
+            self.font.size = self.FONT_SIZE
 
     def draw(self, screen, isTutorial):
         if not self.is_visible:
@@ -5089,6 +5131,9 @@ class LogWindow(Window):
         Window.draw(self)
         offset_x = 10
         offset_y = 10
+
+        self.draw_string(10, 10+4, "ログ", self.CYAN, 20)
+        offset_y += 24
         
         if isTutorial and PLAYER.sender.code_window.linenum in PLAYER.help_dict:
             self.font.size = 20
@@ -5234,6 +5279,7 @@ class CodeWindow(Window):
     HIGHLIGHT_COLOR = (0, 0, 255)
     ROLLBACK_COLOR = Color(100, 248, 248, 255)
     TEXT_COLOR = (255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect, name):
         Window.__init__(self, rect)
@@ -5262,10 +5308,14 @@ class CodeWindow(Window):
         with open(self.c_file_path, 'r', encoding="utf-8") as f:
             return f.readlines()
         
-    def draw_string(self, x, y, string, color):
+    def draw_string(self, x, y, string, color, size=None):
         """文字列出力"""
+        if size:
+            self.font.size = size
         surf, rect = self.font.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+        if size:
+            self.font.size = self.FONT_SIZE
 
     def update_code_line(self, linenum):
         self.linenum = linenum
@@ -5277,9 +5327,16 @@ class CodeWindow(Window):
         x_offset = 10 - self.scrollX
         y_offset = 10 - self.scrollY
         digit_line = len(str(len(self.lines)))
+        
+        self.draw_string(10, 14, "ソースコード", self.CYAN, 20)
+        y_offset += 30
+
         for i, line in enumerate(self.lines):
             # 自動調整onの時は現在の行の3行前から表示するようにする
             if (self.is_auto_scroll and self.rollback_index is None) and i < self.linenum - 3:
+                continue
+            if y_offset < 40:
+                y_offset += self.FONT_SIZE + 4
                 continue
             if y_offset > self.maxY:
                 break
@@ -5308,6 +5365,7 @@ class CodeWindow(Window):
             label_surf, _ = self.font.render("自動スクロール", (255, 255, 255))
             label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
             self.surface.blit(label_surf, label_rect)
+        
         Window.blit(self, screen)
     
     def isCursorInWindow(self, pos : tuple[int, int]):

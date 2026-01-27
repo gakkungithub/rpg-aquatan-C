@@ -1560,6 +1560,8 @@ class ASTtoFlowChart:
 
                     if first_line:
                         begin_line_list.append(first_line)
+                        if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
+                            stmt_cursor_list_in_case.append(stmt_cursor)
                     else:
                         # 最後までcaseが出ない場合
                         if i == len(comp_stmt_cursor_list) - 1:
@@ -1645,6 +1647,7 @@ class ASTtoFlowChart:
                 
                 nodeID = caseNodeID
                 begin_line_list_by_stmt: list[int | None] = []
+
                 for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
                     if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
                         begin_line_list_by_stmt.append(stmt_cursor.location.line)
@@ -1653,6 +1656,7 @@ class ASTtoFlowChart:
                     else:
                         begin_line_list_by_stmt.append(self.get_next_line_in_comp([stmt_cursor]))
 
+                print(begin_line_list_by_stmt)
                 for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
                     if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
                         nodeID = self.parse_stmt(stmt_cursor, nodeID)
@@ -1685,6 +1689,7 @@ class ASTtoFlowChart:
                             self.nextLines.append((begin_line_list_by_stmt[j+1], True))
                         else:
                             next_line = None
+                            print(begin_line_list_by_stmt, j+1)
                             for next_line in begin_line_list_by_stmt[j+1:]:
                                 if next_line:
                                     break
@@ -1693,11 +1698,14 @@ class ASTtoFlowChart:
                             else:
                                 if i == len(cursor_list_by_case) - 1:
                                     self.nextLines.append((comp_exec_cursor.extent.end.line, True))
+                                    print('here1', self.nextLines)
                                 else:
                                     if stmt_cursor_list_in_case[-1].kind == ci.CursorKind.COMPOUND_STMT:
                                         self.nextLines.append((stmt_cursor_list_in_case[-1].extent.end.line, True))
                                     else:
+                                        print('here3')
                                         self.nextLines.append((begin_line_list[i+1], True))
+                                    print('here2', self.nextLines)
                         if j == len(stmt_cursor_list_in_case) - 1:
                             if stmt_cursor.kind == ci.CursorKind.WHILE_STMT:
                                 nodeID = self.parse_while_stmt(stmt_cursor, nodeID, isFinalStmtInSwitch=True)
