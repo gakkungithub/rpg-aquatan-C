@@ -726,22 +726,6 @@ def main():
                             else:
                                 CODEWND.scrollX = 0
                             code_scroll_mouse_pos = event.pos
-                        # elif item_expand_mouse_pos:
-                        #     # dy = event.pos[1] - item_expand_mouse_pos[1]
-                        #     dx = event.pos[0] - item_expand_mouse_pos[0]
-                        #     if SCR_WIDTH // 5 - 10 <= ITEMWND.rect[2] + dx <= SCR_WIDTH // 2 and not (dx >= 0 and ITEMWND.is_right_edge):
-                        #         ITEMWND.rect[2] += dx
-                        #         ITEMWND.width += dx
-                        #     else:
-                        #         dx = 0
-                        #     # if SCR_HEIGHT // 5 * 3 - 10 <= ITEMWND.rect[3] + dy <= SCR_WIDTH - 10 and not (dy >= 0 and ITEMWND.is_bottom_edge):
-                        #     #     ITEMWND.rect[3] += dy
-                        #     #     ITEMWND.height += dy 
-                        #     # else:
-                        #     #     dy = 0
-                        #     if dx != 0 or dy != 0:
-                        #         ITEMWND.surface = pygame.transform.smoothscale(ITEMWND.surface, (ITEMWND.width, ITEMWND.height))
-                        #     item_expand_mouse_pos = event.pos
                         elif item_scroll_mouse_pos:
                             dy = event.pos[1] - item_scroll_mouse_pos[1]
                             dx = event.pos[0] - item_scroll_mouse_pos[0]
@@ -754,16 +738,6 @@ def main():
                             elif dx >= 0:
                                 ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
                             item_scroll_mouse_pos = event.pos
-                        # elif mmap_scroll_mouse_pos:
-                        #     dy = event.pos[1] - mmap_scroll_mouse_pos[1]
-                        #     dx = event.pos[0] - mmap_scroll_mouse_pos[0]
-                        #     if (MMAPWND.offset_y > 10 and dy > 0) or (MMAPWND.offset_y - MMAPWND.rect[3] < 10 - (MMAPWND.row-1) * MMAPWND.tile_size and dy < 0):
-                        #         dy = 0
-                        #     if (MMAPWND.offset_x > SCR_WIDTH - MIN_MAP_SIZE - 10 and dx > 0) or (MMAPWND.offset_x - MMAPWND.rect[2] < SCR_WIDTH - MIN_MAP_SIZE - 10 - (MMAPWND.col-1) * MMAPWND.tile_size and dx < 0):
-                        #         dx = 0
-                        #     MMAPWND.offset_y += dy
-                        #     MMAPWND.offset_x += dx
-                        #     mmap_scroll_mouse_pos = event.pos
                     elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None and mmap_scroll_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
@@ -1998,7 +1972,8 @@ class Player(Character):
                         if chara.initial_direction != self.direction:
                             chara.back_to_init_pos()
                             self.ccchara = None
-                            door = mymap.get_event(self.door["x"], self.door["y"])
+                            if self.door is not None:
+                                door = mymap.get_event(self.door["x"], self.door["y"])
                             if isinstance(door, SmallDoor):
                                 door.close()
                                 self.door = None
@@ -3105,6 +3080,8 @@ class MessageWindow(Window):
                         fieldmap.add_chara(PLAYER)  # マップに再登録
                         PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif self.select_type == 'rollback':
+                    self.sender.code_window.scrollY = 0
+                    self.sender.code_window.scrollX = 0
                     if self.selectMsgText[self.selectingIndex] == "はい":
                         self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
                         rollbackResult = self.sender.receive_json()
@@ -3145,6 +3122,7 @@ class MessageWindow(Window):
                         PLAYER.address_to_fname = {}
                         PLAYER.address_to_size = {}
                         PLAYER.func = player_history[2]["func"]
+                        print(player_history[2]["logLists"])
                         PLAYER.log_lists = player_history[2]["logLists"]
 
                         self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
@@ -3414,16 +3392,20 @@ class ItemWindow(Window):
         if size:
             self.myfont.size = size
         surf, rect = self.myfont.render(string, color)
-        self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
-        if self.is_right_edge and self.rect[2] - 10 < x + rect.width:
-            self.is_right_edge = False
-        if self.is_bottom_edge and self.rect[3] - 10 < y + 24:
-            self.is_bottom_edge = False
+        if y >= 34:
+            self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+            if self.is_right_edge and self.rect[2] - 10 < x + rect.width:
+                self.is_right_edge = False
+            if self.is_bottom_edge and self.rect[3] - 10 < y + 24:
+                self.is_bottom_edge = False
         if size:
             self.myfont.size = self.FONT_HEIGHT
         return x + rect.width
 
     def draw_itemValueChangedRect(self, comments: list[str], offset_y: int):
+        if offset_y < 34:
+            return
+        
         if not MSGWND.is_visible and self.check_comments_line[0] == offset_y // 24:
             if self.check_comments_line[1]:
                 self.check_comments_line = (-1, False)
@@ -3433,6 +3415,13 @@ class ItemWindow(Window):
         self.item_changed_lines.add(offset_y // 24)
         pygame.draw.rect(self.surface, self.RED if self.check_comments_line[0] == offset_y // 24 and self.check_comments_line[1] else self.WHITE, 
                             pygame.Rect(0, offset_y, self.rect.width, 24))
+
+    def draw_icon(self, icon, icon_x, icon_y):
+        if icon_y < 34:
+            return
+        
+        self.surface.blit(icon, (icon_x, icon_y))
+        
 
     def draw(self, screen):
         """メッセージを描画する
@@ -3444,7 +3433,16 @@ class ItemWindow(Window):
         offset_y = self.offset_y
         offset_x = self.offset_x
 
-        self.draw_string(10, 8, "アイテム", self.CYAN, 20)
+        # ウィンドウ名表示
+        self.myfont.size = 20
+        surf, rect = self.myfont.render("アイテム", self.CYAN)
+        self.surface.blit(surf, (10, 8+(self.FONT_HEIGHT+2)-rect[3]))
+        if self.is_right_edge and self.rect[2] - 10 < 10 + rect.width:
+            self.is_right_edge = False
+        if self.is_bottom_edge and self.rect[3] - 10 < 8 + 24:
+            self.is_bottom_edge = False
+        self.myfont.size = self.FONT_HEIGHT
+
         offset_y += 24
 
         right_edge = self.offset_x
@@ -3472,16 +3470,16 @@ class ItemWindow(Window):
 
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
-                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
-                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                self.draw_icon(icon[0], icon_x+8, offset_y+4)
+                self.draw_icon(icon[1], icon_x+4, offset_y+12)
+                self.draw_icon(icon[2], icon_x+12, offset_y+12)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
-                self.surface.blit(icon, (icon_x, offset_y))
+                self.draw_icon(icon, icon_x, offset_y)
 
             if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
 
             # アイコンの右に名前と値を描画
             right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN), right_edge)
@@ -3521,16 +3519,16 @@ class ItemWindow(Window):
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
-                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
-                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                self.draw_icon(icon[0], icon_x+8, offset_y+4)
+                self.draw_icon(icon[1], icon_x+4, offset_y+12)
+                self.draw_icon(icon[2], icon_x+12, offset_y+12)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
-                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
-                self.surface.blit(icon, (icon_x, offset_y))
+                text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
+                self.draw_icon(icon, icon_x, offset_y)
 
             if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
 
             if item.itemvalue.value in PLAYER.address_to_size:
                 self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
@@ -3538,7 +3536,7 @@ class ItemWindow(Window):
             # アイコンの右に名前と値を描画
             right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE), right_edge)
 
-            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname:
+            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and offset_y >= 34:
                 name_offset = self.myfont.get_rect(item.name).width + 30
                 file_button = pygame.Rect(text_x + name_offset, offset_y + 2, 100, 20)
                 pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
@@ -3602,16 +3600,16 @@ class ItemWindow(Window):
 
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.surface.blit(icon[0], (icon_x+8, offset_y+4))
-                self.surface.blit(icon[1], (icon_x+4, offset_y+12))
-                self.surface.blit(icon[2], (icon_x+12, offset_y+12))
+                self.draw_icon(icon[0], icon_x+8, offset_y+4)
+                self.draw_icon(icon[1], icon_x+4, offset_y+12)
+                self.draw_icon(icon[2], icon_x+12, offset_y+12)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
-                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
-                self.surface.blit(icon, (icon_x, offset_y))
+                text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
+                self.draw_icon(icon, icon_x, offset_y)
 
             if constLock:
-                self.surface.blit(constLock, (icon_x + icon.get_width() - 12, offset_y))
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
 
             varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename])
             
@@ -3638,11 +3636,6 @@ class ItemWindow(Window):
             return None
         
         local_pos = (pos[0] - self.x, pos[1] - self.y)
-
-        # # アイテムウィンドウの拡大
-        # if self.rect[2] - 20 <= local_pos[0] <= self.rect[2] and self.rect[3] - 20 <= local_pos[1] <= self.rect[3]:
-        #     pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
-        #     return 'expand'
         
         for filename, button in self.file_buttons.items():
             if button.collidepoint(local_pos):
@@ -5380,7 +5373,7 @@ class CodeWindow(Window):
         while self.rollback_index in self.history_index_not_allowed_chosen_list:
             self.rollback_index -= 1
         self.is_auto_scroll = True
-        self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
+        self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
         self.scrollX = 0
 
     def selectRollBackLine(self, dir: int):
@@ -5396,11 +5389,11 @@ class CodeWindow(Window):
             self.rollback_index += 1
             while self.rollback_index in self.history_index_not_allowed_chosen_list:
                 self.rollback_index += 1
-            if self.rollback_index == len(self.history) - 1:
+            if self.rollback_index >= len(self.history) - 1:
                 self.rollback_index = crnt_rollback_index
 
         if self.is_auto_scroll:
-            self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-19)-18, 0) * (self.FONT_SIZE + 4)
+            self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
 
 # 88888888888                                        ad88888ba                                  88                        
 # 88                                          ,d    d8"     "8b                                 88                        
@@ -5486,7 +5479,8 @@ class EventSender:
                             var_dict[(var.name, var.line)] = var.vartype
                         var_list.append(var_dict)
 
-                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists[:-1]}))
+                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists.copy()}))
+                    
                     if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
                         self.code_window.history_index_not_allowed_chosen_list.append(len(self.code_window.history))
                     PLAYER.isLoopStatementInBefore = False
