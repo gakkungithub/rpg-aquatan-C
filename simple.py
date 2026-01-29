@@ -2165,7 +2165,7 @@ class Player(Character):
                 if event.status == 0:
                     if event.direction == self.direction:
                         event.open()
-                        MSGWND.set(f"「{event.doorname}」への扉を開けた！")
+                        # MSGWND.set(f"「{event.doorname}」への扉を開けた！")
                         if self.door:
                             door = mymap.get_event(self.door["x"], self.door["y"])
                             if isinstance(door, SmallDoor):
@@ -3134,7 +3134,6 @@ class MessageWindow(Window):
                     PLAYER.address_to_fname = {}
                     PLAYER.address_to_size = {}
                     PLAYER.func = player_history[2]["func"]
-                    print(player_history[2]["logLists"])
                     PLAYER.log_lists = player_history[2]["logLists"]
 
                     self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
@@ -3961,7 +3960,7 @@ class MoveEvent():
         py = self.rect.topleft[1]
         screen.blit(self.image, (px-offsetx, py-offsety))
         if len(self.fromTo) and self.fromTo[0] == PLAYER.sender.code_window.linenum:
-            if (('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore):
+            if ((('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore)) and self.type != "ifAllFalse":
                 return
             offsetx, offsety = offset
             px = self.rect.midtop[0] - 16
