@@ -437,7 +437,8 @@ def main():
         code_scroll_mouse_pos = None
         item_expand_mouse_pos = None
         item_scroll_mouse_pos = None
-        mmap_scroll_mouse_pos = None
+        ctrl_scroll_mouse_pos = None
+        log_scroll_mouse_pos = None
         
         while not PLAYER.goaled:
             clock.tick(MAX_FRAME_PER_SEC)
@@ -466,9 +467,6 @@ def main():
                 fieldmap.draw(screen, offset)
             else:
                 DIMWND.dim()
-                if MSGWND.is_visible:
-                    MSGWND.msgwincount += 1
-                MSGWND.next(fieldmap)
                 pygame.display.update()
                 continue
 
@@ -497,9 +495,6 @@ def main():
             draw_string(screen, SCR_WIDTH-60, 10,
                         f"{PLAYER.x},{PLAYER.y}", Color(255, 255, 255, 128))  # プレイヤー座標
             pygame.display.update()
-
-            if MSGWND.is_visible:
-                MSGWND.msgwincount += 1
 
             if cmd == "command":
                 cmd = ""
@@ -664,6 +659,13 @@ def main():
                                 item_expand_mouse_pos = event.pos
                             elif action_type == 'scroll':
                                 item_scroll_mouse_pos = event.pos
+                    if CTRLGWND.is_visible:
+                        if CTRLGWND.isCursorInWindow(event.pos):
+                            ctrl_scroll_mouse_pos = event.pos
+                    if LOGWND.is_visible:
+                        if LOGWND.isCursorInWindow(event.pos):
+                            log_scroll_mouse_pos = event.pos
+
                     if len(PLAYER.funcInfoWindow_list):
                         PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
                     
@@ -676,8 +678,6 @@ def main():
                     elif item_scroll_mouse_pos:
                         item_scroll_mouse_pos = None
                         ITEMWND.is_inAction = True
-                    elif mmap_scroll_mouse_pos:
-                        mmap_scroll_mouse_pos = None
                     end_timer()
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
@@ -738,7 +738,22 @@ def main():
                             elif dx >= 0:
                                 ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
                             item_scroll_mouse_pos = event.pos
-                    elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None and mmap_scroll_mouse_pos is None:
+                        elif ctrl_scroll_mouse_pos:
+                            dy = event.pos[1] - ctrl_scroll_mouse_pos[1]
+                            if dy < 0 and not CTRLGWND.is_bottom_edge:
+                                CTRLGWND.offset_y += dy
+                            elif dy >= 0:
+                                CTRLGWND.offset_y = min(CTRLGWND.offset_y+dy, 10)
+                            ctrl_scroll_mouse_pos = event.pos
+                        elif log_scroll_mouse_pos:
+                            dy = event.pos[1] - log_scroll_mouse_pos[1]
+                            if dy < 0 and not LOGWND.is_bottom_edge:
+                                LOGWND.offset_y += dy
+                            elif dy >= 0:
+                                LOGWND.offset_y = min(LOGWND.offset_y+dy, 10)
+                            log_scroll_mouse_pos = event.pos
+                                      
+                    elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
                             CMNDWND.show()
@@ -804,7 +819,7 @@ def main():
                     cmd = ""
                     if MSGWND.is_visible:
                         # メッセージウィンドウ表示中なら次ページへ
-                        MSGWND.next(fieldmap, force_next=True)
+                        MSGWND.next(fieldmap)
                     else:
                         # ドアを開ける
                         if PLAYER.unlock(fieldmap):
@@ -814,7 +829,6 @@ def main():
                         PLAYER.talk(fieldmap)
 
                 # endregion
-            MSGWND.next(fieldmap)
             pygame.display.flip()
 
         sender.hp_warning_sound.stop()
@@ -1240,10 +1254,7 @@ class Map:
 
         # 条件・関数ウィンドウはイベント・キャラクターより上に描画したいので、上のループの後に描画する
         if len(PLAYER.funcInfoWindow_list):
-            if PLAYER.funcInfoWindowIndex >= len(PLAYER.funcInfoWindow_list):
-                PLAYER.funcInfoWindowIndex = len(PLAYER.funcInfoWindow_list) - 1
-            else:
-                PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
+            PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
 
         if PLAYER.status["HP"] <= 30:
             self.red_overlay.fill((255, 0, 0, 110 - PLAYER.status["HP"] * 3))
@@ -1773,8 +1784,14 @@ class Player(Character):
         self.door: dict | None = None 
         # プレイヤーが条件式通過した後に条件式確認キャラが元の位置に戻るために記憶する
         self.ccchara: dict | None = None
+
         # 遷移済みの関数の情報を記憶
-        self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {} # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
+        # ワープゾーンの位置(マップ名と座標)をキー、チェック済みの関数を値として格納する
+        self.checkedFuncs: dict[tuple[str, str, int], list[tuple[str, str, bool]]] = {}
+        # 全ての関数の確認が完了したらすぐに消すのではなく、メッセージウィンドウが消えてから消す
+        # そのための変数
+        self.completed_checkFuncs_key: tuple[str, str, int] | None = None
+
         self.goaled = False
         self.funcInfoWindow_list: list[FuncInfoWindow] = []
         self.funcInfoWindowIndex = 0
@@ -2029,7 +2046,8 @@ class Player(Character):
                         if itemResult.get("undefined", False):
                             item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                         if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
-                            self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
+                            self.completed_checkFuncs_key = (mymap.name, event.func, event.fromTo[0])
+
                         mymap.remove_event(event)
                         MSGWND.set(item_get_message)
                     PLAYER.fp.write("itemget, " + mymap.name + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "," + event.item + "\n")
@@ -2053,7 +2071,7 @@ class Player(Character):
                             if moveResult.get('skip', False):
                                 MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
                             elif (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
-                                self.checkedFuncs.pop((mymap.name, event.func, event.fromTo[0]))
+                                self.completed_checkFuncs_key = (mymap.name, event.func, event.fromTo[0])
                             
                             if event.type == 'if':
                                 self.add_log(f"if文の{str(event.fromTo[-2])}行目の条件が真であることを確認")
@@ -2234,7 +2252,7 @@ class Player(Character):
                                         for path in path_list:
                                             item.set_comments(path, comment["comments"])
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
-                                    self.checkedFuncs.pop((mymap.name, chara.func, comment["fromTo"][0]))
+                                    self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
                                 
                                 self.add_log(f"{chara.linenum}行目の「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
@@ -2268,11 +2286,11 @@ class Player(Character):
                                         elif CCCharacterResult.get('skip', False):
                                             MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'loop_skip'))
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
-                                                self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
+                                                self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
                                             self.ccchara = chara.set_checked()
                                         else:
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
-                                                self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
+                                                self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
                                             self.ccchara = chara.set_checked()
                                             if chara.type == 'if':
                                                 self.add_log(f"if文の{str(chara.fromTo[-2])}行目目の条件が真であることを確認")
@@ -2344,7 +2362,7 @@ class Player(Character):
                     MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
                 else:
                     if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
-                        self.checkedFuncs.pop((mymap.name, chara.func, chara.fromTo[0]))
+                        self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
                     self.move5History.append({'mapname': mapname, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':True})
                     if len(self.move5History) > 5:
                         self.move5History.pop(0)
@@ -2715,7 +2733,6 @@ class MessageWindow(Window):
     MAX_LINES = 30             # メッセージを格納できる最大行数
     LINE_HEIGHT = 2            # 行間の大きさ
     animcycle = MAX_FRAME_PER_SEC
-    MSGWAIT = 3 * MAX_FRAME_PER_SEC
     HIGHLIGHT_COLOR = (0, 0, 255)
 
     def __init__(self, rect, msg_eng, sender):
@@ -2735,7 +2752,6 @@ class MessageWindow(Window):
         # max_lines_per_page # 1行の最大行数（4行目は▼用）
         self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
         self.max_chars_per_page = self.max_chars_per_line * self.max_lines_per_page  # 1ページの最大文字数
-        self.msgwincount = 0
         self.selectMsgText = None
         self.select_type = None
         self.selectingIndex = 0
@@ -2798,7 +2814,7 @@ class MessageWindow(Window):
                 self.cur_pos += 1  # 1文字流す
                 # テキスト全体から見た現在位置
                 p = self.cur_page * self.max_chars_per_page + self.cur_pos
-                if len(self.text) == p:  # 終端文字
+                if len(self.text) == p:  # 最後の文字ならウィンドウ消去フラグを建てる
                     self.hide_flag = True
                 elif self.text[p] == "\n":  # 改行文字
                     self.cur_pos += self.max_chars_per_line
@@ -2806,8 +2822,6 @@ class MessageWindow(Window):
                 elif self.text[p] == "\f":  # 改ページ文字
                     self.cur_pos += self.max_chars_per_page
                     self.cur_pos = self.cur_pos//self.max_chars_per_page * self.max_chars_per_page
-                # elif self.text[p] == "$" and len(self.text) == p + 1:  # 終端文字
-                #     self.hide_flag = True
                 # 1ページの文字数に達したら▼を表示
                 if self.cur_pos % self.max_chars_per_page == 0:
                     self.next_flag = True
@@ -2860,330 +2874,329 @@ class MessageWindow(Window):
     def selectMsg(self, dir: int):
         self.selectingIndex = (self.selectingIndex + dir) % len(self.selectMsgText)
 
-    def next(self, fieldmap: Map, force_next=False):
-        """メッセージを先に進める"""
-        if (self.msgwincount > self.MSGWAIT and not (self.selectMsgText is not None and self.hide_flag)) or force_next:
-            # 5秒経つか、スペースキーによる強制進行でメッセージを先に進める (ただし、セレクトメッセージの場合は、強制進行でないと進められない)
-            if self.select_type == 'help':
-                if not force_next:
-                    return
-            elif self.selectMsgText and self.hide_flag and self.sender is not None:
-                if self.select_type == 'loop_skip':
-                    if self.selectMsgText[self.selectingIndex] == "はい":
-                        # 暗転
-                        DIMWND.show(200, 'skip')
-                        startLine = self.sender.code_window.linenum
-                        self.sender.send_event({"skip": True})
-                        skipResult = self.sender.receive_json()
-                        self.sender.code_window.linenum = skipResult["finalLine"]
-                        if startLine != skipResult["finalLine"]:
-                            for event in fieldmap.events:
-                                if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
-                                    fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
-                                    PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
-                                    fieldmap.add_chara(PLAYER)  # マップに再登録
-                                    skipResult['message'] += f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
-                                    break
-                        self.set(skipResult['message'])
-                        PLAYER.remove_itemvalue()
-                        for name, item_info in skipResult["items"].items():
-                            for line, value in item_info.items():
-                                item = PLAYER.commonItembag.find(name, int(line))
-                                if item is None:
-                                    item = PLAYER.itembag.find(name, int(line))
-                                if item is not None:
-                                    item.update_value(value)
-                    else:
-                        self.sender.send_event({"skip": False})
-                        skipResult = self.sender.receive_json()
-                        self.set(skipResult['message'])
-                elif self.select_type == 'func_skip':
-                    if self.selectMsgText[self.selectingIndex] == "はい":
-                        self.sender.send_event({"skip": True})
-                        skipResult = self.sender.receive_json()
-                        self.set(skipResult['message'])
-                        PLAYER.remove_itemvalue()
-                        for name, item_info in skipResult["items"].items():
-                            for line, value in item_info.items():
-                                item = PLAYER.commonItembag.find(name, int(line))
-                                if item is None:
-                                    item = PLAYER.itembag.find(name, int(line))
-                                if item is not None:
-                                    item.update_value(value)
-                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                        if isinstance(event, Treasure) and len(event.funcWarp) != 0:
-                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
-                        # 暗転
-                        DIMWND.show(200, 'skip')
-                        fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
-                        PLAYER.set_pos(PLAYER.x, PLAYER.y, DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                    else:
-                        self.sender.send_event({"skip": False})
-                        skipResult = self.sender.receive_json()
-                        self.set(skipResult['message'])
-                        # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
-                        dest_map = fieldmap.name
-                        dest_x = skipResult["skipTo"]["x"]
-                        dest_y = skipResult["skipTo"]["y"]
-
-                        PLAYER.func = skipResult["skipTo"]["name"]
-
-                        from_map = fieldmap.name
-                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                        if len(PLAYER.move5History) > 5:
-                            PLAYER.move5History.pop(0)
-                        PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
-                        
-                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                        if isinstance(event, Treasure) and len(event.funcWarp) != 0:
-                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
-                            newItems = []
-                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
-                            arg_index = 0
-                            for name, argInfo in skipResult["skipTo"]["items"].items():
-                                for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], event.comments["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
-                                    newItems.append(item)
-                                    arg_index += 1
-                            PLAYER.itembag.items.append(newItems)
-                        # 暗転
-                        DIMWND.show(200, 'warp')
-                        fieldmap.create(dest_map)  # 移動先のマップで再構成
-                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
-                    if self.selectMsgText[self.selectingIndex] == "はい":
-                        self.sender.send_event({"skip": True})
-                        DIMWND.show(200, 'skip')
-                        skipResult = self.sender.receive_json()
-                        self.set(skipResult['message'])
-                        PLAYER.remove_itemvalue()
-                        for name, item_info in skipResult["items"].items():
-                            for line, value in item_info.items():
-                                item = PLAYER.commonItembag.find(name, int(line))
-                                if item is None:
-                                    item = PLAYER.itembag.find(name, int(line))
-                                if item is not None:
-                                    item.update_value(value)
-                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                        if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
-                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
-                        if PLAYER.direction == DOWN:
-                            x = PLAYER.x
-                            y = PLAYER.y+1
-                        elif PLAYER.direction == LEFT:
-                            x = PLAYER.x-1
-                            y = PLAYER.y
-                        elif PLAYER.direction == RIGHT:
-                            x = PLAYER.x+1
-                            y = PLAYER.y
+    def next(self, fieldmap: Map):
+        # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
+        if self.selectMsgText and not (self.next_flag or self.hide_flag):
+            return
+        
+        if self.sender is not None and self.selectMsgText:
+            if self.select_type == 'loop_skip':
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    # 暗転
+                    DIMWND.show(200, 'skip')
+                    startLine = self.sender.code_window.linenum
+                    self.sender.send_event({"skip": True})
+                    skipResult = self.sender.receive_json()
+                    self.sender.code_window.linenum = skipResult["finalLine"]
+                    if startLine != skipResult["finalLine"]:
+                        for event in fieldmap.events:
+                            if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
+                                fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                                PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
+                                fieldmap.add_chara(PLAYER)  # マップに再登録
+                                skipResult['message'] += f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
+                                break
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            item = PLAYER.commonItembag.find(name, int(line))
+                            if item is None:
+                                item = PLAYER.itembag.find(name, int(line))
+                            if item is not None:
+                                item.update_value(value)
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+            elif self.select_type == 'func_skip':
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    self.sender.send_event({"skip": True})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            item = PLAYER.commonItembag.find(name, int(line))
+                            if item is None:
+                                item = PLAYER.itembag.find(name, int(line))
+                            if item is not None:
+                                item.update_value(value)
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, Treasure) and len(event.funcWarp) != 0:
+                        if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
                         else:
-                            x = PLAYER.x
-                            y = PLAYER.y-1
-                        chara = fieldmap.get_chara(x, y)
-                        if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
-                            if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
-                        elif isinstance(chara, CharaExpression):
-                            if (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
-                    else:
-                        self.sender.send_event({"skip": False})
-                        skipResult = self.sender.receive_json()
-                        event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                        if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
-                            if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
-                            newItems = []
-                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
-                            arg_index = 0
-                            for name, argInfo in skipResult["skipTo"]["items"].items():
-                                for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
-                                    newItems.append(item)
-                                    arg_index += 1
-                            PLAYER.itembag.items.append(newItems)
-                        if PLAYER.direction == DOWN:
-                            x = PLAYER.x
-                            y = PLAYER.y+1
-                        elif PLAYER.direction == LEFT:
-                            x = PLAYER.x-1
-                            y = PLAYER.y
-                        elif PLAYER.direction == RIGHT:
-                            x = PLAYER.x+1
-                            y = PLAYER.y
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
+                    # 暗転
+                    DIMWND.show(200, 'skip')
+                    fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                    PLAYER.set_pos(PLAYER.x, PLAYER.y, DOWN)  # プレイヤーを移動先座標へ
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
+                    dest_map = fieldmap.name
+                    dest_x = skipResult["skipTo"]["x"]
+                    dest_y = skipResult["skipTo"]["y"]
+
+                    PLAYER.func = skipResult["skipTo"]["name"]
+
+                    from_map = fieldmap.name
+                    PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                    if len(PLAYER.move5History) > 5:
+                        PLAYER.move5History.pop(0)
+                    PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
+                    
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, Treasure) and len(event.funcWarp) != 0:
+                        if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
                         else:
-                            x = PLAYER.x
-                            y = PLAYER.y-1
-                        chara = fieldmap.get_chara(x, y)
-                        if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
-                            if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
-                            newItems = []
-                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])]) - 1
-                            arg_index = 0
-                            for name, argInfo in skipResult["skipTo"]["items"].items():
-                                for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], chara.func_argcomments[func_num_checked]["args"][arg_index] if isinstance(chara, CharaCheckCondition) else chara.comments[func_num_checked]["args"][arg_index], itemInfo["type"])
-                                    newItems.append(item)
-                                    arg_index += 1
-                            PLAYER.itembag.items.append(newItems)
-                        elif isinstance(chara, CharaExpression):
-                            if (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])].append((skipResult["skipTo"]["name"], None, True))
-                            else:
-                                PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skipTo"]["name"], None, True)]
-                            newItems = []
-                            func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])]) - 1
-                            arg_index = 0
-                            for name, argInfo in skipResult["skipTo"]["items"].items():
-                                for line, itemInfo in argInfo.items():
-                                    item = Item(name, int(line), itemInfo["value"], chara.comments[str(chara.linenum)]["comments"][func_num_checked]["args"][arg_index], itemInfo["type"])
-                                    newItems.append(item)
-                                    arg_index += 1
-                            PLAYER.itembag.items.append(newItems)
-                        self.set(skipResult['message'])
-                        # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
-                        dest_map = fieldmap.name
-                        dest_x = skipResult["skipTo"]["x"]
-                        dest_y = skipResult["skipTo"]["y"]
-
-                        from_map = fieldmap.name
-                        PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
-                        if len(PLAYER.move5History) > 5:
-                            PLAYER.move5History.pop(0)
-                        PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
-                        
-                        # 暗転
-                        DIMWND.show(200, 'warp')
-                        fieldmap.create(dest_map)  # 移動先のマップで再構成
-                        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-                elif self.select_type == 'rollback':
-                    self.sender.code_window.scrollY = 0
-                    self.sender.code_window.scrollX = 0
-                    if self.selectMsgText[self.selectingIndex] == "はい":
-                        self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
-                        rollbackResult = self.sender.receive_json()
-                        player_history = self.sender.code_window.history[self.sender.code_window.rollback_index]
-                        self.sender.code_window.linenum = player_history[1]
-                        # 暗転
-                        DIMWND.show(200, 'rollback')
-                        PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
-                        PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
-                        PLAYER.dest = {}
-                        PLAYER.place_label = "away"
-                        PLAYER.automove = []
-                        PLAYER.waitingMove = None
-                        PLAYER.moveHistory = []
-                        PLAYER.move5History = []
-                        PLAYER.commonItembag = ItemBag()
-
-                        # items = ast.literal_eval(config.get("game", "items"))
-                        for gvar_name, gvar_info in rollbackResult["gvars"].items():
-                            for line, values in gvar_info.items():
-                                PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {}, player_history[2]["gvars"][(gvar_name, int(line))]))
-
-                        PLAYER.itembag = ItemBag()
-                        if len(rollbackResult["vars"]) != 0:
-                            PLAYER.itembag.items.pop(0)
-                        for i, var_dict in enumerate(rollbackResult["vars"]):
-                            PLAYER.itembag.items.append([])
-                            for var_name, var_info in var_dict.items():
-                                for line, values in var_info.items():
-                                    PLAYER.itembag.add(Item(var_name, int(line), values, {}, player_history[2]["vars"][i][(var_name, int(line))]))
- 
-                        PLAYER.door = player_history[2]["door"]
-                        PLAYER.ccchara = player_history[2]["ccchara"]
-                        PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
-                        PLAYER.funcInfoWindow_list = []
-                        PLAYER.funcInfoWindowIndex = 0
-                        PLAYER.std_messages = []
-                        PLAYER.address_to_fname = {}
-                        PLAYER.address_to_size = {}
-                        PLAYER.func = player_history[2]["func"]
-                        print(player_history[2]["logLists"])
-                        PLAYER.log_lists = player_history[2]["logLists"]
-
-                        self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
-
-                        fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
+                        newItems = []
+                        func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
+                        arg_index = 0
+                        for name, argInfo in skipResult["skipTo"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], event.comments["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    # 暗転
+                    DIMWND.show(200, 'warp')
+                    fieldmap.create(dest_map)  # 移動先のマップで再構成
+                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    self.sender.send_event({"skip": True})
+                    DIMWND.show(200, 'skip')
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            item = PLAYER.commonItembag.find(name, int(line))
+                            if item is None:
+                                item = PLAYER.itembag.find(name, int(line))
+                            if item is not None:
+                                item.update_value(value)
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
+                        if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
+                    if PLAYER.direction == DOWN:
+                        x = PLAYER.x
+                        y = PLAYER.y+1
+                    elif PLAYER.direction == LEFT:
+                        x = PLAYER.x-1
+                        y = PLAYER.y
+                    elif PLAYER.direction == RIGHT:
+                        x = PLAYER.x+1
+                        y = PLAYER.y
                     else:
-                        self.sender.send_event({"rollback": False})
-                        self.sender.receive_json()
-                        MSGWND.set("巻き戻しを取り止めました")
-                    self.sender.code_window.rollback_index = None
-                elif self.select_type == 'rollback_to_init':
-                    if self.selectMsgText[self.selectingIndex] == "はい":
-                        player_history = self.sender.code_window.history[0]
-                        # 暗転
-                        DIMWND.show(200, 'rollback')
-                        PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
-                        PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
-                        PLAYER.dest = {}
-                        PLAYER.place_label = "away"
-                        PLAYER.automove = []
-                        PLAYER.waitingMove = None
-                        PLAYER.moveHistory = []
-                        PLAYER.move5History = []
-                        PLAYER.door = player_history[2]["door"]
-                        PLAYER.ccchara = player_history[2]["ccchara"]
-                        PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
-                        PLAYER.funcInfoWindow_list = []
-                        PLAYER.funcInfoWindowIndex = 0
-                        PLAYER.std_messages = []
-                        PLAYER.address_to_fname = {}
-                        PLAYER.address_to_size = {}
-                        PLAYER.func = player_history[2]["func"]
-                        self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
-                        fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
-                        fieldmap.add_chara(PLAYER)  # マップに再登録
-                        MSGWND.set(f"ゲーム開始時点まで巻き戻しました")
+                        x = PLAYER.x
+                        y = PLAYER.y-1
+                    chara = fieldmap.get_chara(x, y)
+                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
+                        if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
+                    elif isinstance(chara, CharaExpression):
+                        if (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])].append((skipResult["skippedFunc"], skipResult["retVal"], True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skippedFunc"], skipResult["retVal"], True)]
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, MoveEvent) and len(event.funcWarp) != 0:
+                        if (fieldmap.name, event.func, event.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
+                        newItems = []
+                        func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, event.func, event.fromTo[0])]) - 1
+                        arg_index = 0
+                        for name, argInfo in skipResult["skipTo"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    if PLAYER.direction == DOWN:
+                        x = PLAYER.x
+                        y = PLAYER.y+1
+                    elif PLAYER.direction == LEFT:
+                        x = PLAYER.x-1
+                        y = PLAYER.y
+                    elif PLAYER.direction == RIGHT:
+                        x = PLAYER.x+1
+                        y = PLAYER.y
                     else:
-                        MSGWND.set("巻き戻しを取り止めました")
-                elif self.select_type == 'finished':
-                    PLAYER.goaled = True
-                
-                self.selectMsgText = None
-                self.select_type = None
-                self.msgwincount = 0
-                self.selectingIndex = 0
-                return
+                        x = PLAYER.x
+                        y = PLAYER.y-1
+                    chara = fieldmap.get_chara(x, y)
+                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.funcWarp) != 0:
+                        if (fieldmap.name, chara.func, chara.fromTo[0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])].append((skipResult["skipTo"]["name"], None, True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])] = [(skipResult["skipTo"]["name"], None, True)]
+                        newItems = []
+                        func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.fromTo[0])]) - 1
+                        arg_index = 0
+                        for name, argInfo in skipResult["skipTo"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], chara.func_argcomments[func_num_checked]["args"][arg_index] if isinstance(chara, CharaCheckCondition) else chara.comments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    elif isinstance(chara, CharaExpression):
+                        if (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0]) in PLAYER.checkedFuncs:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])].append((skipResult["skipTo"]["name"], None, True))
+                        else:
+                            PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])] = [(skipResult["skipTo"]["name"], None, True)]
+                        newItems = []
+                        func_num_checked = len(PLAYER.checkedFuncs[(fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["fromTo"][0])]) - 1
+                        arg_index = 0
+                        for name, argInfo in skipResult["skipTo"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], chara.comments[str(chara.linenum)]["comments"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    self.set(skipResult['message'])
+                    # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
+                    dest_map = fieldmap.name
+                    dest_x = skipResult["skipTo"]["x"]
+                    dest_y = skipResult["skipTo"]["y"]
 
-            if self.is_visible:
-                # 現在のページが最後のページだったらウィンドウを閉じる
-                if self.hide_flag:
-                    self.hide()
-                # ▼が表示されてれば次のページへ
-                if self.next_flag:
-                    self.message_window_sound.play()
-                    self.cur_page += 1
-                    self.cur_pos = 0
-                    self.next_flag = False
-            self.msgwincount = 0
-                                                                                                                                    
+                    from_map = fieldmap.name
+                    PLAYER.move5History.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'cItems': PLAYER.commonItembag.items[-1], 'items': PLAYER.itembag.items[-1], 'return': False})
+                    if len(PLAYER.move5History) > 5:
+                        PLAYER.move5History.pop(0)
+                    PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["fromLine"]})
+                    
+                    # 暗転
+                    DIMWND.show(200, 'warp')
+                    fieldmap.create(dest_map)  # 移動先のマップで再構成
+                    PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type == 'rollback':
+                self.sender.code_window.scrollY = 0
+                self.sender.code_window.scrollX = 0
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
+                    rollbackResult = self.sender.receive_json()
+                    player_history = self.sender.code_window.history[self.sender.code_window.rollback_index]
+                    self.sender.code_window.linenum = player_history[1]
+                    # 暗転
+                    DIMWND.show(200, 'rollback')
+                    PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
+                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+                    PLAYER.dest = {}
+                    PLAYER.place_label = "away"
+                    PLAYER.automove = []
+                    PLAYER.waitingMove = None
+                    PLAYER.moveHistory = []
+                    PLAYER.move5History = []
+                    PLAYER.commonItembag = ItemBag()
+
+                    # items = ast.literal_eval(config.get("game", "items"))
+                    for gvar_name, gvar_info in rollbackResult["gvars"].items():
+                        for line, values in gvar_info.items():
+                            PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {}, player_history[2]["gvars"][(gvar_name, int(line))]))
+
+                    PLAYER.itembag = ItemBag()
+                    if len(rollbackResult["vars"]) != 0:
+                        PLAYER.itembag.items.pop(0)
+                    for i, var_dict in enumerate(rollbackResult["vars"]):
+                        PLAYER.itembag.items.append([])
+                        for var_name, var_info in var_dict.items():
+                            for line, values in var_info.items():
+                                PLAYER.itembag.add(Item(var_name, int(line), values, {}, player_history[2]["vars"][i][(var_name, int(line))]))
+
+                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.ccchara = player_history[2]["ccchara"]
+                    PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
+                    PLAYER.funcInfoWindow_list = []
+                    PLAYER.funcInfoWindowIndex = 0
+                    PLAYER.std_messages = []
+                    PLAYER.address_to_fname = {}
+                    PLAYER.address_to_size = {}
+                    PLAYER.func = player_history[2]["func"]
+                    print(player_history[2]["logLists"])
+                    PLAYER.log_lists = player_history[2]["logLists"]
+
+                    self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+
+                    fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
+                else:
+                    self.sender.send_event({"rollback": False})
+                    self.sender.receive_json()
+                    MSGWND.set("巻き戻しを取り止めました")
+                self.sender.code_window.rollback_index = None
+            elif self.select_type == 'rollback_to_init':
+                if self.selectMsgText[self.selectingIndex] == "はい":
+                    player_history = self.sender.code_window.history[0]
+                    # 暗転
+                    DIMWND.show(200, 'rollback')
+                    PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
+                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+                    PLAYER.dest = {}
+                    PLAYER.place_label = "away"
+                    PLAYER.automove = []
+                    PLAYER.waitingMove = None
+                    PLAYER.moveHistory = []
+                    PLAYER.move5History = []
+                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.ccchara = player_history[2]["ccchara"]
+                    PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
+                    PLAYER.funcInfoWindow_list = []
+                    PLAYER.funcInfoWindowIndex = 0
+                    PLAYER.std_messages = []
+                    PLAYER.address_to_fname = {}
+                    PLAYER.address_to_size = {}
+                    PLAYER.func = player_history[2]["func"]
+                    self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+                    fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
+                    fieldmap.add_chara(PLAYER)  # マップに再登録
+                    MSGWND.set(f"ゲーム開始時点まで巻き戻しました")
+                else:
+                    MSGWND.set("巻き戻しを取り止めました")
+            elif self.select_type == 'finished':
+                PLAYER.goaled = True
+            
+            self.selectMsgText = None
+            self.select_type = None
+            self.selectingIndex = 0
+            return
+
+        if self.is_visible:
+            # 現在のページが最後のページだったらウィンドウを閉じる
+            if self.hide_flag:
+                if PLAYER.completed_checkFuncs_key:
+                    PLAYER.checkedFuncs.pop(PLAYER.completed_checkFuncs_key)
+                    PLAYER.completed_checkFuncs_key = None
+                self.hide()
+            # ▼が表示されてれば次のページへ
+            if self.next_flag:
+                self.message_window_sound.play()
+                self.cur_page += 1
+                self.cur_pos = 0
+                self.next_flag = False
+                                                                                                                                
 # 88888888ba                                            I8,        8        ,8I 88                      88                                 
 # 88      "8b                                           `8b       d8b       d8' ""                      88                                 
 # 88      ,8P                                            "8,     ,8"8,     ,8"                          88                                 
@@ -3392,7 +3405,7 @@ class ItemWindow(Window):
         if size:
             self.myfont.size = size
         surf, rect = self.myfont.render(string, color)
-        if y >= 34:
+        if y >= 34 or color == self.CYAN:
             self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
             if self.is_right_edge and self.rect[2] - 10 < x + rect.width:
                 self.is_right_edge = False
@@ -3422,7 +3435,6 @@ class ItemWindow(Window):
         
         self.surface.blit(icon, (icon_x, icon_y))
         
-
     def draw(self, screen):
         """メッセージを描画する
         メッセージウィンドウが表示されていないときは何もしない"""
@@ -3434,14 +3446,7 @@ class ItemWindow(Window):
         offset_x = self.offset_x
 
         # ウィンドウ名表示
-        self.myfont.size = 20
-        surf, rect = self.myfont.render("アイテム", self.CYAN)
-        self.surface.blit(surf, (10, 8+(self.FONT_HEIGHT+2)-rect[3]))
-        if self.is_right_edge and self.rect[2] - 10 < 10 + rect.width:
-            self.is_right_edge = False
-        if self.is_bottom_edge and self.rect[3] - 10 < 8 + 24:
-            self.is_bottom_edge = False
-        self.myfont.size = self.FONT_HEIGHT
+        self.draw_string(10, 8, "アイテム", self.CYAN, 20)
 
         offset_y += 24
 
@@ -5026,9 +5031,14 @@ class ControllerGuideWindow(Window):
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
+        self.offset_y = 10
+        self.is_bottom_edge = True
 
     def draw_string(self, x: int, y: int, string: str, color: pygame.Color = None, size=None):
         """文字列出力"""
+        if y < 34 and string != "操作":
+            return
+         
         if size:
             self.font.size = size
         surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
@@ -5041,7 +5051,7 @@ class ControllerGuideWindow(Window):
             return
         Window.draw(self)
         offset_x = 10
-        offset_y = 10
+        offset_y = self.offset_y
         self.draw_string(10, 10+4, "操作", self.CYAN, 20)
         offset_y += 24
 
@@ -5053,7 +5063,7 @@ class ControllerGuideWindow(Window):
             self.draw_string(offset_x, offset_y, "入力コマンド:", Color(255, 0, 0, 255))
             offset_y += self.FONT_SIZE + 4
             self.draw_string(offset_x, offset_y, "rollback: 過去に戻れる")
-            # offset_y += self.FONT_SIZE + 4
+            offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "stdio A B...:")
             # offset_y += self.FONT_SIZE
             # self.draw_string(offset_x, offset_y, "　A B...を標準入力")
@@ -5065,6 +5075,7 @@ class ControllerGuideWindow(Window):
             if PLAYER.sender.code_window.rollback_index is not None:
                 offset_y += self.FONT_SIZE + 4
                 self.draw_string(offset_x, offset_y, "↑/↓: 行を選ぶ")
+            offset_y += self.FONT_SIZE + 4
         else:
             if PLAYER.isFootActionValid:
                 self.draw_string(offset_x, offset_y, "f: 足元へのアクション")
@@ -5087,7 +5098,17 @@ class ControllerGuideWindow(Window):
             # self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
             # offset_y += self.FONT_SIZE + 4
             self.draw_string(offset_x, offset_y, "c: コマンドウィンドウを表示")
+            offset_y += self.FONT_SIZE + 4
+        
+        self.is_bottom_edge = offset_y <= self.rect.height
+        
         Window.blit(self, screen)
+
+    def isCursorInWindow(self, pos : tuple[int, int]):
+        if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.rect.height:
+            return True
+        else:
+            return False
                                                                                                                
 # 88                               I8,        8        ,8I 88                      88                                 
 # 88                               `8b       d8b       d8' ""                      88                                 
@@ -5108,9 +5129,14 @@ class LogWindow(Window):
     def __init__(self, rect):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.offset_y = 10
+        self.is_bottom_edge = True
 
     def draw_string(self, x: int, y: int, string: str, color=None, size=None):
         """文字列出力"""
+        if y < 34 and string != "ログ":
+            return
+
         if size:
             self.font.size = size
         surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
@@ -5123,7 +5149,7 @@ class LogWindow(Window):
             return
         Window.draw(self)
         offset_x = 10
-        offset_y = 10
+        offset_y = self.offset_y
 
         self.draw_string(10, 10+4, "ログ", self.CYAN, 20)
         offset_y += 24
@@ -5143,8 +5169,17 @@ class LogWindow(Window):
                 self.draw_string(offset_x, offset_y, log)
                 offset_y += self.FONT_SIZE + 4
             offset_y += self.FONT_SIZE + 4
+
+        self.is_bottom_edge = offset_y <= self.rect.height
+
         Window.blit(self, screen)
 
+    def isCursorInWindow(self, pos : tuple[int, int]):
+        if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.rect.height:
+            return True
+        else:
+            return False
+        
 # 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
 # 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
 # 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 

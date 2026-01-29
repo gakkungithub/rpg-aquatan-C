@@ -1043,7 +1043,7 @@ class GenBitMap:
                     elif string_comments:
                         arrContExp_values = string_comments
                     else:
-                        arrContExp_values = index_comments + ['初期化されていません']
+                        arrContExp_values = index_comments + ['初期化されていない要素です']
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_values, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':

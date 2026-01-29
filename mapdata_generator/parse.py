@@ -499,6 +499,7 @@ class ASTtoFlowChart:
             nodeID = arrTopNodeID
             index_condition_move = []
             # Mcircleノードに添字の計算式または推定値を取得する
+
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
                     indexNodeID = self.createNode("", 'Mcircle')
@@ -590,7 +591,7 @@ class ASTtoFlowChart:
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
-                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
+                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されていない要素です'], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
@@ -634,7 +635,7 @@ class ASTtoFlowChart:
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ['初期化されてません'], cursor.location.line)
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ['初期化されていないアイテムです'], cursor.location.line)
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
@@ -1656,7 +1657,6 @@ class ASTtoFlowChart:
                     else:
                         begin_line_list_by_stmt.append(self.get_next_line_in_comp([stmt_cursor]))
 
-                print(begin_line_list_by_stmt)
                 for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
                     if stmt_cursor.kind == ci.CursorKind.BREAK_STMT:
                         nodeID = self.parse_stmt(stmt_cursor, nodeID)
@@ -1689,7 +1689,6 @@ class ASTtoFlowChart:
                             self.nextLines.append((begin_line_list_by_stmt[j+1], True))
                         else:
                             next_line = None
-                            print(begin_line_list_by_stmt, j+1)
                             for next_line in begin_line_list_by_stmt[j+1:]:
                                 if next_line:
                                     break
@@ -1698,14 +1697,11 @@ class ASTtoFlowChart:
                             else:
                                 if i == len(cursor_list_by_case) - 1:
                                     self.nextLines.append((comp_exec_cursor.extent.end.line, True))
-                                    print('here1', self.nextLines)
                                 else:
                                     if stmt_cursor_list_in_case[-1].kind == ci.CursorKind.COMPOUND_STMT:
                                         self.nextLines.append((stmt_cursor_list_in_case[-1].extent.end.line, True))
                                     else:
-                                        print('here3')
                                         self.nextLines.append((begin_line_list[i+1], True))
-                                    print('here2', self.nextLines)
                         if j == len(stmt_cursor_list_in_case) - 1:
                             if stmt_cursor.kind == ci.CursorKind.WHILE_STMT:
                                 nodeID = self.parse_while_stmt(stmt_cursor, nodeID, isFinalStmtInSwitch=True)
