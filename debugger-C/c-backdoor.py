@@ -913,15 +913,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
-                            if event.get('type', '') != condition_type:
+                            condition_type_get = event.get('type', '')
+                            if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"NG行動をしました1!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"NG行動をしました2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"NG行動をしました3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             else:
                                 break
                         continue
@@ -1003,15 +1004,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
-                                if event.get('type', '') != condition_type:
+                                condition_type_get = event.get('type', '')
+                                if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"NG行動をしました4!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"NG行動をしました5!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"NG行動をしました6!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1024,12 +1026,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
-                                    if event.get('type', '') != condition_type:
+                                    condition_type_get = event.get('type', '')
+                                    if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"NG行動をしました7!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     elif (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"NG行動をしました8!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
@@ -1062,16 +1065,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"ここから先は進入できません2!!", "status": "ng", "skippedFunc": skipped_func})
+                        self.event_sender({"message": f"ここから先は進入できません22!!", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             if (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                self.event_sender({"message": f"NG行動をしました9!!", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                self.event_sender({"message": f"NG行動をしました10!!", "status": "ng"})
                             else:
                                 break
                         continue
@@ -1123,7 +1126,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     back_frame_num = self.frame_num
-                                    
+
                                     self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
                                     self.step_conditionally()
                                     # 遷移先の関数に変数宣言がある場合のために変数確認する
@@ -1141,10 +1144,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     continue
                                 if (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                    self.event_sender({"message": f"NG行動をしました11!!", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                    self.event_sender({"message": f"NG行動をしました12!!", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1159,10 +1162,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         continue
                                     if (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                        self.event_sender({"message": f"NG行動をしました13!!", "status": "ng"})
                                     elif (funcWarp := event.get('funcWarp', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました!!", "status": "ng"})
+                                        self.event_sender({"message": f"NG行動をしました14!!", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
