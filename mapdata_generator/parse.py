@@ -1227,8 +1227,8 @@ class ASTtoFlowChart:
 
         next_line = self.get_next_line()
 
-        if len(list(then_cursor.get_children())):
-            self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd',  [end_line, next_line[0]])
+        # if len(list(then_cursor.get_children())):
+        #     self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd',  [end_line, next_line[0]])
 
         self.createEdge(then_end, trueEndNodeID)
 

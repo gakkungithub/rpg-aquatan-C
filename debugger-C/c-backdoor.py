@@ -721,7 +721,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             varsDeclLines_copy = varsDeclLines[:]
 
-            print(varsDeclLines_copy)
             if len(varsDeclLines_copy):
                 # やはり、変数は順番に取得させる
                 while len(varsDeclLines_copy):
@@ -1200,8 +1199,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "", "status": "ok"})
                                 self.vars_tracker.trackStart(self.frame)
                                 self.vars_checker()
-                            elif type == 'ifEnd':
-                                self.event_sender({"message": "", "status": "ok"})
+                            # elif type == 'ifEnd':
+                            #     self.event_sender({"message": "", "status": "ok"})
                             elif type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'continue':
@@ -1336,6 +1335,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             self.event_sender({"message": "", "status": "ok"}, False)
                         else:
                             self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                        return CONTINUE
+                    elif len(fromTo) == 0 and type == "":
+                        self.event_sender({"message": "", "status": "ok", "line": self.line_number}, False)
                         return CONTINUE
                     else:
                         self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})

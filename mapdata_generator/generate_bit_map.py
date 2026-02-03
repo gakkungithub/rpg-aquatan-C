@@ -191,7 +191,7 @@ class MapInfo:
         self.eventMap[to_local_y+self.offset["y"]+y, to_local_x+self.offset["x"]+x] = self.ISEVENT
 
         c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(goalNodeID)
-        # doWhileTrue, ifEndについてはワープゾーン情報を上書きする
+        # doWhileTrueについてはワープゾーン情報を上書きする
         if warpNodeID is not None:
             c_move_type, c_move_fromTo = self.condition_line_trackers.get_condition_line_tracker(warpNodeID)
         exp_comments = expNodeInfo[3] if expNodeInfo else []

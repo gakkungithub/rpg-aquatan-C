@@ -2054,7 +2054,7 @@ class Player(Character):
                 else:
                     MSGWND.set(itemResult['message'])
             elif isinstance(event, MoveEvent):
-                if event.type != '':
+                if event.type:
                     ### ワープゾーンに入ろうとしていることの情報を送信する (もしfuncWarpが空でなければ戻ってきた時に関数の繰り返しの処理を行うフラグを立てる)
                     self.sender.send_event({"type": event.type, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
                     moveResult = self.sender.receive_json()
@@ -2127,6 +2127,9 @@ class Player(Character):
                     else:
                         MSGWND.set(moveResult['message'])
                 else:
+                    self.sender.send_event({"type": '', "fromTo": event.fromTo})
+                    self.sender.receive_json()
+
                     dest_map = event.dest_map
                     dest_x = event.dest_x
                     dest_y = event.dest_y
