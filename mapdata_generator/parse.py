@@ -1250,7 +1250,6 @@ class ASTtoFlowChart:
                     self.createEdge(condNodeID, falseNodeID, "False")
                     self.createRoomSizeEstimate(falseNodeID)
                     nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track, 'else')
-                    self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
                     end_line = in_else_cursor[-1].location.line
                     self.line_info_dict[self.scanning_func].setLine(end_line)
                     self.createEdge(nodeID, falseEndNodeID)
