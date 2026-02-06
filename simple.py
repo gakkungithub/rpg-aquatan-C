@@ -649,7 +649,7 @@ def main():
                         local_pos = (event.pos[0] - CODEWND.x, event.pos[1] - CODEWND.y)
                         if CODEWND.auto_scroll_button_rect.collidepoint(local_pos):
                             CODEWND.is_auto_scroll = True
-                            CODEWND.scrollY = 0
+                            CODEWND.scrollY = max(min(CODEWND.linenum, len(CODEWND.lines)-13)-12, 0) * (CODEWND.FONT_SIZE + 4)
                             CODEWND.scrollX = 0
                         elif CODEWND.isCursorInWindow(event.pos):
                             code_scroll_mouse_pos = event.pos
@@ -3792,7 +3792,6 @@ class CharaReturn(Character):
         
     def draw(self, screen, offset):
         super().draw(screen, offset)
-        # self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list}))
         if self.fromTo[0] == PLAYER.sender.code_window.linenum:
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
@@ -5355,6 +5354,9 @@ class CodeWindow(Window):
 
     def update_code_line(self, linenum):
         self.linenum = linenum
+        # 行数が更新されたら、scrollYを更新する
+        if self.is_auto_scroll:
+            self.scrollY = max(min(self.linenum, len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
         
     def draw(self, screen):
         if not self.is_visible:
@@ -5368,9 +5370,6 @@ class CodeWindow(Window):
         y_offset += 30
 
         for i, line in enumerate(self.lines):
-            # 自動調整onの時は現在の行の3行前から表示するようにする
-            if (self.is_auto_scroll and self.rollback_index is None) and i < self.linenum - 3:
-                continue
             if y_offset < 40:
                 y_offset += self.FONT_SIZE + 4
                 continue
