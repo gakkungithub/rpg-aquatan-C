@@ -2763,6 +2763,7 @@ class MessageWindow(Window):
         self.memory_message = ""
         self.str_messages = []
         self.message_window_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "message_window.wav"))
+        self.select_menu_cursor_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "select_menu_cursor.wav"))
 
     def set(self, base_message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
@@ -2876,6 +2877,7 @@ class MessageWindow(Window):
 
     def selectMsg(self, dir: int):
         self.selectingIndex = (self.selectingIndex + dir) % len(self.selectMsgText)
+        self.select_menu_cursor_sound.play()
 
     def next(self, fieldmap: Map):
         # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
@@ -5061,10 +5063,12 @@ class ControllerGuideWindow(Window):
             self.draw_string(offset_x, offset_y, "escape:")
             offset_y += self.FONT_SIZE
             self.draw_string(offset_x, offset_y, "　コマンドウィンドウを非表示")
+            offset_y += self.FONT_SIZE + 4
+            self.draw_string(offset_x, offset_y, "space: コマンドを実行")
             offset_y += (self.FONT_SIZE + 4) * 2
             self.draw_string(offset_x, offset_y, "入力コマンド:", Color(255, 0, 0, 255))
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "rollback: 過去に戻れる")
+            self.draw_string(offset_x, offset_y, "rollback: 過去に戻る")
             offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "stdio A B...:")
             # offset_y += self.FONT_SIZE
@@ -5331,6 +5335,8 @@ class CodeWindow(Window):
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
 
+        self.rollback_cursor_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "rollback_cursor.wav"))
+
     def load_code_lines(self):
         """Cファイルからコードを読み込む"""
         if not os.path.exists(self.c_file_path):
@@ -5373,17 +5379,17 @@ class CodeWindow(Window):
             text = f"{str(i+1):>{digit_line}}  {line.rstrip()}"
             if (i + 1) == self.linenum:
                 bg_rect = pygame.Rect(
-                    x_offset - 5,
+                    5,
                     y_offset,
-                    self.rect.width - 20,
+                    self.rect.width - 10,
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
             if self.rollback_index is not None and (i + 1) == self.history[self.rollback_index][1]:
                 bg_rect = pygame.Rect(
-                    x_offset - 5,
+                    5,
                     y_offset,
-                    self.rect.width - 20,
+                    self.rect.width - 10,
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.ROLLBACK_COLOR, bg_rect)
@@ -5426,8 +5432,10 @@ class CodeWindow(Window):
             self.rollback_index += 1
             while self.rollback_index in self.history_index_not_allowed_chosen_list:
                 self.rollback_index += 1
-            if self.rollback_index >= len(self.history) - 1:
+            if self.rollback_index >= len(self.history):
                 self.rollback_index = crnt_rollback_index
+        
+        self.rollback_cursor_sound.play()
 
         if self.is_auto_scroll:
             self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
