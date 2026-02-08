@@ -81,7 +81,7 @@ class LineInfo:
         self.start = line
 
 class ASTtoFlowChart:
-    def __init__(self):
+    def __init__(self, is_english):
         self.dot = Digraph(comment='Control Flow')
         self.diag_list = []
         self.nextLines: list[tuple[int, bool]] = []
@@ -101,6 +101,9 @@ class ASTtoFlowChart:
         self.condition_move : dict[str, tuple[str, list[int | str | None]]] = {}
         self.line_info_dict: dict[str, LineInfo] = {}
         self.macro_pos = {}
+
+        # 英語モードにする
+        self.is_english = is_english
     
     def createNode(self, nodeLabel, shape='rect'):
         nodeID = str(uuid.uuid4())
@@ -480,7 +483,18 @@ class ASTtoFlowChart:
                 elif cr.kind == ci.CursorKind.STRING_LITERAL:
                     # 文字列を格納する配列の場合
                     indexNodeID = self.createNode(cr.spelling, 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (str(len(cr.spelling)-2), [], [], [f"文字列 {cr.spelling} の文字が1つずつ添字の小さい順から配列に格納されます", f"添字は {len(cr.spelling)-2} が自動的に設定されます"], cursor.location.line)
+                    self.expNode_info[f'"{indexNodeID}"'] = (
+                        str(len(cr.spelling)-2), [], [],
+                        [
+                            f"store each character of {cr.spelling} into the array in increasing index order",
+                            f"array size is automatically set to {len(cr.spelling)-2}"
+                        ] if self.is_english else
+                        [
+                            f"文字列 {cr.spelling} の各文字が添字の小さい順に配列へ格納されます",
+                            f"配列サイズは {len(cr.spelling)-2} に自動的に設定されます"
+                        ],
+                        cursor.location.line
+                    )
                     self.createEdge(arrTopNodeID, indexNodeID, "strCont")
                 else:
                     cr_index_list.append(cr)
@@ -503,7 +517,11 @@ class ASTtoFlowChart:
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
                     indexNodeID = self.createNode("", 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (str(cr_index), [], [], [f"添字は {cr_index} が自動的に設定されます"], cursor.location.line)
+                    self.expNode_info[f'"{indexNodeID}"'] = (
+                        str(cr_index), [], [], 
+                        [f"array size is automatically set to {cr_index}" if self.is_english else f"添字は {cr_index} が自動的に設定されます"], 
+                        cursor.location.line
+                        )
                 else:
                     indexNodeID = self.get_exp(cr_index, shape="Mcircle")
                     index_condition_move += self.expNode_info[f'"{indexNodeID}"'][2]
@@ -591,7 +609,7 @@ class ASTtoFlowChart:
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
-                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ['初期化されていない要素です'], cursor.location.line)
+                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ["this is an uninitialized part" if self.is_english else "初期化されていない要素です"], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
@@ -635,7 +653,7 @@ class ASTtoFlowChart:
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ['初期化されていないアイテムです'], cursor.location.line)
+                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ["this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"], cursor.location.line)
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
@@ -735,7 +753,7 @@ class ASTtoFlowChart:
                         arr_condition_move = [*arr_condition_move, *self.expNode_info[f'"{contentNodeID}"'][2]]
                 else:
                     contentNodeID = self.createNode(arr_content["label"], "square")
-                    self.expNode_info[f'"{contentNodeID}"'] = (str(len(arr_content_list)), [], [], ['ランダムな値が設定されてます'], line)
+                    self.expNode_info[f'"{contentNodeID}"'] = (str(len(arr_content_list)), [], [], ["random value is set here" if self.is_english else "ランダムな値が設定されてます"], line)
                 contentNodeID_list.append(contentNodeID)
             return contentNodeID_list
 
@@ -770,9 +788,25 @@ class ASTtoFlowChart:
             '*': "アドレス {expr} が指す値を読み取ります",
         }
 
+        unary_front_operator_comments_en = {
+            '++': "add 1 to {expr}, then use value of {expr}",
+            '--': "subtract 1 from {expr}, then use value of {expr}",
+            '+': "use value of {expr}",
+            '-': "use negative value of {expr}",
+            '!': "false if {expr} is correct, otherwise true",
+            '~': "flip all the bits in binary of {expr}",
+            '&': "get address of variable {expr}",
+            '*': "scan value of address {expr}",
+        }
+
         unary_back_operator_comments = {
             '++': "{expr} の値を使います。その後、{expr} を 1 増やします",
             '--': "{expr} の値を使います。その後、{expr} を 1 減らします",
+        }
+
+        unary_back_operator_comments_en = {
+            '++': "use value of {expr}, then add 1 to {expr}",
+            '--': "use value of {expr}, then subtract 1 from {expr}",
         }
 
         # 環境依存は後で考える (環境を考えないならctypes.sizeofでOK)
@@ -802,7 +836,7 @@ class ASTtoFlowChart:
             }
         }
 
-        def get_sizeof_operator_comments(type_name):
+        def get_sizeof_operator_comments(type_name, en: bool):
             tokens = type_name.strip().split()
             non_size_modifiers = {'const', 'volatile', 'extern', 'static', 'register', 'inline'}
 
@@ -823,9 +857,9 @@ class ASTtoFlowChart:
 
             size = sizeof_operator_size.get(base_type, sizeof_operator_size['other']).get(frozenset(size_tokens), None)
             if size:
-                return f"{type_name}のサイズ{size}を取得します"
+                return f"get size {size} of {type_name}" if en else f"{type_name}のサイズ{size}を取得します" 
             else:
-                return f"{type_name}のサイズを取得します"
+                return f"get size of {type_name}" if en else f"{type_name}のサイズを取得します"
 
         binary_operator_comments = {
             '+': "{left} と {right} の値を足します",
@@ -849,6 +883,28 @@ class ASTtoFlowChart:
             '>>': "{left} を右に {right} ビット分シフトします。2進数で見ると桁が右にずれて、2の {right} 乗で割ったのと同じになります",
         }
         
+        binary_operator_comments_en = {
+            '+': "add {left} and {right}",
+            '-': "subtract {right} from {left}",
+            '*': "multiply {left} by {right}",
+            '/': "divide {left} by {right}",
+            '%': "get remainder after dividing {left} by {right}",
+            '=': "assign {right} to {left}",
+            '==': "true if {left} and {right} are same, otherwise false",
+            '!=': "true if {left} and {right} are different, otherwise false",
+            '<': "true if {left} is smaller than {right}, otherwise false",
+            '<=': "true if {left} is smaller than or equal to {right}, otherwise false",
+            '>': "true if {left} is bigger than {right}, otherwise false",
+            '>=': "true if {left} is bigger than or equal to {right}, otherwise false",
+            '&&': "true if {left} and {right} are correct, otherwise false",
+            '||': "true if either {left} or {right} correct, otherwise false",
+            '&': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if both bits are 1, otherwise 0",
+            '|': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if either bits are 1, otherwise 0",
+            '^': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if both bits are different, otherwise 0",
+            '<<': "shift {left} left by {right} bits. The value becomes {left} multiplied by 2 to the power of {right}.",
+            '>>': "shift {left} right by {right} bits. The value becomes {left} multiplied by 2 to the power of {right}.",
+        }
+        
         compound_assignment_operator_comments = {
             '+=': "{left} に {right} の値を足した結果を {left} に代入します",
             '-=': "{left} から {right} の値を引いた結果を {left} に代入します",
@@ -858,7 +914,21 @@ class ASTtoFlowChart:
             '<<=': "{left} を {right} 分左シフトした結果を {left} に代入します",
             '>>=': "{left} を {right} 分右シフトした結果を {left} に代入します",
             '&=': "{left} と {right} のビットANDを {left} に代入します",
+            '|=': "{left} と {right} のビットORを {left} に代入します",
             '^=': "{left} と {right} のビットXORを {left} に代入します",
+        }
+
+        compound_assignment_operator_comments_en = {
+            '+=': "add {right} to {left}, and assign the result to {left}",
+            '-=': "subtract {right} from {left}, and assign the result to {left}",
+            '*=': "multiply {left} by {right}, and assign the result to {left}",
+            '/=': "divide {left} by {right}, and assign the result to {left}",
+            '%=': "get remainder after dividing {left} by {right}, and assign the result to {left}",
+            '<<=': "shift {left} left by {right} bits, and assign the result to {left}",
+            '>>=': "shift {left} right by {right} bits, and assign the result to {left}",
+            '&=': "compare each bit of {left} and {right}, then produce a number where each bit is 1 if both bits are 1, otherwise 0, and assign the result to {left}",
+            '|=': "compare each bit of {left} and {right}, then produce a number where either bit is 1 if either bits are 1, otherwise 0, and assign the result to {left}",
+            '^=': "compare each bit of {left} and {right}, then produce a number where each bit is 1 if both bits are different, otherwise 0, and assign the result to {left}",
         }
 
         cursor = self.unwrap_unexposed(cursor)
@@ -871,7 +941,8 @@ class ASTtoFlowChart:
         if cursor.kind == ci.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
             inside_exp_terms = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
-            calc_order_comments.append(f"({inside_exp_terms}) : ( ) で囲まれている部分は先に計算します")
+            exp_comment = "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します"
+            calc_order_comments.append(f"({inside_exp_terms}) : {exp_comment}")
             exp_terms = ''.join(["(", inside_exp_terms, ")"])
         # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
@@ -940,12 +1011,18 @@ class ASTtoFlowChart:
             # 前置(++a)
             if operator.location.offset < operand_cursor.location.offset:
                 exp_terms = ''.join([operator.spelling, operand_term])
-                comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
+                if self.is_english:
+                    comment = unary_front_operator_comments_en.get(operator.spelling, "unresolved operator")
+                else:
+                    comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
             # 後置(a++)
             else:
                 operator = next(reversed(list(cursor.get_tokens())))
                 exp_terms = ''.join([operand_term, operator.spelling])
-                comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
+                if self.is_english:
+                    comment = unary_back_operator_comments_en.get(operator.spelling, "unresolved operator")
+                else:
+                    comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(expr=operand_term)}")
         # c言語特有の一項条件式 (現在はsizeofのみに対応)
         elif cursor.kind == ci.CursorKind.CXX_UNARY_EXPR:
@@ -957,7 +1034,7 @@ class ASTtoFlowChart:
                     type_str = self.unwrap_unexposed(child_cursor_list[0]).type.spelling
                 else:
                     type_str = exp_terms.removeprefix("sizeof(").removesuffix(")")
-                calc_order_comments.append(f"{exp_terms} : {get_sizeof_operator_comments(type_str)}")
+                calc_order_comments.append(f"{exp_terms} : {get_sizeof_operator_comments(type_str, self.is_english)}")
         # 二項条件式(a + b)
         elif cursor.kind == ci.CursorKind.BINARY_OPERATOR:
             exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
@@ -1009,7 +1086,10 @@ class ASTtoFlowChart:
             if right_exp_terms is None:
                 right_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ' '.join([left_exp_terms, operator_spell, right_exp_terms])
-            comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
+            if self.is_english:
+                comment = binary_operator_comments_en.get(operator_spell, "unresolved operator")
+            else:
+                comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=left_exp_terms, right=right_exp_terms)}")
         # 複合代入演算子(a += b)
         elif cursor.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
@@ -1020,10 +1100,14 @@ class ASTtoFlowChart:
                 if front_exp_terms_end <= token.location.offset:
                     operator_spell = token.spelling
                     break
+                
             front_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
             back_exp_terms =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             exp_terms = ' '.join([front_exp_terms, operator_spell, back_exp_terms])
-            comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
+            if self.is_english:
+                comment = compound_assignment_operator_comments_en.get(operator_spell, "unresolved operator")
+            else:
+                comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
             calc_order_comments.append(f"{exp_terms} : {comment.format(left=front_exp_terms, right=back_exp_terms)}")
         # 三項条件式(c? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
@@ -1033,7 +1117,8 @@ class ASTtoFlowChart:
             true_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
             false_exp_terms = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
             exp_terms = ''.join([condition, " ? ", true_exp_terms, " : ", false_exp_terms])
-            calc_order_comments.append(f"{exp_terms} : {condition} が真なら {true_exp_terms}、偽なら {false_exp_terms} を計算します")
+            exp_comment = f"if {condition} is true, get value of {true_exp_terms}、otherwise get value of {false_exp_terms}" if self.is_english else f"{condition} が真なら {true_exp_terms}、偽なら {false_exp_terms} を計算します"
+            calc_order_comments.append(f"{exp_terms} : {exp_comment}")
         # キャスト型
         elif cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
@@ -1041,13 +1126,24 @@ class ASTtoFlowChart:
             exp_terms = ''.join(["(", cursor.type.spelling, ") ", casted_exp_terms])
             casted_exp_type = self.unwrap_unexposed(cr).type.spelling
             if casted_exp_type:
-                calc_order_comments.append(f"{exp_terms} : {casted_exp_terms} の型 ({casted_exp_type}) を {cursor.type.spelling} に変換します")
+                exp_comment = (
+                    f"use value of {casted_exp_terms} cast from {casted_exp_type} to {cursor.type.spelling}"
+                    if self.is_english else
+                    f"{casted_exp_terms} の型を {casted_exp_type} から {cursor.type.spelling} に変換します"
+                )
+                calc_order_comments.append(f"{exp_terms} : {exp_comment}")
             else:
-                calc_order_comments.append(f"{exp_terms} : {casted_exp_terms} の型を {cursor.type.spelling} に変換します")
+                exp_comment = (
+                    f"use value of {casted_exp_terms} cast to {cursor.type.spelling}"
+                    if self.is_english else
+                    f"{casted_exp_terms} の型を {cursor.type.spelling} に変換します"
+                )
+                calc_order_comments.append(f"{exp_terms} : {exp_comment}")
         # 配列の要素や構造体のメンバの{}
         elif cursor.kind == ci.CursorKind.INIT_LIST_EXPR:
             for cr in cursor.get_children():
                 self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
+        
         return exp_terms
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
@@ -1106,9 +1202,14 @@ class ASTtoFlowChart:
             func_references.append(ref_spell)
         # 標準関数以外なら自作関数として登録する
         else:
-            calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for i, arg_exp_term in enumerate(arg_exp_term_list)]) + 
-                                        "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
-                                        "args": arg_calc_order_comments_list})
+            if self.is_english:
+                calc_order_comments.append({"name": ref_spell, "comment": f"execute function {ref_spell} with" + ", ".join([f"{arg_exp_term} for #{i+1} argument" for i, arg_exp_term in enumerate(arg_exp_term_list)])
+                                            if len(arg_exp_term_list) else f"execute function {ref_spell} with no arguments", 
+                                            "args": arg_calc_order_comments_list})
+            else:
+                calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for i, arg_exp_term in enumerate(arg_exp_term_list)]) + 
+                                            "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
+                                            "args": arg_calc_order_comments_list})
             # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
             func_references.append((ref_spell, arg_func_order_list))
         return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"

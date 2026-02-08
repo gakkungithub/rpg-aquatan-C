@@ -124,7 +124,7 @@ class RoomInfo(TypedDict):
 class MapInfo:
     ISEVENT = 2
 
-    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]]):
+    def __init__(self, condition_move: dict[str, tuple[str, list[int | str | None]]], is_english: bool):
         self.eventMap = np.zeros((20,20))
         self.offset: dict[str, int] = {"y": 0, "x": 0}
         self.room_info: dict[str, RoomInfo] = {}
@@ -144,6 +144,8 @@ class MapInfo:
         self.memory_lines: dict[str, dict[int, list[dict]]] = {}
         self.str_lines: dict[str, dict[int, list[dict]]] = {}
         self.condition_comments: dict[int, list[dict]] = {}
+
+        self.is_english = is_english
 
     # プレイヤーの初期位置の設定
     def setPlayerInitPos(self, initNodeID):  
@@ -233,12 +235,13 @@ class MapInfo:
             segment = ""
             for i, s in enumerate(subparts):
                 segment += s
-                if i < len(subparts) - 1:  # ? があった場所に条件を挿入
-                    segment += f'条件 {hover_list[crnt_condition_num]}'
+                if i < len(subparts) - 1:  
+                    # ? があった場所に条件を挿入
+                    segment += f"condition {hover_list[crnt_condition_num]}" if self.is_english else f"条件 {hover_list[crnt_condition_num]}"
                     crnt_condition_num += 1
             parts.append(segment)
 
-        doorname = "かつ\n".join(parts)
+        doorname = "AND\n".join(parts) if self.is_english else "かつ\n".join(parts) 
         self.doors.append(Door((pos[0] - self.offset["y"], pos[1] - self.offset["x"]), dir, doorname))
         self.eventMap[pos[0], pos[1]] = self.ISEVENT
 
@@ -559,7 +562,7 @@ class GenBitMap:
 
     # 型指定はまた後で行う
     def __init__(self, pname: str, func_info_dict, gvar_info, varNode_info: dict[str, dict], expNode_info: dict[str, tuple[str, list[str], list[str], list[str | dict], int]], 
-                 roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]]):
+                 roomSize_info, gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], condition_move: dict[str, tuple[str, list[int | str | None]]], is_english):
         (self.graph, ) = pydot.core.graph_from_dot_file(f'{DATA_DIR}/{pname}/{pname}.dot') # このフローチャートを辿ってデータを作成していく
         self.nextNodeInfo: dict[str, list[tuple[str, str]]] = {}
         self.func_info_dict: dict = func_info_dict
@@ -570,7 +573,8 @@ class GenBitMap:
         self.floorMap = None
         self.roomsMap = None
         self.gotoRoom_list: dict[str, dict[str, GotoRoomInfo]] = gotoRoom_list # gotoラベルによるワープゾーンを作るための変数
-        self.mapInfo = MapInfo(condition_move)
+        self.mapInfo = MapInfo(condition_move, is_english)
+        self.is_english = is_english
 
     def trim_map_padding(self):
         # 上方向
@@ -840,7 +844,7 @@ class GenBitMap:
             toNodeID = gotoRoom["toNodeID"]
             fromNodeID_list = gotoRoom["fromNodeID"]
             for fromNodeID in fromNodeID_list:
-                self.mapInfo.setWarpZone(fromNodeID, toNodeID, f"ラベル: {labelName} に遷移します", self.func_name, 158)
+                self.mapInfo.setWarpZone(fromNodeID, toNodeID, f"move to label {labelName}" if self.is_english else f"ラベル: {labelName} に遷移します", self.func_name, 158)
 
         self.mapInfo.setPlayerInitPos(nodeID)
 
@@ -861,16 +865,16 @@ class GenBitMap:
             if self.getNodeLabel(nodeID) == 'do':
                 self.createRoom(nodeID, crntRoomID)
                 exp = self.getExpNodeInfo(nodeID)
-                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目のdo-while文の?の真偽の確認処理", "hover": [exp[0]], "type": "cond-in"})
+                self.createPath(crntRoomID, nodeID, {"detail": f"next is check of do-while ? of line {exp[4]}" if self.is_english else f"次が{exp[4]}行目のdo-while文の?の真偽の確認処理", "hover": [exp[0]], "type": "cond-in"})
                 crntRoomID = nodeID
                 for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                     self.createRoom(toNodeID, crntRoomID)
                     if self.getNodeShape(toNodeID) == 'circle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が真", "hover": [exp[0]], "type": "cond-check"}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
+                        self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": f"do-while ? of line {exp[4]} is true" if self.is_english else f"{exp[4]}行目のdo-while文の?が真", "hover": [exp[0]], "type": "cond-check"}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
                         exp = self.getExpNodeInfo(nodeID)
-                        self.createPath(crntRoomID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]], "type": "cond-check"}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                        self.createPath(crntRoomID, toNodeID, {"detail": f"do-while ? of line {exp[4]} is false" if self.is_english else f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]], "type": "cond-check"}, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeID_list.append(toNodeID)
             else:
                 #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
@@ -880,18 +884,43 @@ class GenBitMap:
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
-                            path_comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真" , "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
+                            path_comment_dict = {
+                                "detail": 
+                                condition_comment_dict["detail"] + "+" + f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is true"
+                                if self.is_english else
+                                condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", 
+                                "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"
+                                }
                         else:
-                            path_comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真" , "hover": [exp[0]], "type": "cond-check"}
+                            path_comment_dict = {
+                                "detail": 
+                                f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is true" 
+                                if self.is_english else 
+                                f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }
                         self.createPath(crntRoomID, toNodeID, path_comment_dict, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'diamond':
                         self.createRoom(toNodeID, crntRoomID)
                         # 今までのif条件を繋げる (今まで+今回の条件が偽の場合を次のdiamondに渡す)
                         if condition_comment_dict:
-                            comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
+                            comment_dict = {
+                                "detail": 
+                                condition_comment_dict["detail"] + "+" + f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false"
+                                if self.is_english else 
+                                condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": condition_comment_dict["hover"] + [exp[0]], 
+                                "type": "cond-check"
+                                }
                         else:
-                            comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]], "type": "cond-check"}
+                            comment_dict = {
+                                "detail": 
+                                f"{self.getNodeLabel(nodeID)} condition ? of line {exp[4]} is false"
+                                if self.is_english else
+                                f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }
                         exp = self.getExpNodeInfo(nodeID)
                         nodeID_list.append((toNodeID, comment_dict))
                     elif self.getNodeShape(toNodeID) == 'invtriangle':
@@ -910,12 +939,22 @@ class GenBitMap:
                             toNodeID = tempNodeID
                         self.createRoom(toNodeID, crntRoomID)
                         if len(case_exp_list):
-                            warp_comment = {"detail": f"{exp[4]}行目の?が真", "hover": [f"{switch_exp[0]} == {'または'.join(case_exp_list)}"], "type": "cond-check"}
+                            warp_comment = {
+                                "detail": f"case ? of line {exp[4]} is true" if self.is_english else f"{exp[4]}行目のcase?が真", 
+                                "hover": [f"{switch_exp[0]} == {' OR '.join(case_exp_list)}"] if self.is_english else [f"{switch_exp[0]} == {'または'.join(case_exp_list)}"], 
+                                "type": "cond-check"
+                                }
                         else:
                             if self.getNodeLabel(toNodeID) == 'default':
-                                warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない(default)", "hover": [switch_exp[0]], "type": "cond-check"}
+                                warp_comment = {
+                                    "detail": f"switch ? of line {switch_exp[4]} is not true for any cases (default)" if self.is_english else f"{switch_exp[4]}行目のswitch文の?がいずれのcaseにも該当しない(default)", 
+                                    "hover": [switch_exp[0]], "type": "cond-check"
+                                    }
                             else:
-                                warp_comment = {"detail": f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない", "hover": [switch_exp[0]], "type": "cond-check"}
+                                warp_comment = {
+                                    "detail": f"switch ? of line {switch_exp[4]} is not true for any cases" if self.is_english else f"{switch_exp[4]}行目の?がいずれのcaseにも該当しない", 
+                                    "hover": [switch_exp[0]], "type": "cond-check"
+                                    }
                         self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nodeID)) # 条件文の計算式を確かめる
                         nodeID_list.insert(0, toNodeID)
                     elif self.getNodeShape(toNodeID) == 'doublecircle':
@@ -923,9 +962,21 @@ class GenBitMap:
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
-                            path_comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
+                            path_comment_dict = {
+                                "detail": 
+                                condition_comment_dict["detail"] + "+" + f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false"
+                                if self.is_english else
+                                condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"
+                                }
                         else:
-                            path_comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]], "type": "cond-check"}
+                            path_comment_dict = {
+                                "detail": 
+                                f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false"
+                                if self.is_english else
+                                f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }
                         self.createPath(crntRoomID, toNodeID, path_comment_dict, expNodeID=nodeID) # 条件文の計算式を確かめる
                         nodeID_list.append(toNodeID)
                     # elseにて、中の処理がない場合
@@ -934,9 +985,21 @@ class GenBitMap:
                         # 今までのif条件を繋げる
                         exp = self.getExpNodeInfo(nodeID)
                         if condition_comment_dict:
-                            comment_dict = {"detail": condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"}
+                            comment_dict = {
+                                "detail": 
+                                condition_comment_dict["detail"] + "+" + f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false"
+                                if self.is_english else
+                                condition_comment_dict["detail"] + "+" + f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": condition_comment_dict["hover"] + [exp[0]], "type": "cond-check"
+                                }
                         else:
-                            comment_dict = {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]], "type": "cond-check"}
+                            comment_dict = {
+                                "detail":
+                                f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false"
+                                if self.is_english else
+                                f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }
                         # self.trackAST(crntRoomID, toNodeID, loopBackID, comment_dict)
                         nodeID_list.insert(0, (toNodeID, comment_dict))
                     else:
@@ -957,17 +1020,26 @@ class GenBitMap:
                 self.createRoom(toNodeID, nodeID)
                 if self.getNodeShape(toNodeID) == 'circle':
                     exp = self.getExpNodeInfo(nodeID)
-                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", "hover": [exp[0]], "type": "cond-check"}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, {
+                        "detail": f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is true" if self.is_english else f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が真", 
+                        "hover": [exp[0]], "type": "cond-check"
+                        }, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeID_list.insert(0, toNodeID)
                 elif self.getNodeShape(toNodeID) == 'doublecircle':
                     exp = self.getExpNodeInfo(nodeID)
-                    self.createPath(nodeID, toNodeID, {"detail": f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", "hover": [exp[0]], "type": "cond-check"}, expNodeID=nodeID) # 条件文の計算式を確かめる
+                    self.createPath(nodeID, toNodeID, {
+                        "detail": f"{self.getNodeLabel(nodeID)} ? of line {exp[4]} is false" if self.is_english else f"{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?が偽", 
+                        "hover": [exp[0]], "type": "cond-check"
+                        }, expNodeID=nodeID) # 条件文の計算式を確かめる
                     nodeID_list.append(toNodeID)
             # pentagonノードに戻ってくる時は既にtrue, false以降の解析は済んでいるのでnodeID_listは空リスト
             if nodeID_list:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
-                self.createPath(crntRoomID, nodeID, {"detail": f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理なら", "hover": [exp[0]], "type": "cond-in"})
+                self.createPath(crntRoomID, nodeID, {
+                    "detail": f"in case that next is check of {self.getNodeLabel(nodeID)} ? in line {exp[4]}" if self.is_english else f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理なら", 
+                    "hover": [exp[0]], "type": "cond-in"
+                    })
                 # true
                 self.trackAST(nodeID_list[0], nodeID_list[0], nodeID)
                 # false
@@ -980,9 +1052,21 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'parallelogram' and loopBackID:
             loopBack_exp = self.getExpNodeInfo(loopBackID)
             if (change_exp := self.getExpNodeInfo(nodeID)):
-                warp_comment = {"detail": f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら+{change_exp[4]}行目の?を実行して", "hover": [loopBack_exp[0], change_exp[0]], "type": "cond-in-change"}
+                warp_comment = {
+                    "detail": 
+                    f"in case that next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}+execute ? of line {change_exp[4]}"
+                    if self.is_english else
+                    f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら+{change_exp[4]}行目の?を実行して", 
+                    "hover": [loopBack_exp[0], change_exp[0]], "type": "cond-in-change"
+                    }
             else:
-                warp_comment = {"detail": f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら", "hover": [loopBack_exp[0]], "type": "cond-in"}
+                warp_comment = {
+                    "detail": 
+                    f"in case that next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}"
+                    if self.is_english else
+                    f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら", 
+                    "hover": [loopBack_exp[0]], "type": "cond-in"
+                    }
             self.mapInfo.setWarpZone(crntRoomID, loopBackID, warp_comment, self.func_name, 158)
             loopBackID = None
         # if文の終点でワープゾーンを作る
@@ -1004,7 +1088,10 @@ class GenBitMap:
                 if self.mapInfo.condition_line_trackers.get_condition_line_tracker(nodeID)[0] == '':
                     self.mapInfo.setWarpZone(crntRoomID, toNodeID, {}, self.func_name, 158, warpNodeID=nodeID)
                 else:
-                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {"detail": "if文を終了します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, toNodeID, {
+                        "detail": "end of if statement" if self.is_english else "if文を終了します", 
+                        "hover": [], "type": "end"
+                        }, self.func_name, 158, warpNodeID=nodeID)
             if tempNode_info:
                 self.trackAST(toNodeID, self.getNextNodeInfo(toNodeID)[0][0], loopBackID)
             return
@@ -1043,7 +1130,7 @@ class GenBitMap:
                     elif string_comments:
                         arrContExp_values = string_comments
                     else:
-                        arrContExp_values = index_comments + ['初期化されていない要素です']
+                        arrContExp_values = index_comments + ["this is an uninitialized part" if self.is_english else "初期化されていない要素です"]
                     self.mapInfo.setItemBox(crntRoomID, self.getNodeLabel(nodeID), toNodeID, {"values": arrContExp_values, "indexes": index_comments}, var_type, self.func_name)
                 # 構造体系
                 elif self.getNodeShape(toNodeID) == 'tab':
@@ -1083,24 +1170,38 @@ class GenBitMap:
             if nodeID in self.mapInfo.condition_line_trackers.tracks:
                 nextNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
                 if self.getNodeShape(nextNodeID) == 'parallelogram' and loopBackID:
-                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": "continueで現在のループから脱出します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, loopBackID, {"detail": "exit from the current loop statement by continue" if self.is_english else "continueで現在のループから脱出します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
                     loopBackID = None
                 # continue → doWhile構文の場合
                 elif self.getNodeShape(nextNodeID) == 'diamond':
                     self.createRoom(nextNodeID, crntRoomID)
                     exp = self.getExpNodeInfo(nextNodeID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": f"continueで{exp[4]}行目のdo-while文の?の真偽の確認に移る", "hover": [exp[0]], "type": "cond-in"}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {
+                        "detail": f"move to check of do-while ? of line {exp[4]} by continue" 
+                        if self.is_english else 
+                        f"continueで{exp[4]}行目のdo-while文の?の真偽の確認に移る", 
+                        "hover": [exp[0]], "type": "cond-in"
+                        }, self.func_name, 158, warpNodeID=nodeID)
                     for toNodeID, edgeLabel in self.nextNodeInfo.get(nodeID, []):
                         self.createRoom(toNodeID, nextNodeID)
                         if self.getNodeShape(toNodeID) == 'circle':
-                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]], "type": "cond-check"}, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
+                            self.mapInfo.setWarpZone(nextNodeID, toNodeID, {
+                                "detail": f"do-while ? of line {exp[4]} is false" if self.is_english else f"{exp[4]}行目のdo-while文の?が偽", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }, self.func_name, 158, expNodeInfo=self.getExpNodeInfo(nextNodeID)) # 条件文の計算式を確かめる
                         elif self.getNodeShape(toNodeID) == 'doublecircle':
-                            self.createPath(nextNodeID, toNodeID, {"detail": f"{exp[4]}行目のdo-while文の?が偽", "hover": [exp[0]], "type": "cond-check"}, expNodeID=nextNodeID) # 条件文の計算式を確かめる
+                            self.createPath(nextNodeID, toNodeID, {
+                                "detail": f"do-while ? of line {exp[4]} is false" if self.is_english else f"{exp[4]}行目のdo-while文の?が偽", 
+                                "hover": [exp[0]], "type": "cond-check"
+                                }, expNodeID=nextNodeID) # 条件文の計算式を確かめる
                             nodeID = nextNodeID
                 # breakのノードの場合
                 else:
                     self.createRoom(nextNodeID, crntRoomID)
-                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {"detail": "breakにより現在のループから脱出します", "hover": [], "type": "end"}, self.func_name, 158, warpNodeID=nodeID)
+                    self.mapInfo.setWarpZone(crntRoomID, nextNodeID, {
+                        "detail": "exit from the current loop statement by break" if self.is_english else "breakにより現在のループから脱出します", 
+                        "hover": [], "type": "end"
+                        }, self.func_name, 158, warpNodeID=nodeID)
                     if self.getNodeLabel(nextNodeID) == 'end':
                         crntRoomID = nextNodeID
                         nodeID = nextNodeID
@@ -1108,7 +1209,13 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'invtrapezium':
             trueNodeID, edgeLabel = self.getNextNodeInfo(nodeID)[0]
             self.createRoom(trueNodeID, crntRoomID)
-            self.mapInfo.setWarpZone(crntRoomID, trueNodeID, {"detail": f"{self.getNodeLabel(nodeID)}行目のdo-while文の1回目の処理に入ります", "hover": [], "type": "cond-first-in"}, self.func_name, 158, warpNodeID=nodeID) # 条件文の計算式を確かめる
+            self.mapInfo.setWarpZone(crntRoomID, trueNodeID, {
+                "detail": 
+                f"get into the 1st do-while execution beginning from line {self.getNodeLabel(nodeID)}"
+                if self.is_english else
+                f"{self.getNodeLabel(nodeID)}行目のdo-while文の1回目の処理に入ります", 
+                "hover": [], "type": "cond-first-in"
+                }, self.func_name, 158, warpNodeID=nodeID) # 条件文の計算式を確かめる
             nodeID = trueNodeID
             crntRoomID = trueNodeID
         # switch構文の途中のcaseまたは末尾に接続する
@@ -1128,13 +1235,18 @@ class GenBitMap:
                 toNodeID = tempNodeID
             self.createRoom(toNodeID, crntRoomID)
             if "end" == self.getNodeLabel(toNodeID):
-                warp_comment = {"detail": "switch文を終了します", "hover": [], "type": "end"}
+                warp_comment = {
+                    "detail": "end of switch statement" if self.is_english else "switch文を終了します", 
+                    "hover": [], "type": "end"
+                    }
                 self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158)
                 crntRoomID = toNodeID
                 nodeID = toNodeID
             else:
-                warp_comment = {"detail": "次のcase以降の処理に進みます", "hover": [], "type": "cond-check"}
-
+                warp_comment = {
+                    "detail": "get into execution after the next cases" if self.is_english else "次のcase以降の処理に進みます", 
+                    "hover": [], "type": "cond-check"
+                    }
                 self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158)
                 return
         elif self.getNodeShape(nodeID) == 'triangle':
@@ -1152,7 +1264,10 @@ class GenBitMap:
                     break
                 toNodeID = tempNodeID
             self.createRoom(toNodeID, crntRoomID)
-            warp_comment = {"detail": "次のcase以降の処理に進みます", "hover": [], "type": "cond-check"}
+            warp_comment = {
+                "detail": "get into execution after the next cases" if self.is_english else "次のcase以降の処理に進みます", 
+                "hover": [], "type": "cond-check"
+                }
             self.mapInfo.setWarpZone(crntRoomID, toNodeID, warp_comment, self.func_name, 158, warpNodeID=nodeID)
             return
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)

@@ -95,7 +95,7 @@ def end_timer():
 
 def main():
     """Main"""
-    global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, cmd
+    global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, ISENGLISH, cmd
     # 現状はグローバル変数にしているが、今後どうするかは考える
     global SCR_RECT, SCR_WIDTH, SCR_HEIGHT, MIN_MAP_SIZE, TXTBOX_HEIGHT
 
@@ -134,6 +134,7 @@ def main():
             scropt = DOUBLEBUF | HWSURFACE
             screen = pygame.display.set_mode(SBW_RECT.size, scropt)
 
+        ISENGLISH = False
         SBWND = StageButtonWindow()
         SBWND.show()
         SBWND.draw(screen)
@@ -170,17 +171,20 @@ def main():
                             sbw_scroll_mouse_pos = event.pos
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
-                            if button_name == SBWND.is_clicked(event.pos) == 'color support':
+                            if button_name == SBWND.is_clicked(event.pos) == "color support":
                                 button_io_sound.play()
                                 SBWND.color_support = not SBWND.color_support
-                            elif button_name == SBWND.is_clicked(event.pos) == 'check lldb':
+                            elif button_name == SBWND.is_clicked(event.pos) == "check lldb":
                                 button_io_sound.play()
                                 if server is not None:
                                     SBWND.close()
                                     server = None
                                 else:
                                     SBWND.stage_selecting = not SBWND.stage_selecting
-                            elif button_name == SBWND.is_clicked(event.pos) == 'tutorial':
+                            elif button_name == SBWND.is_clicked(event.pos) == "switch language":
+                                ISENGLISH = not ISENGLISH
+                                SBWND.load_sb()
+                            elif button_name == SBWND.is_clicked(event.pos) == "tutorial":
                                 stage_index = 0
                                 SBWND.hide()
                                 stage_name = "tutorial"                       
@@ -251,6 +255,8 @@ def main():
                 cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
                 if SBWND.color_support:
                     cfcode.append("-u")
+                if ISENGLISH:
+                    cfcode.append("-e")
                 subprocess.run(cfcode, cwd="mapdata_generator", check=True)
             subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
         except subprocess.CalledProcessError as e:
@@ -264,7 +270,10 @@ def main():
         pause_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_close.wav"))
         game_over_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "game_over.wav"))
         # サーバを立てる
-        server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""], cwd="debugger-C", env=env)
+        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""]
+        if ISENGLISH:
+            c_backdoor_code.append("--english")
+        server = subprocess.Popen(c_backdoor_code, cwd="debugger-C", env=env)
         # endregion
 
         # region マップの初期設定
@@ -446,7 +455,10 @@ def main():
             if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
                 pygame.mixer.music.stop()
                 game_over_sound.play()
-                MSGWND.set("プレイヤーのライフが尽きました、、、\nGAME OVER !!", (['ステージ選択画面に戻る'], 'finished'))
+                if ISENGLISH:
+                    MSGWND.set("Your HP ran off,,, \nGAME OVER !!", (["Go back to the Stage-Select Menu"], 'finished'))
+                else:
+                    MSGWND.set("プレイヤーのライフが尽きました、、、\nGAME OVER !!", (["ステージ選択画面に戻る"], 'finished'))
 
             # メッセージウィンドウ表示中は更新を中止
             if not MSGWND.is_visible:
@@ -518,11 +530,12 @@ def main():
                 elif cmd == "rollback":
                     if len(CODEWND.history) > 1:
                         sender.send_event({"rollback": True})
-                        # MMAPWND.hide()
-                        # CODEWND.show()
                         sender.receive_json()
                     else:
-                        MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
+                        if ISENGLISH:
+                            MSGWND.set("Would you go back to rightly after the dungeon began ?", (['Yes', 'No'], 'rollback_to_init'))
+                        else:
+                            MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
                 elif cmd == "undo":
                     if len(PLAYER.move5History) < 1:
                         MSGWND.set("No history...")
@@ -689,11 +702,11 @@ def main():
                             for event in pygame.event.get():
                                 if event.type == QUIT:
                                     server.terminate()
-                                    print('ゲームを終了しました')
+                                    print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                                     sys.exit()
                                 if event.type == KEYDOWN and event.key == K_ESCAPE:
                                     server.terminate()
-                                    print('ゲームを終了しました')
+                                    print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                                     sys.exit()
                                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
                                     local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
@@ -761,16 +774,6 @@ def main():
                 
                 # region keydown event
                 ## open map
-                # if event.type == KEYDOWN and event.key == K_m:
-                #     # if MMAPWND.is_visible:
-                #     #     MMAPWND.hide()
-                #     #     CODEWND.show()
-                #     # elif CODEWND.is_visible:
-                #     #     CODEWND.hide()
-                #     # else:
-                #     #     MMAPWND.show()
-                #     MMAPWND.is_visible = not MMAPWND.is_visible
-
                 if (event.type == KEYDOWN and event.key == K_c):
                     cmd = "command"
                     CMNDWND.show()
@@ -783,11 +786,11 @@ def main():
                         for event in pygame.event.get():
                             if event.type == QUIT:
                                 server.terminate()
-                                print('ゲームを終了しました')
+                                print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                                 sys.exit()
                             if event.type == KEYDOWN and event.key == K_ESCAPE:
                                 server.terminate()
-                                print('ゲームを終了しました')
+                                print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                                 sys.exit()
 
                             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -1384,8 +1387,6 @@ class Map:
                 self.create_plpath_j(event)
             elif event_type == "PLACESET":  # 場所マーカー
                 self.create_placeset_j(event)
-            # elif event_type == "HELP":
-            #     self.create_help_j(event)
             
     def create_chara_j(self, data):
         """キャラクターを作成してcharasに追加する"""
@@ -2033,18 +2034,18 @@ class Player(Character):
                         self.checkedFuncs[(mymap.name, event.func, event.fromTo[0])].append((skippedFunc, None, False))
                 if itemResult['status'] == "ok":
                     if itemResult.get('skip', False):
-                        MSGWND.set(itemResult['message'], (['はい', 'いいえ'], 'func_skip'))
+                        MSGWND.set(itemResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'func_skip'))
                     else:
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
                         event.open(itemResult['item']['value'], itemResult['item']['line'], event.comments)
-                        item_get_message = f"宝箱を開けた！\n「{event.item}」を手に入れた！"
-                        self.add_log(f"{event.fromTo[0]}行目のアイテム「{event.item}」を取得")
+                        item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
+                        self.add_log(f"Item {event.item} of {event.fromTo[0]} line was acquired" if ISENGLISH else f"{event.fromTo[0]}行目のアイテム「{event.item}」を取得")
                         if (indexes := event.comments.get("indexes", None)):
                             item_get_message += "\f" + "\f".join(indexes)
                         if itemResult.get("undefined", False):
-                            item_get_message += f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                            item_get_message += f"\fbut, value of item {event.item} was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                         if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
                             self.completed_checkFuncs_key = (mymap.name, event.func, event.fromTo[0])
 
@@ -2066,47 +2067,47 @@ class Player(Character):
                     if moveResult['status'] == "ok":
                         # skipアクション (条件文に関数がある場合は関数に遷移するかを判断する)
                         if moveResult.get('skipCond', False):
-                            MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
+                            MSGWND.set(moveResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
                         else:
                             if moveResult.get('skip', False):
-                                MSGWND.set(moveResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                                MSGWND.set(moveResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
                             elif (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
                                 self.completed_checkFuncs_key = (mymap.name, event.func, event.fromTo[0])
                             
                             if event.type == 'if':
-                                self.add_log(f"if文の{str(event.fromTo[-2])}行目の条件が真であることを確認")
+                                self.add_log(f"Checked if condition of line {str(event.fromTo[-2])} is true" if ISENGLISH else f"if文の{str(event.fromTo[-2])}行目の条件が真であることを確認")
                             elif event.type == 'else':
-                                self.add_log(f"{str(event.fromTo[0])}行目から始まるif文の条件が全て偽であるためにelse以降に移った")
+                                self.add_log(f"Chose 'else' because all if conditions began from line {str(event.fromTo[0])} were false" if ISENGLISH else f"{str(event.fromTo[0])}行目から始まるif文の条件が全て偽であるためにelseを選んだ")
                             elif event.type == 'ifAllFalse':
-                                self.add_log(f"{str(event.fromTo[0])}行目から始まるif文の条件が全て偽であることを確認")
+                                self.add_log(f"Got over if statement began from line {str(event.fromTo[0])} because the all conditions were wrong" if ISENGLISH else f"{str(event.fromTo[0])}行目から始まるif文の条件が全て偽であることを確認し、何もしないで通過")
                             elif event.type == 'whileIn':
-                                self.add_log(f"{str(event.fromTo[0])}行目のwhile文の条件の確認を開始")
+                                self.add_log(f"Began to check while condition of line {str(event.fromTo[0])}" if ISENGLISH else f"{str(event.fromTo[0])}行目のwhile文の条件の確認を開始")
                             elif event.type == 'whileTrue':
-                                self.add_log(f"{str(event.fromTo[0])}行目のwhile文の条件が真であることを開始")
+                                self.add_log(f"Checked while condition of line {str(event.fromTo[0])} is true" if ISENGLISH else f"{str(event.fromTo[0])}行目のwhile文の条件が真であることを開始")
                             elif event.type == 'whileFalse':
-                                self.add_log(f"{str(event.fromTo[0])}行目のwhile文の条件が偽であることを開始")                           
+                                self.add_log(f"Checked while condition of line {str(event.fromTo[0])} is false" if ISENGLISH else f"{str(event.fromTo[0])}行目のwhile文の条件が偽であることを開始")                           
                             elif event.type == 'doWhileIn':
-                                self.add_log(f"{str(event.fromTo[0])}行目のdo while文の条件の確認を開始")
+                                self.add_log(f"Began to check do while condition of line {str(event.fromTo[0])}" if ISENGLISH else f"{str(event.fromTo[0])}行目のdo while文の条件の確認を開始")
                             elif event.type == 'doWhileInit':
-                                self.add_log(f"{str(event.fromTo[0])}行目のdo while文の条件の1回目の処理を開始")
+                                self.add_log(f"Began to check while condition of line {str(event.fromTo[0])} first time" if ISENGLISH else f"{str(event.fromTo[0])}行目のdo while文の条件の1回目の処理を開始")
                             elif event.type == 'doWhileTrue':
-                                self.add_log(f"{str(event.fromTo[0])}行目のdo while文の条件が偽であることを開始")
+                                self.add_log(f"Checked do while condition of line {str(event.fromTo[0])} is true" if ISENGLISH else f"{str(event.fromTo[0])}行目のdo while文の条件が真であることを開始")
                             elif event.type == 'doWhileFalse':
-                                self.add_log(f"{str(event.fromTo[0])}行目のdo while文の条件が偽であることを開始")
+                                self.add_log(f"Checked do while condition of line {str(event.fromTo[0])} is false" if ISENGLISH else f"{str(event.fromTo[0])}行目のdo while文の条件が偽であることを開始")
                             elif event.type == 'forIn':
-                                self.add_log(f"{str(event.fromTo[0])}行目のfor文の条件の確認を開始")
+                                self.add_log(f"Began to check for condition of line {str(event.fromTo[0])}" if ISENGLISH else f"{str(event.fromTo[0])}行目のfor文の条件の確認を開始")
                             elif event.type == 'forTrue':
-                                self.add_log(f"{str(event.fromTo[0])}行目のfor文の条件が真であることを開始")
+                                self.add_log(f"Checked for condition of line {str(event.fromTo[0])} is true" if ISENGLISH else f"{str(event.fromTo[0])}行目のfor文の条件が真であることを開始")
                             elif event.type == 'forFalse':
-                                self.add_log(f"{str(event.fromTo[0])}行目のfor文の条件が偽であることを開始")
+                                self.add_log(f"Checked do while condition of line {str(event.fromTo[0])} is false" if ISENGLISH else f"{str(event.fromTo[0])}行目のfor文の条件が偽であることを開始")
                             elif event.type == 'switchCase':
-                                self.add_log(f"{str(event.fromTo[-2])}行目のswitch文の条件が真であることを開始")
+                                self.add_log(f"Checked case condition of line {str(event.fromTo[-2])} was true" if ISENGLISH else f"{str(event.fromTo[-2])}行目のcaseの条件が真であることを確認")
                             elif event.type == 'switchMiddleCase':
-                                self.add_log(f"breakがないので他のcaseに侵入しました")
+                                self.add_log("Got into other cases because no break statement" if ISENGLISH else "breakがないので他のcaseに侵入しました")
                             elif event.type == 'switchEnd':
-                                self.add_log(f"switch文が終了しました")
+                                self.add_log("End of switch statement" if ISENGLISH else "switch文が終了しました")
                             elif event.type == 'break':
-                                self.add_log(f"{str(event.fromTo[0])}行目のbreakで1つループを抜けました")
+                                self.add_log(f"Got out of a loop with break statement of line {str(event.fromTo[0])}" if ISENGLISH else f"{str(event.fromTo[0])}行目のbreakで1つループを抜けました")
 
                             dest_map = event.dest_map
                             dest_x = event.dest_x
@@ -2145,7 +2146,7 @@ class Player(Character):
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             return True
         else:
-            MSGWND.set("足元には何もない。")
+            MSGWND.set("nothing on foot" if ISENGLISH else "足元には何もない。")
             return False
 
     def unlock(self, mymap: Map):
@@ -2176,7 +2177,7 @@ class Player(Character):
                                 self.door = None
                         self.door = {"x": event.x, "y": event.y, "direction": event.direction}
                     else:
-                        MSGWND.set('この方向から扉は開けられません!!')
+                        MSGWND.set("Cannot open this door from this side !!" if ISENGLISH else "この方向から扉は開けられません!!")
                 else:
                     return False
             else:
@@ -2232,7 +2233,7 @@ class Player(Character):
                             MSGWND.set(charaExpressionResult['message'])
                         else:
                             if charaExpressionResult.get('skipCond', False):
-                                MSGWND.set(charaExpressionResult['message'], (['はい', 'いいえ'], 'exp_func_skip'))
+                                MSGWND.set(charaExpressionResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'exp_func_skip'))
                             else:
                                 item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
 
@@ -2257,7 +2258,9 @@ class Player(Character):
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                                     self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
                                 
-                                self.add_log(f"{chara.linenum}行目の「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
+                                self.add_log(f"executed function {chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
+                                             if ISENGLISH else
+                                             f"{chara.linenum}行目の「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
 
                                 # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
@@ -2280,14 +2283,18 @@ class Player(Character):
                                             self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                                     if CCCharacterResult['status'] == "ng":
                                         if mymap.name == "tutorial":
-                                            MSGWND.set("条件が間違ったキャラクターに話しかけると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!")
+                                            MSGWND.set(
+                                                "HP -10 if you do a wrong action for a C step execution... \fKeep your HP above 0!!"
+                                                if ISENGLISH else
+                                                "条件が間違ったキャラクターに話しかけると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
+                                            )
                                         else:
                                             MSGWND.set(CCCharacterResult['message'])
                                     else:
                                         if CCCharacterResult.get('skipCond', False):
-                                            MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'cond_func_skip'))
+                                            MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
                                         elif CCCharacterResult.get('skip', False):
-                                            MSGWND.set(CCCharacterResult['message'], (['はい', 'いいえ'], 'loop_skip'))
+                                            MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                                                 self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
                                             self.ccchara = chara.set_checked()
@@ -2295,58 +2302,59 @@ class Player(Character):
                                             if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                                                 self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
                                             self.ccchara = chara.set_checked()
+            
                                             if chara.type == 'if':
-                                                self.add_log(f"if文の{str(chara.fromTo[-2])}行目目の条件が真であることを確認")
+                                                self.add_log(f"Checked if condition of line {str(chara.fromTo[-2])} is true" if ISENGLISH else f"if文の{str(chara.fromTo[-2])}行目目の条件が真であることを確認")
                                             elif chara.type == 'else':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目から始まるif文の条件が全て偽であるためにelse以降に移った")
+                                                self.add_log(f"Chose 'else' because all if conditions began from line {str(chara.fromTo[0])} were false" if ISENGLISH else f"{str(chara.fromTo[0])}行目から始まるif文の条件が全て偽であるためにelseを選んだ")
                                             elif chara.type == 'ifAllFalse':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目から始まるif文の条件が全て偽であることを確認")
+                                                self.add_log(f"Got over if statement began from line {str(chara.fromTo[0])} because the all conditions were wrong" if ISENGLISH else f"{str(chara.fromTo[0])}行目から始まるif文の条件が全て偽であることを確認し、何もしないで通過")
                                             elif chara.type == 'whileIn':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のwhile文の条件の確認を開始")
+                                                self.add_log(f"Began to check while condition of line {str(chara.fromTo[0])}" if ISENGLISH else f"{str(chara.fromTo[0])}行目のwhile文の条件の確認を開始")
                                             elif chara.type == 'whileTrue':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のwhile文の条件が真であることを開始")
+                                                self.add_log(f"Checked while condition of line {str(chara.fromTo[0])} is true" if ISENGLISH else f"{str(chara.fromTo[0])}行目のwhile文の条件が真であることを確認")
                                             elif chara.type == 'whileFalse':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のwhile文の条件が偽であることを開始")                           
+                                                self.add_log(f"Checked while condition of line {str(chara.fromTo[0])} is false" if ISENGLISH else f"{str(chara.fromTo[0])}行目のwhile文の条件が偽であることを確認")                           
                                             elif chara.type == 'doWhileIn':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のdo while文の条件の確認を開始")
+                                                self.add_log(f"Began to check do while condition of line {str(chara.fromTo[0])}" if ISENGLISH else f"{str(chara.fromTo[0])}行目のdo while文の条件の確認を開始")
                                             elif chara.type == 'doWhileInit':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のdo while文の条件の1回目の処理を開始")
+                                                self.add_log(f"Began to check while condition of line {str(chara.fromTo[0])} first time" if ISENGLISH else f"{str(chara.fromTo[0])}行目のdo while文の条件の1回目の処理を開始")
                                             elif chara.type == 'doWhileTrue':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のdo while文の条件が偽であることを開始")
+                                                self.add_log(f"Checked do while condition of line {str(chara.fromTo[0])} is true" if ISENGLISH else f"{str(chara.fromTo[0])}行目のdo while文の条件が真であることを開始")
                                             elif chara.type == 'doWhileFalse':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のdo while文の条件が偽であることを開始")
+                                                self.add_log(f"Checked do while condition of line {str(chara.fromTo[0])} is false" if ISENGLISH else f"{str(chara.fromTo[0])}行目のdo while文の条件が偽であることを開始")
                                             elif chara.type == 'forIn':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のfor文の条件の確認を開始")
+                                                self.add_log(f"Began to check for condition of line {str(chara.fromTo[0])}" if ISENGLISH else f"{str(chara.fromTo[0])}行目のfor文の条件の確認を開始")
                                             elif chara.type == 'forTrue':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のfor文の条件が真であることを開始")
+                                                self.add_log(f"Checked for condition of line {str(chara.fromTo[0])} is true" if ISENGLISH else f"{str(chara.fromTo[0])}行目のfor文の条件が真であることを開始")
                                             elif chara.type == 'forFalse':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のfor文の条件が偽であることを開始")
+                                                self.add_log(f"Checked do while condition of line {str(chara.fromTo[0])} is false" if ISENGLISH else f"{str(chara.fromTo[0])}行目のfor文の条件が偽であることを開始")
                                             elif chara.type == 'switchCase':
-                                                self.add_log(f"{str(chara.fromTo[-2])}行目のswitch文の条件が真であることを開始")
+                                                self.add_log(f"Checked case condition of line {str(chara.fromTo[-2])} was true" if ISENGLISH else f"{str(chara.fromTo[-2])}行目のcaseの条件が真であることを開始")
                                             elif chara.type == 'switchMiddleCase':
-                                                self.add_log(f"breakがないので他のcaseに侵入しました")
+                                                self.add_log("Got into other cases because no break statement" if ISENGLISH else f"breakがないので他のcaseに侵入しました")
                                             elif chara.type == 'switchEnd':
-                                                self.add_log(f"switch文が終了しました")
+                                                self.add_log("End of switch statement" if ISENGLISH else f"switch文が終了しました")
                                             elif chara.type == 'break':
-                                                self.add_log(f"{str(chara.fromTo[0])}行目のbreakで1つループを抜けました")
+                                                self.add_log(f"Got out of a loop with break statement of line {str(chara.fromTo[0])}" if ISENGLISH else f"{str(chara.fromTo[0])}行目のbreakで1つループを抜けました")
 
-                                            MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
+                                            MSGWND.set("Condition checked !! Please get in !!" if ISENGLISH else "条件を確認済みです!!　どうぞお通りください!!")
                                 else:
-                                    MSGWND.set("異なる行動をしようとしています")
+                                    MSGWND.set("You did a different action" if ISENGLISH else "異なる行動をしようとしています")
                                     return False
                             else:
-                                MSGWND.set("条件文を確認済みです!!　どうぞお通りください!!")
+                                MSGWND.set("Condition checked !! Please get in !!" if ISENGLISH else "条件を確認済みです!!　どうぞお通りください!!")
                         else:
-                            MSGWND.set("そのほうこうには　だれもいない。")
+                            MSGWND.set("Nobody is in this direction" if ISENGLISH else "そのほうこうには　だれもいない。")
                             return False
                     else:
-                        MSGWND.set("ここは　出口ではありません。")
+                        MSGWND.set("Here is not an exit" if ISENGLISH else "ここは　出口ではありません。")
                         return False
                 elif isinstance(chara, CharaReturn):
                     PLAYER.set_waitingMove_return(mymap, chara)
             return True
         else:
-            MSGWND.set("そのほうこうには　だれもいない。")
+            MSGWND.set("Nobody is in this direction" if ISENGLISH else "そのほうこうには　だれもいない。")
             return False
 
     def set_waitingMove_return(self, mymap: Map, chara: "CharaReturn"):
@@ -2362,7 +2370,7 @@ class Player(Character):
                     self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
-                    MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
+                    MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                 else:
                     if (mymap.name, chara.func, chara.fromTo[0]) in self.checkedFuncs:
                         self.completed_checkFuncs_key = (mymap.name, chara.func, chara.fromTo[0])
@@ -2372,7 +2380,7 @@ class Player(Character):
                     move = self.moveHistory.pop()
                     self.itembag.items.pop()
                     PLAYER.remove_itemvalue()
-                    self.add_log(f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
+                    self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
                     for name, item_info in returnResult["items"].items():
                         for line, value in item_info.items():
                             item = PLAYER.commonItembag.find(name, int(line))
@@ -2391,8 +2399,8 @@ class Player(Character):
                     self.waitingMove.dest_y = move['y']
                     self.fp.write("moveout, " + mapname + "," + str(self.x)+", " + str(self.y) + "\n")
                     MSGWND.set(chara.message)
-
                 return
+            
         # mainのreturnキャラ
         else:
             self.sender.send_event({"type": 'return', "fromTo": fromTo + [0] if len(chara.funcWarp) else fromTo, "funcWarp": chara.funcWarp, 'main': True})
@@ -2402,14 +2410,17 @@ class Player(Character):
                     self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
             if returnResult['status'] == 'ok':
                 if returnResult.get('skipReturn', False):
-                    MSGWND.set(returnResult['message'], (['はい', 'いいえ'], 'return_func_skip'))
+                    MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                 elif returnResult.get('finished', False):
                     pygame.mixer.music.stop()
                     self.goal_sound.play()
-                    self.add_log("ゴールに辿り着いた")
+                    self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
                     if mymap.name == "tutorial":
-                        returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば右下のポーズ画面を開いて確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります!!)\fでは、C言語ダンジョンを楽しんでください!!"
-                    MSGWND.set(returnResult['message'], (['ステージ選択画面に戻る'], 'finished'))
+                        if ISENGLISH:
+                            returnResult['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
+                        else:
+                            returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                    MSGWND.set(returnResult['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
                     self.fp.write("finished\n")
                 return
         MSGWND.set(returnResult['message'])
@@ -2774,7 +2785,7 @@ class MessageWindow(Window):
                 self.selectMsgText, self.select_type = selectMessages
             message_list = []
             if len(self.new_std_messages):
-                message_list.append("\n".join(["コンソール出力:"] + self.new_std_messages))
+                message_list.append("\n".join(["Output:" if ISENGLISH else "コンソール出力:"] + self.new_std_messages))
                 self.new_std_messages = []
             if len(self.str_messages):
                 message_list.append("\n".join(self.str_messages))
@@ -2886,7 +2897,7 @@ class MessageWindow(Window):
         
         if self.sender is not None and self.selectMsgText:
             if self.select_type == 'loop_skip':
-                if self.selectMsgText[self.selectingIndex] == "はい":
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # 暗転
                     DIMWND.show(200, 'skip')
                     startLine = self.sender.code_window.linenum
@@ -2899,7 +2910,7 @@ class MessageWindow(Window):
                                 fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                                 PLAYER.set_pos(event.x, event.y, DOWN)  # プレイヤーを移動先座標へ
                                 fieldmap.add_chara(PLAYER)  # マップに再登録
-                                skipResult['message'] += f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
+                                skipResult['message'] += f'\fmoved to break statement of line {skipResult["finalLine"]} !!' if ISENGLISH else f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
                                 break
                     self.set(skipResult['message'])
                     PLAYER.remove_itemvalue()
@@ -2915,7 +2926,7 @@ class MessageWindow(Window):
                     skipResult = self.sender.receive_json()
                     self.set(skipResult['message'])
             elif self.select_type == 'func_skip':
-                if self.selectMsgText[self.selectingIndex] == "はい":
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     self.sender.send_event({"skip": True})
                     skipResult = self.sender.receive_json()
                     self.set(skipResult['message'])
@@ -2977,7 +2988,7 @@ class MessageWindow(Window):
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
-                if self.selectMsgText[self.selectingIndex] == "はい":
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     self.sender.send_event({"skip": True})
                     DIMWND.show(200, 'skip')
                     skipResult = self.sender.receive_json()
@@ -3099,7 +3110,7 @@ class MessageWindow(Window):
             elif self.select_type == 'rollback':
                 self.sender.code_window.scrollY = 0
                 self.sender.code_window.scrollX = 0
-                if self.selectMsgText[self.selectingIndex] == "はい":
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
                     rollbackResult = self.sender.receive_json()
                     player_history = self.sender.code_window.history[self.sender.code_window.rollback_index]
@@ -3152,7 +3163,7 @@ class MessageWindow(Window):
                     MSGWND.set("巻き戻しを取り止めました")
                 self.sender.code_window.rollback_index = None
             elif self.select_type == 'rollback_to_init':
-                if self.selectMsgText[self.selectingIndex] == "はい":
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     player_history = self.sender.code_window.history[0]
                     # 暗転
                     DIMWND.show(200, 'rollback')
@@ -3176,9 +3187,9 @@ class MessageWindow(Window):
                     self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
                     fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                     fieldmap.add_chara(PLAYER)  # マップに再登録
-                    MSGWND.set(f"ゲーム開始時点まで巻き戻しました")
+                    MSGWND.set("Back to rightly after game began" if ISENGLISH else "ゲーム開始時点まで巻き戻しました")
                 else:
-                    MSGWND.set("巻き戻しを取り止めました")
+                    MSGWND.set("stopped rollback" if ISENGLISH else "巻き戻しを取り止めました")
             elif self.select_type == 'finished':
                 PLAYER.goaled = True
             
@@ -3283,13 +3294,13 @@ class PauseWindow(Window):
 
         # ゲームボタン
         pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
-        label_surf_toGame, _ = self.font.render("ゲームに戻る", self.TO_GAME_FONT_COLOR)
+        label_surf_toGame, _ = self.font.render("Back to game" if ISENGLISH else "ゲームに戻る", self.TO_GAME_FONT_COLOR)
         label_rect_toGame = label_surf_toGame.get_rect(center=self.button_toGame_rect.center)
         self.surface.blit(label_surf_toGame, label_rect_toGame)
 
         # ステージ選択メニューに戻るボタン
         pygame.draw.rect(self.surface, self.TO_SSELECT_BG_COLOR, self.button_toStageSelect_rect)
-        label_surf_toStageSelect, _ = self.font.render("ステージ選択画面に戻る", self.TO_SSELECT_FONT_COLOR)
+        label_surf_toStageSelect, _ = self.font.render("Back to Stage select" if ISENGLISH else "ステージ選択画面に戻る", self.TO_SSELECT_FONT_COLOR)
         label_rect_toStageSelect = label_surf_toStageSelect.get_rect(center=self.button_toStageSelect_rect.center)
         self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
 
@@ -3450,7 +3461,7 @@ class ItemWindow(Window):
         offset_x = self.offset_x
 
         # ウィンドウ名表示
-        self.draw_string(10, 8, "アイテム", self.CYAN, 20)
+        self.draw_string(10, 8, "ITEM" if ISENGLISH else "アイテム", self.CYAN, 20)
 
         offset_y += 24
 
@@ -3704,7 +3715,7 @@ class StatusWindow(Window):
             FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
-        self.name = "あくあたん" + self.player.name
+        self.name = "AQUATAN" + self.player.name if ISENGLISH else "あくあたん" + self.player.name
         self.stage_index = stage_index
 
     def draw_string(self, x, y, string, color):
@@ -3724,8 +3735,8 @@ class StatusWindow(Window):
             return
         Window.draw(self)
         # self.surface.blit(self.img_schedule, self.text_rect)
-        self.draw_string(10, 10, f"ステージ {self.stage_index}", self.WHITE)
-        self.draw_string(10, 30, f"現在地:　{self.player.func}", self.CYAN)
+        self.draw_string(10, 10, f"Stage {self.stage_index}" if ISENGLISH else f"ステージ {self.stage_index}", self.WHITE)
+        self.draw_string(10, 30, f"Now:　{self.player.func}" if ISENGLISH else f"現在地:　{self.player.func}", self.CYAN)
 
         self.draw_status(10, 50, "HP")
         self.draw_status(100, 50, "MP")
@@ -4009,7 +4020,7 @@ class Detail:
 
                 # 条件リンクを描画（最後以外）
                 if j < len(parts) - 1:
-                    cond_surf, _ = font.render("計算式 ▷" if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else "条件 ▷", self.HOVER_TEXT_COLOR)
+                    cond_surf, _ = font.render(("EXP ▷" if ISENGLISH else "計算式 ▷") if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else ("Cond ▷" if ISENGLISH else "条件 ▷"), self.HOVER_TEXT_COLOR)
                     text_rect = cond_surf.get_rect(topleft=(x+6, y))
                     outer_rect = pygame.Rect(
                         x+2,
@@ -4026,25 +4037,25 @@ class Detail:
                 x = 50
                 if detail["type"] == "cond-in-change":
                     continue
-                and_surf, _ = font.render("かつ", self.WHITE)
+                and_surf, _ = font.render("AND" if ISENGLISH else "かつ", self.WHITE)
                 and_rect = and_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((and_surf, and_rect))
                 y = and_rect.bottom + 4
             elif detail["type"] == "end":
                 x = 50
-                next_surf, _ = font.render("この先に進むと次の処理に移行します", self.WHITE)
+                next_surf, _ = font.render("to the next step getting over here" if ISENGLISH else "この先に進むと次の処理に移行します", self.WHITE)
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
             elif detail["type"] in ("cond-in", "cond-in-change"):
                 x = 50
-                end_surf, _ = font.render("先に進みます", self.WHITE)
+                end_surf, _ = font.render("to the next step" if ISENGLISH else "先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4        
             elif detail["type"] == "cond-check":
                 x = 50
-                end_surf, _ = font.render("ならこの先に進みます", self.WHITE)
+                end_surf, _ = font.render("then, to the next step" if ISENGLISH else "ならこの先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4
@@ -4672,8 +4683,11 @@ class StageButtonWindow:
     #               "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer", "18_stdio_input_output", "19_file_io", "20_memory_management"]
     # code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文", "関数宣言と定義", "条件文の中に関数", "一次元配列", "二次元配列", "文字列と文字配列",
     #                      "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列とポインタの組合せ", "関数の引数にポインタ", "標準入出力", "ファイルの入出力", "メモリ管理"]
+    # code_explanations = ["Variable Decl", "Variable Exp", "Variable Adv", "If, Switch", "Loop", "Function", "Func in Cond", "1D array", "2D array", "String",
+    #                      "Use of String", "Struct", "Var type, modifier", "Recursive func", "Pointer", "Array, Pointer", "Pointer in Func", "Std output", "file IO", "Memory"]
     code_names = ["101_variables_expression", "102_functions_condition", "103_loops", "104_array_struct", "105_pointer"]
     code_explanations = ["変数の宣言と計算", "条件文と関数", "繰り返し文", "配列と構造体", "ポインタ"]
+    code_explanations_en = ["Variable", "Cond, Func", "Loops", "Array, Struct", "Pointer"]
 
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
@@ -4690,6 +4704,7 @@ class StageButtonWindow:
         self.tutorial_button_rect = pygame.Rect(self.rect.width - 330, 10, 100, 30)
         self.color_support_button_rect = pygame.Rect(self.rect.width - 220, 10, 100, 30)
         self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
+        self.english_mode_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
         self.bg_image = load_image("data", "c_background.png", -1)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
@@ -4710,9 +4725,14 @@ class StageButtonWindow:
         x = 10 - self.scrollX
         y = SBW_HEIGHT // 4
         self.button_stages = []
-        for i, code_name in enumerate(self.code_names):
-            self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
-            x += self.SB_WIDTH + 10
+        if ISENGLISH:
+            for i, code_name in enumerate(self.code_names):
+                self.button_stages.append(StageButton(code_name, self.code_explanations_en[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+                x += self.SB_WIDTH + 10
+        else:
+            for i, code_name in enumerate(self.code_names):
+                self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+                x += self.SB_WIDTH + 10
 
     def blit(self, screen):
         """blit"""
@@ -4723,27 +4743,32 @@ class StageButtonWindow:
             self.blit(screen)
 
             screen.blit(self.bg_image, (0, 0))
-            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), "ステージ選択" if self.stage_selecting else "lldb　処理チェック", self.FONT_COLOR)
+            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), ("Stage Select" if ISENGLISH else "ステージ選択") if self.stage_selecting else ("LLDB check" if ISENGLISH else "LLDB　処理チェック"), self.FONT_COLOR)
             for button in self.button_stages:
                 button.draw(screen)
 
             # チュートリアルボタン
             pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
-            tutorial_label_surf, _ = self.mini_button_font.render("チュートリアル", (0, 0, 0))
+            tutorial_label_surf, _ = self.mini_button_font.render("Tutorial" if ISENGLISH else "チュートリアル", (0, 0, 0))
             tutorial_label_rect = tutorial_label_surf.get_rect(center=self.tutorial_button_rect.center)
             screen.blit(tutorial_label_surf, tutorial_label_rect)
 
             # 色覚サポートのあり/なしボタン
             pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
-            color_support_label_surf, _ = self.mini_button_font.render("色覚サポートあり" if self.color_support else "色覚サポートなし", (0, 0, 0) if self.color_support else (255, 255, 255))
+            color_support_label_surf, _ = self.mini_button_font.render(("Color Support ON" if ISENGLISH else "色覚サポートあり") if self.color_support else ("Color Support OFF" if ISENGLISH else "色覚サポートなし"), (0, 0, 0) if self.color_support else (255, 255, 255))
             color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
             screen.blit(color_support_label_surf, color_support_label_rect)
 
             # ゲームモード/デバッグモードのボタン
-            pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
-            mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
-            mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
-            screen.blit(mode_change_label_surf, mode_change_label_rect)
+            # pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
+            # mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
+            # mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+            # screen.blit(mode_change_label_surf, mode_change_label_rect)
+
+            pygame.draw.rect(screen, (255, 255, 255) if ISENGLISH else (0, 0, 0), self.english_mode_button_rect)
+            english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (0, 0, 0) if ISENGLISH else (255, 255, 255))
+            english_mode_label_rect = english_mode_label_surf.get_rect(center=self.english_mode_button_rect.center)
+            screen.blit(english_mode_label_surf, english_mode_label_rect)
 
     def is_clicked(self, pos):
         # ステージの内容と説明を両方code_namesリストに格納したいので、ステージボタンはインデックスで取得する
@@ -4751,11 +4776,13 @@ class StageButtonWindow:
             if button.rect.collidepoint(pos):
                 return i
         if self.tutorial_button_rect.collidepoint(pos):
-            return 'tutorial'
+            return "tutorial"
         if self.color_support_button_rect.collidepoint(pos):
-            return 'color support'
-        if self.checking_lldb_button_rect.collidepoint(pos):
-            return 'check lldb'
+            return "color support"
+        # if self.checking_lldb_button_rect.collidepoint(pos):
+        #     return "check lldb"
+        if self.english_mode_button_rect.collidepoint(pos):
+            return "switch language"
         return None
     
     def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
@@ -4830,7 +4857,7 @@ class StageButton:
     
     def draw(self, surface: pygame.Surface):
         pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
-        text_surf, _ = self.font.render(f"ステージ　{self.stage_num}", self.STAGE_NAME_COLOR)
+        text_surf, _ = self.font.render(f"Stage {self.stage_num}" if ISENGLISH else f"ステージ　{self.stage_num}", self.STAGE_NAME_COLOR)
         text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
         self.surface.blit(text_surf, text_rect)
         self.font.size = 12
@@ -5039,7 +5066,7 @@ class ControllerGuideWindow(Window):
 
     def draw_string(self, x: int, y: int, string: str, color: pygame.Color = None, size=None):
         """文字列出力"""
-        if y < 34 and string != "操作":
+        if y < 34 and string not in ("操作", "CONTROLLER"):
             return
          
         if size:
@@ -5055,54 +5082,54 @@ class ControllerGuideWindow(Window):
         Window.draw(self)
         offset_x = 10
         offset_y = self.offset_y
-        self.draw_string(10, 10+4, "操作", self.CYAN, 20)
+        self.draw_string(10, 10+4, "CONTROLLER" if ISENGLISH else "操作", self.CYAN, 20)
         offset_y += 24
 
         if self.cmndwnd.is_visible:
             self.draw_string(offset_x, offset_y, "escape:")
             offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "　コマンドウィンドウを非表示")
+            self.draw_string(offset_x, offset_y, "hide the Command Window" if ISENGLISH else "コマンドウィンドウを非表示")
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "space: コマンドを実行")
+            self.draw_string(offset_x, offset_y, "space: execute command" if ISENGLISH else "space: コマンドを実行")
             offset_y += (self.FONT_SIZE + 4) * 2
-            self.draw_string(offset_x, offset_y, "入力コマンド:", Color(255, 0, 0, 255))
+            self.draw_string(offset_x, offset_y, "input command:" if ISENGLISH else "入力コマンド:", Color(255, 0, 0, 255))
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "rollback: 過去に戻る")
+            self.draw_string(offset_x, offset_y, "rollback: back to past" if ISENGLISH else "rollback: 過去に戻る")
             offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "stdio A B...:")
             # offset_y += self.FONT_SIZE
-            # self.draw_string(offset_x, offset_y, "　A B...を標準入力")
+            # self.draw_string(offset_x, offset_y, "input A B..." if ISENGLISH else "A B...を標準入力")
             # offset_y += self.FONT_SIZE + 4
         elif isSelectMsgText:
-            self.draw_string(offset_x, offset_y, "←/→: 選択")
+            self.draw_string(offset_x, offset_y, "←/→: select" if ISENGLISH else "←/→: 選択")
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "space: 決定")
+            self.draw_string(offset_x, offset_y, "space: decide" if ISENGLISH else "space: 決定")
             if PLAYER.sender.code_window.rollback_index is not None:
                 offset_y += self.FONT_SIZE + 4
-                self.draw_string(offset_x, offset_y, "↑/↓: 行を選ぶ")
+                self.draw_string(offset_x, offset_y, "↑/↓: choose line" if ISENGLISH else "↑/↓: 行を選ぶ")
             offset_y += self.FONT_SIZE + 4
         else:
             if PLAYER.isFootActionValid:
-                self.draw_string(offset_x, offset_y, "f: 足元へのアクション")
+                self.draw_string(offset_x, offset_y, "f: action on foot" if ISENGLISH else "f: 足元へのアクション")
                 offset_y += self.FONT_SIZE + 4
             if PLAYER.isFowardActionValid:
-                self.draw_string(offset_x, offset_y, "space: 前方へのアクション")
+                self.draw_string(offset_x, offset_y, "space: action to forward" if ISENGLISH else "space: 前方へのアクション")
                 offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "shift押下中に移動: ダッシュ")
+            self.draw_string(offset_x, offset_y, "move with shift: dash" if ISENGLISH else "shift押下中に移動: ダッシュ")
             offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "カーソル:")
+            self.draw_string(offset_x, offset_y, "cursor:" if ISENGLISH else "カーソル:")
             offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "　クリックでボタンを押す")
+            self.draw_string(offset_x, offset_y, "click on button" if ISENGLISH else "クリックでボタンを押す")
             offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "　または")
+            self.draw_string(offset_x, offset_y, "or" if ISENGLISH else "または")
             offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "　ウィンドウ内をスクロール")
+            self.draw_string(offset_x, offset_y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
             offset_y += (self.FONT_SIZE + 4) * 2
             # self.draw_string(offset_x, offset_y, "i: 宝箱上のアイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
             # offset_y += self.FONT_SIZE + 4
             # self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
             # offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "c: コマンドウィンドウを表示")
+            self.draw_string(offset_x, offset_y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを表示")
             offset_y += self.FONT_SIZE + 4
         
         self.is_bottom_edge = offset_y <= self.rect.height
@@ -5139,7 +5166,7 @@ class LogWindow(Window):
 
     def draw_string(self, x: int, y: int, string: str, color=None, size=None):
         """文字列出力"""
-        if y < 34 and string != "ログ":
+        if y < 34 and string not in ("ログ", "LOG"):
             return
 
         if size:
@@ -5156,7 +5183,7 @@ class LogWindow(Window):
         offset_x = 10
         offset_y = self.offset_y
 
-        self.draw_string(10, 10+4, "ログ", self.CYAN, 20)
+        self.draw_string(10, 10+4, "LOG" if ISENGLISH else "ログ", self.CYAN, 20)
         offset_y += 24
         
         if isTutorial and PLAYER.sender.code_window.linenum in PLAYER.help_dict:
@@ -5283,7 +5310,7 @@ class MiniMapWindow(Window, Map):
 
         if not self.is_auto_scroll:
             pygame.draw.rect(screen, (100, 100, 100), self.auto_scroll_button_rect)  # グレーのボタン
-            label_surf, _ = self.font.render("自動スクロール", (255, 255, 255))
+            label_surf, _ = self.font.render("auto scroll" if ISENGLISH else "自動スクロール", (255, 255, 255))
             label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
             screen.blit(label_surf, label_rect)
                 
@@ -5366,7 +5393,7 @@ class CodeWindow(Window):
         y_offset = 10 - self.scrollY
         digit_line = len(str(len(self.lines)))
         
-        self.draw_string(10, 14, "ソースコード", self.CYAN, 20)
+        self.draw_string(10, 14, "CODE" if ISENGLISH else "ソースコード", self.CYAN, 20)
         y_offset += 30
 
         for i, line in enumerate(self.lines):
@@ -5467,7 +5494,7 @@ class EventSender:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.settimeout(timeout)
                 self.sock.connect((host, port))
-                print("[Client] 接続成功")
+                print("[Client] connection succeeded" if ISENGLISH else "[Client]　接続成功")
                 break
             except (ConnectionRefusedError, OSError) as e:
                 last_error = e
@@ -5499,7 +5526,7 @@ class EventSender:
                     PLAYER.damage = "-10"
                     PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
                     if "message" in msg:
-                        msg["message"] += '\fプレイヤーに10ダメージ !!'
+                        msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
                     if PLAYER.status["HP"] == 30:
                         self.hp_warning_sound.play(loops=-1)
                     elif PLAYER.status["HP"] == 0:
@@ -5507,7 +5534,7 @@ class EventSender:
                     return msg
                 if msg["status"] == "rollback":
                     self.code_window.set_rollback_mode()
-                    MSGWND.set("右上のコードウィンドウの水色の行の処理直前まで巻き戻しますか?", (['はい', 'いいえ'], 'rollback'))
+                    MSGWND.set("Do you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
                     return msg
                 if msg["status"] == "rollbackFalse":
                     return msg
@@ -5565,13 +5592,22 @@ class EventSender:
                 if "memory" in msg:
                     for memory_info in msg["memory"]:
                         if memory_info["type"] == "malloc":
-                            MSGWND.memory_message = f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            if ISENGLISH:
+                                MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory by malloc"
+                            else:
+                                MSGWND.memory_message = f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
                             # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                         elif memory_info["type"] == "realloc":
-                            MSGWND.memory_message = f"reallocにより、{memory_info['fromVar']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            if ISENGLISH:
+                                MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory used {memory_info['fromVar']} memory by realloc"
+                            else:
+                                MSGWND.memory_message = f"reallocにより、{memory_info['fromVar']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
                             # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
                         else:
-                            MSGWND.memory_message = f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
+                            if ISENGLISH:
+                                MSGWND.memory_message = f"liberate {memory_info['address']} memory"
+                            else:
+                                MSGWND.memory_message = f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
                             # PLAYER.address_to_size.pop(memory_info["address"], None)
                 if "type" in msg:
                     PLAYER.isLoopStatementInBefore = True
@@ -5582,7 +5618,7 @@ class EventSender:
                 continue  # JSONがまだ完全でないので続けて待つ
             except socket.timeout:
                 if self.code_window.rollback_index is None:
-                    raise TimeoutError("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+                    raise TimeoutError("timeout in socket connection. endless loop or length of exection may result in this problem." if ISENGLISH else "ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
             except Exception as e:
                 print(f"受信エラー: {e}")
                 raise

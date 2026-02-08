@@ -389,6 +389,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.str_info_to_send = []
             self.skipped_lines = []
             self.events_history: list[dict] = []
+            self.is_english = args.english
 
         def set_process_and_thread(self, process: lldb.SBProcess, thread: lldb.SBThread, rollback_index: int | None) -> None:
             gvars = []
@@ -412,7 +413,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
                     self.get_std_outputs()
-                    self.event_sender({"message": "最初の処理", "line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
+                    self.event_sender({"message": "The first step" if self.is_english else "最初の処理", "line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
                     self.line_number: int = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
                     self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
@@ -499,10 +500,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if (event := self.event_reciever()) is None:
                         continue
                     if event.get('type', None) == 'return' and event['fromTo'][0] == self.line_number:
-                        self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
+                        self.event_sender({"message": "Congraturations!! Here is a goal!!" if self.is_english else "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                         raise ProgramFinished()
                     else:
-                        self.event_sender({"message": "returnキャラに話しかけてください!!", "status": "ng"})
+                        self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください!!", "status": "ng"})
 
             self.thread = self.frame.GetThread()
             self.process = self.thread.GetProcess()
@@ -530,25 +531,45 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
                                 items = list(set(skipped_varDecls) - set(vars_event))
-                                self.event_sender({"message": f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!", "status": "ng"})
+                                if self.is_english:
+                                    item_message = f"HINT: Get item {', '.join([item_lacked[0] for item_lacked in items])} !!"
+                                else:
+                                    item_message = f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
+                                self.event_sender({"message": item_message, "status": "ng"})
                             else:
-                                self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
+                                if self.is_english:
+                                    item_message = f"You are trying to get different item {itemname[0]} !!"
+                                else:
+                                    item_message = f"異なるアイテム {itemname[0]} を取得しようとしています!!"
+                                self.event_sender({"message": item_message, "status": "ng"})
                         else:
                             vars_event.append(itemname)
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 self.vars_tracker.setVarsDeclared(itemname)
-                                self.event_sender({"message": f"アイテム {itemname[0]} を正確に取得できました!!", "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"})
+                                if self.is_english:
+                                    item_message = f"You got item {itemname[0]} !!"
+                                else:
+                                    item_message = f"アイテム {itemname[0]} を正確に取得できました!!"
+                                self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"})
                                 break
                             self.vars_tracker.setVarsDeclared(itemname)
-                            self.event_sender({"message": f"アイテム {itemname[0]} を正確に取得できました!!", "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"}, False)
+                            if self.is_english:
+                                item_message = f"You got item {itemname[0]} !!"
+                            else:
+                                item_message = f"アイテム {itemname[0]} を正確に取得できました!!"
+                            self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"}, False)
                     else:
                         errorCnt += 1
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
                             items = list(set(skipped_varDecls) - set(vars_event))
-                            self.event_sender({"message": f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!", "status": "ng"})
+                            if self.is_english:
+                                item_message = f"HINT: Get items {', '.join([item_lacked[0] for item_lacked in items])} !!"
+                            else:
+                                item_message = f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
+                            self.event_sender({"message": item_message, "status": "ng"})
                         else:
-                            self.event_sender({"message": "何らかのアイテムを取得してください!!", "status": "ng"})
+                            self.event_sender({"message": "Get an item !!" if self.is_english else "何らかのアイテムを取得してください!!", "status": "ng"})
 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["input"] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
                 self.input_check_num[(self.next_frame_num, self.next_line_number)] = (self.line_data[self.func_crnt_name]["input"][str(self.next_line_number)], -1)
@@ -570,23 +591,31 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if state == "incomplete":
                             errorCnt += 1
                             if errorCnt >= 3:
-                                self.event_sender({"message": f"入力({', '.join(errors['incomplete'])})が足りていません!! もう一度入力してください!!", "status": "ng"})
+                                if self.is_english:
+                                    stdin_message = f"HINT: Missing input ({', '.join(errors['incomplete'])})!! input again !!"
+                                else:
+                                    stdin_message = f"ヒント: 入力({', '.join(errors['incomplete'])})が足りていません!! もう一度入力してください!!"
+                                self.event_sender({"message": stdin_message, "status": "ng"})
                             else:
-                                self.event_sender({"message": "入力が足りていません!! もう一度入力してください!!", "status": "ng"})
+                                self.event_sender({"message": "Missing input !! input again !!" if self.is_english else "入力が足りていません!! もう一度入力してください!!", "status": "ng"})
                             continue
                         self.stdin_buffer = remaining
                         self.process.PutSTDIN(new_stdin)
                         self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check].pop(0)
                         if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check]):
-                            self.event_sender({"message": "次のscanf用に入力してください!!", "status": "ok"}, False)
+                            self.event_sender({"message": "input again for scanf !!" if self.is_english else "次のscanf用に入力してください!!", "status": "ok"}, False)
                         else:
                             break
                     else:
                         errorCnt += 1
                         if errorCnt >= 3:
-                            self.event_sender({"message": f"値をフォーマット({self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0]})\nに沿って入力してください!!", "status": "ng"})
+                            if self.is_english:
+                                stdin_message = f"input values in the format ({self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0]}) !!"
+                            else:
+                                stdin_message = f"値をフォーマット({self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0]})\nに沿って入力してください!!"
+                            self.event_sender({"message": stdin_message, "status": "ng"})
                         else:
-                            self.event_sender({"message": "値を入力してください!!", "status": "ng"})
+                            self.event_sender({"message": "input values for scanf" if self.is_english else "値を入力してください!!", "status": "ng"})
                 self.input_check_num[(self.next_frame_num, self.next_line_number)][0].pop(input_check)
                 if len(self.input_check_num[(self.next_frame_num, self.next_line_number)][0]) == 0:
                     self.input_check_num.pop((self.next_frame_num, self.next_line_number))
@@ -611,13 +640,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 
                 if input_check:
                     if state == "ok":
-                        message = f"値({', '.join(results)})がstdinに入力されました!!"
-                        self.event_sender({"message": "値がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
+                        self.event_sender({"message": f"values ({', '.join(results)}) were set to stdin !!" if self.is_english else f"値 ({', '.join(results)}) がstdinに入力されました!!", "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                     elif state == "mismatch":
-                        message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
-                        if errors["incomplete"]:
-                            incomplete_message = ", ".join(errors["incomplete"]) + "\nに該当する変数にはランダムな値が設定されます"
-                            message += "\f" + incomplete_message
+                        if self.is_english:
+                            message = f"values do not match to scanf format \n({errors['mismatch']})"
+                            if errors["incomplete"]:
+                                incomplete_message = "set random values for variables in\n" + ", ".join(errors["incomplete"])
+                                message += "\f" + incomplete_message
+                        else:
+                            message = f"値がscanfのフォーマットに合致しませんでした、、、\n({errors['mismatch']}で合致していません!!)"
+                            if errors["incomplete"]:
+                                incomplete_message = ", ".join(errors["incomplete"]) + "\nに該当する変数にはランダムな値が設定されます"
+                                message += "\f" + incomplete_message
                         self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                 
                 if str(self.line_number) in self.line_data[self.func_name]["file"] and (self.frame_num, self.line_number) not in self.file_check_num:
@@ -739,9 +773,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 errorCnt += 1
                                 # 複数回入力を間違えたらヒントをあげる
                                 if errorCnt >= 3:
-                                    self.event_sender({"message": f"ヒント: アイテム {var[0]} を取得してください!!", "status": "ng"})
+                                    self.event_sender({"message": f"HINT: Get item {var[0]} !!" if self.is_english else f"ヒント: アイテム {var[0]} を取得してください!!", "status": "ng"})
                                 else:
-                                    self.event_sender({"message": f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
+                                    self.event_sender({"message": f"You are trying to get a different item {itemname[0]} !!" if self.is_english else f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
                                 continue
 
                             fromTo: list[int] = event['fromTo']
@@ -767,7 +801,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                             else:
                                 errorCnt += 1
-                                self.event_sender({"message": f"異なる行動をしようとしています!!20", "status": "ng", "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"You did a different action !!20" if self.is_english else f"異なる行動をしようとしています!!20", "status": "ng", "skippedFunc": skipped_func})
                                 continue
                 
                             # アイテムを正しく取得できたら次の変数に移る
@@ -776,7 +810,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.vars_tracker.setVarsDeclared(var)
                                 # まだ全ての宣言が完了していない場合
                                 if len(varsDeclLines_copy):
-                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func}, False)
+                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func}, False)
                                 # 全ての宣言が完了している場合
                                 else:
                                     # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
@@ -800,7 +834,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             if (var, int(line)) not in vars_declared
                                         }
                                     ]
-                                    self.event_sender({"message": f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
+                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:
@@ -808,7 +842,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     line_number_track.append(self.next_line_number)
                                     if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
                                         func_num += 1
-                                        self.event_sender({"message": f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True, "skippedFunc": skipped_func})
+                                        self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True, "skippedFunc": skipped_func})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             back_line_number = self.line_number
@@ -819,7 +853,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                                 self.step_conditionally()
                                                 if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                                     retVal = thread.GetStopReturnValue().GetValue()
-                                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                                    self.event_sender({"message": "function skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                                 if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                                     break
                                             self.func_checked.pop(-1)
@@ -827,7 +861,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             items = {}
                                             for argname, arg_info in funcWarp[0]['args'].items():
                                                 items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
-                                            self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
+                                            self.event_sender({"message": f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": funcWarp[0]["name"], "x": funcWarp[0]["x"], "y": funcWarp[0]["y"], "items": items}})
                                             self.func_checked.append([self.func_crnt_name])
                                             back_line_number = self.line_number
                                             back_frame_num = self.frame_num
@@ -843,20 +877,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                                     else:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"異なる行動をしようとしています10!!", "status": "ng", "skippedFunc": skipped_func})
+                                        self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています10!!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                 # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
                                 else:
                                     # self.step_conditionally(var_check=False)
                                     self.step_conditionally()
                                     if crntFromTo[0] != self.line_number:
-                                        self.event_sender({"message": f"このアイテムは取得できません11!!", "status": "ng", "skippedFunc": skipped_func})
+                                        self.event_sender({"message": "You cannot get this item !!" if self.is_english else "このアイテムは取得できません11!!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                     line_number_track.append(self.line_number)
                                     crntFromTo.pop(0)
                         else:
                             errorCnt += 1
-                            self.event_sender({"message": "異なる行動をしようとしています1!!", "status": "ng"})
+                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています1!!", "status": "ng"})
             else:
                 values_changed = []
                 for varname in self.vars_tracker.vars_changed.keys():
@@ -908,20 +942,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                        self.event_sender({"message": f"You cannot get over here 2!! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             condition_type_get = event.get('type', '')
                             if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました1!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action1 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました1!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action2 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action3 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             else:
                                 break
                         continue
@@ -941,7 +975,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
@@ -954,14 +988,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         self.step_conditionally()
                                         if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                             retVal = thread.GetStopReturnValue().GetValue()
-                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                         elif back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             line_number_track.append(self.next_line_number)
                                             break
                                         # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
                                         elif condition_type == "exp" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
                                             line_number_track = fromTo
-                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
+                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
                                             break
                                     self.func_checked.pop(-1)
                                 # スキップしない
@@ -970,7 +1004,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     func = funcWarp.pop(0)
                                     for argname, arg_info in func["args"].items():
                                         items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
-                                    self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                    self.event_sender({"message": f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     self.func_checked.append([self.func_crnt_name])
                                     back_line_number = self.line_number
                                     back_frame_num = self.frame_num
@@ -999,20 +1033,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     self.func_checked.pop(-1)
                                     line_number_track.append(self.next_line_number)
                             else:
-                                self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng", "skippedFunc": skipped_func})
+                                self.event_sender({"message": "You cannot get over here10 !!" if self.is_english else "ここから先は進入できません10!!", "status": "ng", "skippedFunc": skipped_func})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 condition_type_get = event.get('type', '')
                                 if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました4!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action4 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました4!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました5!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action5 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました5!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました6!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action6 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました6!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1021,17 +1055,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             self.step_conditionally()
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"You cannot get over here3 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
                                     condition_type_get = event.get('type', '')
                                     if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました7!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"You did a different action7 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました7!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     elif (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました8!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"You did a different action8 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました8!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
@@ -1064,16 +1098,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"ここから先は進入できません22!!", "status": "ng", "skippedFunc": skipped_func})
+                        self.event_sender({"message": "You cannot get over here22 !!" if self.is_english else "ここから先は進入できません22!!", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             if (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました9!!", "status": "ng"})
+                                self.event_sender({"message": "You did a different action9 !!" if self.is_english else "NG行動をしました9!!", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"NG行動をしました10!!", "status": "ng"})
+                                self.event_sender({"message": "You did a different action10 !!" if self.is_english else f"NG行動をしました10!!", "status": "ng"})
                             else:
                                 break
                         continue
@@ -1081,7 +1115,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         retVal = thread.GetStopReturnValue().GetValue()
-                        self.event_sender({"message": f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
+                        self.event_sender({"message": f"go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
                         # 戻ってきた場所からnext_line_numberまででskipped_linesを取得する
                         self.skipped_lines = [l for l in self.skipped_lines if fromTo[-1] < int(l) < self.next_line_number]
                         self.step_conditionally()
@@ -1092,7 +1126,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
@@ -1104,16 +1138,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         self.step_conditionally()
                                         if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
                                             retVal = thread.GetStopReturnValue().GetValue()
-                                            self.event_sender({"message": "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
                                             if len(funcWarp) == 1:
                                                 while True:
                                                     if (event := self.event_reciever()) is None:
                                                         continue
                                                     if event.get('type', None) == 'return' and event['fromTo'][0] == self.next_line_number:
-                                                        self.event_sender({"message": "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
+                                                        self.event_sender({"message": "Congraturations !! Here is a goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                                                         raise ProgramFinished()
                                                     else:
-                                                        self.event_sender({"message": "returnキャラに話しかけてください!!", "status": "ng"})
+                                                        self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください!!", "status": "ng"})
                                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
                                 # スキップしない
@@ -1122,7 +1156,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     func = funcWarp.pop(0)
                                     for argname, arg_info in func["args"].items():
                                         items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
-                                    self.event_sender({"message": f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                    self.event_sender({"message": f"skip is cancelled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
                                     back_line_number = self.line_number
                                     back_frame_num = self.frame_num
 
@@ -1137,16 +1171,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             break
                                 line_number_track.append(self.next_line_number)
                             else:
-                                self.event_sender({"message": "ここから先は進入できません10!!", "status": "ng"})
+                                self.event_sender({"message": "You cannot get over here10 !!" if self.is_english else "ここから先は進入できません10!!", "status": "ng"})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 if (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました11!!", "status": "ng"})
+                                    self.event_sender({"message": "You did a differene taction11 !!" if self.is_english else "NG行動をしました11!!", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"NG行動をしました12!!", "status": "ng"})
+                                    self.event_sender({"message": "You did a differene taction12 !!" if self.is_english else f"NG行動をしました12!!", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1155,16 +1189,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             self.step_conditionally()
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": f"ここから先は進入できません3!!", "status": "ng", "skippedFunc": skipped_func})
+                                self.event_sender({"message": "You cannot over here3 !!" if self.is_english else "ここから先は進入できません3!!", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
                                     if (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました13!!", "status": "ng"})
+                                        self.event_sender({"message": "You did a different action13 !!" if self.is_english else "NG行動をしました13!!", "status": "ng"})
                                     elif (funcWarp := event.get('funcWarp', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"NG行動をしました14!!", "status": "ng"})
+                                        self.event_sender({"message": "You did a different action14 !!" if self.is_english else f"NG行動をしました14!!", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
@@ -1209,16 +1243,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     skipStart = self.next_line_number
                                     skipEnd = self.line_data[self.func_name]["loops"][str(self.next_line_number)]
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while or for", "skip": True})
+                                    self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while or for", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "type": "while or for", "finalLine": self.line_number})
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "type": "while or for", "finalLine": self.line_number})
                                         return CONTINUE
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "while or for"})
+                                        self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "while or for"})
                                 # type == do_whileの場合
                                 else:
                                     # まずは条件文に行って次がTrueかFalseかを見る
@@ -1228,15 +1262,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         skipStart = self.line_number
                                         skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                         # ここでスキップするかどうかを確認する
-                                        self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True})
+                                        self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= self.next_line_number <= skipEnd:
                                                 # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                                 self.step_conditionally()
-                                            self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
+                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number})
                                         else:
-                                            self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "doWhile"})
+                                            self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "doWhile"})
                                     else:
                                         self.event_sender({"message": "", "type": "doWhile", "status": "ok"})
                                     return CONTINUE
@@ -1250,14 +1284,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 check_return(fromTo, funcWarp)
                                 return PROGRESS
                             else:
-                                self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                                self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                                 return CONTINUE
                         # void関数の戻り
                         elif fromTo[0] == self.line_number and fromTo[0] in self.line_data[self.func_name]["voidreturn"]:
-                            self.event_sender({"message": f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
+                            self.event_sender({"message": f"go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
                             self.skipped_lines = [l for l in self.skipped_lines if backToLine < int(l) < self.next_line_number]
                         else:
-                            self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                             return CONTINUE            
                     elif len(fromTo) == 1 and fromTo == [self.line_number]:
                         if type == 'whileIn':
@@ -1266,15 +1300,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
+                                    self.event_sender({"message": "skip to rightly before exit of loop" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "while"}, False)
+                                        self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "while"}, False)
                                 else:
                                     self.event_sender({"message": "", "status": "ok", "type": "while"})
                             else:
@@ -1285,15 +1319,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 # ここでスキップするかどうを確認する
                                 skipStart = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 skipEnd = self.line_number
-                                self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
+                                self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
                                 event = self.event_reciever()
                                 if event.get('skip', False):
                                     while skipStart <= self.next_line_number <= skipEnd:
                                         # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                         self.step_conditionally()
-                                    self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
+                                    self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
                                 else:
-                                    self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "doWhile"}, False)
+                                    self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "doWhile"}, False)
                             else:
                                 self.event_sender({"message": "", "status": "ok", "type": "doWhile"}, False)
                         elif type == 'forIn':
@@ -1303,7 +1337,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
+                                    self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         line_list: list[int] = [skipStart]
@@ -1311,21 +1345,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
                                             self.step_conditionally()
                                             line_list.append(self.line_number)
-                                        self.event_sender({"message": "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll(), "finalLine": skipStart if [skipStart, skipEnd] == line_list[-2:] else self.line_number}, False)
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll(), "finalLine": skipStart if [skipStart, skipEnd] == line_list[-2:] else self.line_number}, False)
                                         if skipEnd == self.line_number:
                                             while True:
                                                 if (event := self.event_reciever()) is None:
                                                     break
                                                 elif (fromTo := event.get('fromTo')) is None:
-                                                    self.event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"}, False)
+                                                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng"}, False)
                                                 elif (type := event.get('type')) != 'forFalse':
-                                                    self.event_sender({"message": "異なる行動をしようとしています!!", "status": "ng"}, False)
+                                                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng"}, False)
                                                 if fromTo == [*line_list[-2:], self.next_line_number]:
                                                     skipped_func = []
                                                     self.event_sender({"message": "", "status": "ok", "type": "for", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
                                                     break
                                     else:
-                                        self.event_sender({"message": "スキップをキャンセルしました", "status": "ok", "type": "for", "values": values}, False)
+                                        self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "for", "values": values}, False)
                                 else:
                                     self.event_sender({"message": "", "status": "ok", "type": "for", "values": values})
                             else:
@@ -1334,16 +1368,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         elif type == 'switchMiddleCase':
                             self.event_sender({"message": "", "status": "ok"}, False)
                         else:
-                            self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                     elif len(fromTo) == 0 and type == "":
                         self.event_sender({"message": "", "status": "ok", "line": self.line_number}, False)
                         return CONTINUE
                     else:
-                        self.event_sender({"message": "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                        self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
                 else:
-                    self.event_sender({"message": "異なる処理に対するアクションをしました!!", "status": "ng"})
+                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる処理に対するアクションをしました!!", "status": "ng"})
                     return CONTINUE
 
             self.step_conditionally()
@@ -1427,7 +1461,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             send_data = json.dumps(msgJson)
             conn.sendall(send_data.encode('utf-8'))
 
-    print(f"[接続] {addr} が接続しました")
+    print(f"[connected] {addr} is connected" if args.english else f"[接続] {addr} が接続しました")
     debug_manager = DebugManager()
     rollback_index = None
     while True:
@@ -1500,6 +1534,7 @@ parser = argparse.ArgumentParser(description='for the c-backdoor')
 parser.add_argument('--name', type=str, required=True, help='string')
 parser.add_argument('--lines', type=str, required=True, help='string')
 parser.add_argument('--events', type=str, required=True, help='string')
+parser.add_argument('--english', action='store_true', help='Enable english mode')
 
 # 引数を解析
 args = parser.parse_args()
