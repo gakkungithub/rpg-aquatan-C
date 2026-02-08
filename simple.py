@@ -767,11 +767,11 @@ def main():
                                 CTRLGWND.offset_y = min(CTRLGWND.offset_y+dy, 10)
                             ctrl_scroll_mouse_pos = event.pos
                         elif log_scroll_mouse_pos:
-                            dy = event.pos[1] - log_scroll_mouse_pos[1]
-                            if dy < 0 and not LOGWND.is_bottom_edge:
-                                LOGWND.offset_y += dy
-                            elif dy >= 0:
-                                LOGWND.offset_y = min(LOGWND.offset_y+dy, 10)
+                            dy = - (event.pos[1] - log_scroll_mouse_pos[1])
+                            if LOGWND.scrollY + dy > 0 and not LOGWND.is_bottom_edge:
+                                LOGWND.scrollY += dy
+                            else:
+                                LOGWND.scrollY = 0
                             log_scroll_mouse_pos = event.pos
                                       
                     elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None:
@@ -1830,7 +1830,7 @@ class Player(Character):
             11: ([["You got item !!"], ["You can check the item on the right-top window !!"], ["Get item left-top the next !! (dash moving with \"shift\" key)"]], ["Get item \"c\" !!"], (19,20)),
             14: ([["There are types of items (variables)", "Different icons for different types !!"], ["highlight is set to the item with new values,", "and you can check about the value clicking on the line !!"], ["Open the right door, and talk to the character on the way next !!", "(\"return\" or \"space\" for both opening and talking)"], ["You can go further talking to a character with a correct condition !!", "(the right character has a correct condition !!)"],
             ["You can check the condition clicking a RED string in the top-middle window which appears as you face on the character !!"]], ["Talk to the right character !!"], (26,19)),
-            20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white exp character !!"], (27,17)),
+            20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white", "exp character !!"], (27,17)),
             24: ([["Open a treasure box down side !!"], ["You can see function \"testCheck\" in the expression of the box..."]], ["Get item \"finalResult\" !!"], (5,11)),
             27: ([["Then, the final mission is... to talk to a brown Goal character !!"], ["But, if you are nervous with how-to-play, check it going the past !!"], ["You can go back the past with \"rollback\" command !!", "(open the command window with \"c\" key, then input \"rollback\" !!)"]], ["Talk to the brown", "Goal Character !!"], (6,9)),
         }
@@ -2277,9 +2277,9 @@ class Player(Character):
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                                     self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
                                 
-                                self.add_log(f"executed function {chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
+                                self.add_log(f"executed expression {chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
                                              if ISENGLISH else
-                                             f"{chara.linenum}行目の「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
+                                             f"{chara.linenum}行目の計算式「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
 
                                 # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
@@ -5155,10 +5155,6 @@ class ControllerGuideWindow(Window):
             offset_y += self.FONT_SIZE
             self.draw_string(offset_x, offset_y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
             offset_y += (self.FONT_SIZE + 4) * 2
-            # self.draw_string(offset_x, offset_y, "i: 宝箱上のアイテム名を非表示" if PLAYER.itemNameShow else "i: アイテム名を表示")
-            # offset_y += self.FONT_SIZE + 4
-            # self.draw_string(offset_x, offset_y, "m: ミニマップを非表示" if self.mmapwnd.is_visible else "m: ミニマップを表示")
-            # offset_y += self.FONT_SIZE + 4
             self.draw_string(offset_x, offset_y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを表示")
             offset_y += self.FONT_SIZE + 4
         
@@ -5192,11 +5188,12 @@ class LogWindow(Window):
         Window.__init__(self, rect)
         self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
         self.offset_y = 10
+        self.scrollY = 0
         self.is_bottom_edge = True
 
     def draw_string(self, x: int, y: int, string: str, color=None, size=None):
         """文字列出力"""
-        if y < 34 and string not in ("ログ", "LOG"):
+        if y < 34 and string not in ("ログ", "LOG", "MISSION"):
             return
 
         if size:
@@ -5209,13 +5206,11 @@ class LogWindow(Window):
     def draw(self, screen, isTutorial):
         if not self.is_visible:
             return
+        
         Window.draw(self)
         offset_x = 10
-        offset_y = self.offset_y
+        offset_y = 14
 
-        self.draw_string(10, 10+4, "LOG" if ISENGLISH else "ログ", self.CYAN, 20)
-        offset_y += 24
-        
         if isTutorial and PLAYER.sender.code_window.linenum in PLAYER.help_dict:
             self.font.size = 20
             self.draw_string(offset_x, offset_y, "MISSION", Color(255, 0, 0, 255))
@@ -5231,6 +5226,11 @@ class LogWindow(Window):
                     offset_y += self.FONT_SIZE + 4
             offset_y += self.FONT_SIZE + 4
 
+        self.draw_string(10, offset_y, "LOG" if ISENGLISH else "ログ", self.CYAN, 20)
+        
+        self.offset_y = offset_y + 20
+        offset_y = self.offset_y - self.scrollY
+
         for log_list in PLAYER.log_lists:
             for log in log_list:
                 self.draw_string(offset_x, offset_y, log)
@@ -5242,7 +5242,7 @@ class LogWindow(Window):
         Window.blit(self, screen)
 
     def isCursorInWindow(self, pos : tuple[int, int]):
-        if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.rect.height:
+        if self.x <= pos[0] <= self.x + self.rect.width and self.y + self.offset_y <= pos[1] <= self.y + self.rect.height:
             return True
         else:
             return False
