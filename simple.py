@@ -157,10 +157,10 @@ def main():
             while stage_name is None:
                 for event in pygame.event.get():
                     if event.type == QUIT:
-                        print('ゲームを終了しました')
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                         sys.exit()
                     if event.type == KEYDOWN and event.key == K_ESCAPE:
-                        print('ゲームを終了しました')
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                         sys.exit()
 
                     # region mouse click event
@@ -2041,7 +2041,7 @@ class Player(Character):
                             PLAYER.remove_itemvalue()
                         event.open(itemResult['item']['value'], itemResult['item']['line'], event.comments)
                         item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
-                        self.add_log(f"Item {event.item} of {event.fromTo[0]} line was acquired" if ISENGLISH else f"{event.fromTo[0]}行目のアイテム「{event.item}」を取得")
+                        self.add_log(f"Item \"{event.item}\" of {event.fromTo[0]} line was acquired" if ISENGLISH else f"{event.fromTo[0]}行目のアイテム「{event.item}」を取得")
                         if (indexes := event.comments.get("indexes", None)):
                             item_get_message += "\f" + "\f".join(indexes)
                         if itemResult.get("undefined", False):
@@ -3269,12 +3269,20 @@ class PauseWindow(Window):
                                  (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
                                  ]
         self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
-                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージをくらいます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
+                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージです"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
                                  [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
                                  [["cキーでコマンドウィンドウを開きます", "\"rollback\"と打つと、過去の処理に戻れます"]],
                                  [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
                                  [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
                                  [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
+                                 ]
+        self.guide_texts_list_en = [[["move with arrow keys or buttons"], ["dash moving with shift key"]],
+                                 [["action to forward with space or Enter key", "open a door to a conditional character"], ["talk to conditional characters", "get damaged if the condition is incorrect"], ["if the next is expression,", "talk to a white character"]],
+                                 [["f key for action on footf", "open treasure box,", "then get item of variable"], ["warp zones are for conditions", "get into a warp zone with correct condition"]],
+                                 [["c key to open the command window", "type \"rollback\", then go back to the past"]],
+                                 [["quit game with escape key"], ["if the command window is open,", "you can close the window"]],
+                                 [["your status in on the left-top window", "game is over as HP reaches 0"]],
+                                 [["get deeper in a dungeon", "to a Goal character !!"]]
                                  ]
         self.guide_images_index = 0
         self.button_right = Button("arrow.png", self.rect.width // 5 * 4, (self.height - BUTTON_WIDTH)//2, 0)
@@ -3311,10 +3319,16 @@ class PauseWindow(Window):
         for i, image in enumerate(self.guide_images_list[self.guide_images_index]):
             self.surface.blit(image, (image_x, y))
             text_y = y
-            for text in self.guide_texts_list[self.guide_images_index][i]:
-                surf, rect = self.font.render(text, self.TEXT_COLOR)
-                self.surface.blit(surf, (text_x,text_y))
-                text_y += 20
+            if ISENGLISH:
+                for text in self.guide_texts_list_en[self.guide_images_index][i]:
+                    surf, rect = self.font.render(text, self.TEXT_COLOR)
+                    self.surface.blit(surf, (text_x,text_y))
+                    text_y += 20
+            else:
+                for text in self.guide_texts_list[self.guide_images_index][i]:
+                    surf, rect = self.font.render(text, self.TEXT_COLOR)
+                    self.surface.blit(surf, (text_x,text_y))
+                    text_y += 20
             y += 150
 
         self.button_left.draw(self.surface)
