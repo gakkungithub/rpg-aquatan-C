@@ -389,9 +389,9 @@ class MapInfo:
             local_pos, funcName, line_track = chara_return.get_attributes()
             func_warp, converted_fromTo = self.line_track_transformer(line_track, funcName)
             if funcName == "main":
-                characters.append({"type": "CHARARETURN", "name": "15161", "x": int(local_pos[1]+self.offset["x"]), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
+                characters.append({"type": "CHARARETURN", "name": "15161", "x": int(local_pos[1]+self.offset["x"]), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"Congraturations !! Here is A Goal !!" if self.is_english else f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"ここが関数 {funcName} の終わりです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"This is the end of function {funcName} !!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
 
         # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
@@ -413,7 +413,7 @@ class MapInfo:
                 move_dir_list.append(3)
             move_dir = random.choice(move_dir_list)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": pos[1], "y": pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,
-                               "movetype": 1, "message": "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, 
+                               "movetype": 1, "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, 
                                "funcWarp": func_warp, "comments": chara_checkCondition.comments, "func_argcomments": self.condition_comments.get(converted_fromTo[0], []), "detail": chara_checkCondition.detail})
 
         for chara_expression in self.chara_expressions.values():
@@ -422,7 +422,7 @@ class MapInfo:
                 func_warp, converted_fromTo = self.line_track_transformer(comments["line_track"], chara_expression.func)
                 comments_dict[firstLine] = {"type": comments["type"], "fromTo": converted_fromTo, "exps": comments["exps"], "comments": comments["comments"], "funcWarp": func_warp, "vars": comments["vars"]}
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": int(chara_expression.local_pos[1]+self.offset["x"]), "y": int(chara_expression.local_pos[0]+self.offset["y"]), "dir": 0,
-                               "movetype": 1, "message": "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "comments": comments_dict})
+                               "movetype": 1, "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "comments": comments_dict})
             
         with open(f'{DATA_DIR}/{pname}/{pname}.json', 'w') as f:
             def find_numpy_int(obj, path="root"):

@@ -187,7 +187,7 @@ def main():
                             elif button_name == SBWND.is_clicked(event.pos) == "tutorial":
                                 stage_index = 0
                                 SBWND.hide()
-                                stage_name = "tutorial"                       
+                                stage_name = "tutorial_en" if ISENGLISH else "tutorial"                
                             # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
                             elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
@@ -246,7 +246,7 @@ def main():
 
         try:
             # チュートリアルマップは固定のマップデータを既に生成しているのでマップデータ生成システムを起動する必要はない
-            if stage_name != "tutorial":
+            if stage_name not in ("tutorial", "tutorial_en"):
                 # cプログラムを整形する
                 subprocess.run(["clang-format", "-i", f"{programpath}.c"])
 
@@ -395,10 +395,14 @@ def main():
             Rect(BUTTON_WIDTH * 3 + 70 , SCR_HEIGHT // 4 * 3, 
                 SCR_WIDTH // 2 - 30, SCR_HEIGHT // 4 - 10), MessageEngine(), sender)
         
-        if fieldmap.name == "tutorial":
+        if fieldmap.name in ("tutorial", "tutorial_en"):
             mission_message_list: list[str] = []
-            for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
-                mission_message_list.append('\n'.join(help_message_list))
+            if ISENGLISH:
+                for help_message_list in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][0]:
+                    mission_message_list.append('\n'.join(help_message_list))
+            else:
+                for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                    mission_message_list.append('\n'.join(help_message_list))
             PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
             MSGWND.set('\f'.join(mission_message_list))
 
@@ -464,10 +468,14 @@ def main():
             if not MSGWND.is_visible:
                 fieldmap.update()
                 # チュートリアルステージではhelp用のメッセージがあり、それを表示させる
-                if fieldmap.name == "tutorial" and PLAYER.sender.code_window.linenum not in PLAYER.help_line_number_aquired:
+                if fieldmap.name in ("tutorial", "tutorial_en") and PLAYER.sender.code_window.linenum not in PLAYER.help_line_number_aquired:
                     mission_message_list: list[str] = []
-                    for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
-                        mission_message_list.append('\n'.join(help_message_list))
+                    if ISENGLISH:
+                        for help_message_list in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][0]:
+                            mission_message_list.append('\n'.join(help_message_list))
+                    else:
+                        for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                            mission_message_list.append('\n'.join(help_message_list))
                     PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
                     MSGWND.set('\f'.join(mission_message_list))
             elif PLAYER.damage_motion:
@@ -495,7 +503,7 @@ def main():
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
             CTRLGWND.draw(screen, MSGWND.selectMsgText is not None)
-            LOGWND.draw(screen, fieldmap.name == "tutorial")
+            LOGWND.draw(screen, fieldmap.name in ("tutorial", "tutorial_en"))
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
             # ミニマップだけは、メッセージウィンドウと被る場所に表示されるので、メッセージウィンドウ表示中には表示しない
@@ -1237,7 +1245,7 @@ class Map:
                         screen.blit(self.images[self.map[y][x]],
                                     (x*GS-offsetx, y*GS-offsety))
 
-        if self.name == "tutorial":
+        if self.name in ("tutorial", "tutorial_en"):
             is_visible = (pygame.time.get_ticks() // 300) % 5 != 0
             # このマップにあるイベントを描画
             for event in self.events:
@@ -1334,7 +1342,7 @@ class Map:
         if self.floor != json_data["floor"]:
             # bgm設定
             pygame.mixer.music.stop()
-            if self.name == "tutorial":
+            if self.name in ("tutorial", "tutorial_en"):
                 pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "tutorial.wav"))
                 pygame.mixer.music.set_volume(0.3)
             elif json_data["floor"] == 31: # sand
@@ -1806,7 +1814,7 @@ class Player(Character):
         self.isLoopStatementInBefore = False
         self.log_lists: list[list[str]] = []
         self.help_dict: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
-            3: ([["関数をスキップしなければ、その関数に応じた部屋に遷移します!!"]], ["再び計算式キャラクターに", "話せ!!"], (13,6)),
+            3: ([["関数をスキップしなければ、その関数に応じた部屋に遷移します!!"]], ["再び計算式キャラクター", "と話せ!!"], (13,6)),
             4: ([["黒色のキャラクターに話しかけると「return」に対応して元の部屋に戻ることができます!!"]], ["黒色のキャラクターに話しかけて", "ワープ前の部屋に戻れ!!"], (13,3)),
             9: ([["ようこそ!C言語ダンジョンの世界へ!!"],["青の帽子のキャラクターがあなたです!!"],["これからチュートリアルを開始します!!"],["まずは右にある宝箱を取ってみましょう!!"]], ["アイテム「test」を取得せよ!!"], (27,27)),
             11: ([["取得したアイテムは右上のアイテムウィンドウで確認できます!!"], ["次は左上のアイテムを取りに行きましょう!!(「shift」キーを押しながら移動でダッシュできます)"]], ["アイテム「c」を取得せよ!!"], (19,20)),
@@ -1814,6 +1822,17 @@ class Player(Character):
             20: ([["次は全身白色のキャラクターに話しかけてみましょう!!"], ["彼らはプログラムの計算式を司っていて、話しかけるとその計算式を実行してくれます!!"]], ["計算式キャラクターに", "話しかけよ!!"], (27,17)),
             24: ([["次はアイテム「finalResult」を取得しましょう!!"], ["どうやら計算式にtestCheckという関数が含まれているそうですね、、、"]], ["アイテム「finalResult」を", "取得せよ!!"], (5,11)),
             27: ([["あとは、茶色のキャラクターに話しかけてゴールするだけです!!"], ["操作に不安があるなら今までの処理を逆戻し(rollback)して確認してみましょう!!"]], ["ゴールキャラクターに", "話しかけろ!!"], (6,9)),
+        }
+        self.help_dict_en: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
+            3: ([["If you don't skip function, you warp to the room of function !!"]], ["Talk to the white", "character again !!"], (13,6)),
+            4: ([["With talking to the black character, as like \"return\", you can go back to the room you came from !!"]], ["Talk to the black character to be back the room you came from !!"], (13,3)),
+            9: ([["Welcome to the C Dungeon Game !!"], ["You are a character with a blue hat !!"], ["Let's begin tutorial !!"],["Move right with right key, and get treasure !!", "Then, get item on the box with \"f\" key !!"]], ["Get item \"test\" !!"], (27,27)),
+            11: ([["You got item !!"], ["You can check the item on the right-top window !!"], ["Get item left-top the next !! (dash moving with \"shift\" key)"]], ["Get item \"c\" !!"], (19,20)),
+            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["highlight is set to the item with new values,", "and you can check about the value clicking on the line !!"], ["Open the right door, and talk to the character on the way next !!", "(\"return\" or \"space\" for both opening and talking)"], ["You can go further talking to a character with a correct condition !!", "(the right character has a correct condition !!)"],
+            ["You can check the condition clicking a RED string in the top-middle window which appears as you face on the character !!"]], ["Talk to the right character !!"], (26,19)),
+            20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white exp character !!"], (27,17)),
+            24: ([["Open a treasure box down side !!"], ["You can see function \"testCheck\" in the expression of the box..."]], ["Get item \"finalResult\" !!"], (5,11)),
+            27: ([["Then, the final mission is... to talk to a brown Goal character !!"], ["But, if you are nervous with how-to-play, check it going the past !!"], ["You can go back the past with \"rollback\" command !!", "(open the command window with \"c\" key, then input \"rollback\" !!)"]], ["Talk to the brown", "Goal Character !!"], (6,9)),
         }
         self.help_line_number_aquired: list[int] = []
         self.fp = open(PATH, mode='w')
@@ -2282,11 +2301,11 @@ class Player(Character):
                                         for skippedFunc in CCCharacterResult["skippedFunc"]:
                                             self.checkedFuncs[(mymap.name, chara.func, chara.fromTo[0])].append((skippedFunc, None, False))
                                     if CCCharacterResult['status'] == "ng":
-                                        if mymap.name == "tutorial":
+                                        if mymap.name in ("tutorial", "tutorial_en"):
                                             MSGWND.set(
                                                 "HP -10 if you do a wrong action for a C step execution... \fKeep your HP above 0!!"
                                                 if ISENGLISH else
-                                                "条件が間違ったキャラクターに話しかけると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
+                                                "間違ったアクションを実行すると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
                                             )
                                         else:
                                             MSGWND.set(CCCharacterResult['message'])
@@ -2415,7 +2434,7 @@ class Player(Character):
                     pygame.mixer.music.stop()
                     self.goal_sound.play()
                     self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
-                    if mymap.name == "tutorial":
+                    if mymap.name in ("tutorial", "tutorial_en"):
                         if ISENGLISH:
                             returnResult['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
                         else:
@@ -2892,10 +2911,7 @@ class MessageWindow(Window):
 
     def next(self, fieldmap: Map):
         # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
-        if self.selectMsgText and not (self.next_flag or self.hide_flag):
-            return
-        
-        if self.sender is not None and self.selectMsgText:
+        if self.sender is not None and (self.selectMsgText and self.hide_flag):
             if self.select_type == 'loop_skip':
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # 暗転
@@ -5205,9 +5221,14 @@ class LogWindow(Window):
             self.draw_string(offset_x, offset_y, "MISSION", Color(255, 0, 0, 255))
             self.font.size = self.FONT_SIZE
             offset_y += 20
-            for help_message_part in PLAYER.help_dict[PLAYER.sender.code_window.linenum][1]:
-                self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
-                offset_y += self.FONT_SIZE + 4
+            if ISENGLISH:
+                for help_message_part in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][1]:
+                    self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
+                    offset_y += self.FONT_SIZE + 4
+            else:
+                for help_message_part in PLAYER.help_dict[PLAYER.sender.code_window.linenum][1]:
+                    self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
+                    offset_y += self.FONT_SIZE + 4
             offset_y += self.FONT_SIZE + 4
 
         for log_list in PLAYER.log_lists:
