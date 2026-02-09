@@ -1819,7 +1819,7 @@ class Player(Character):
             9: ([["ようこそ!C言語ダンジョンの世界へ!!"],["青の帽子のキャラクターがあなたです!!"],["これからチュートリアルを開始します!!"],["まずは右にある宝箱を取ってみましょう!!"]], ["アイテム「test」を取得せよ!!"], (27,27)),
             11: ([["取得したアイテムは右上のアイテムウィンドウで確認できます!!"], ["次は左上のアイテムを取りに行きましょう!!(「shift」キーを押しながら移動でダッシュできます)"]], ["アイテム「c」を取得せよ!!"], (19,20)),
             14: ([["アイテムには種類(変数の型)があり、", "アイコンが異なります!!"], ["値が更新されたアイテムにはハイライトが引かれており、", "クリックでその内容を確認できます!!"], ["次はドアを開けて、キャラクターに話しかけてみましょう!!"], ["条件が正しいキャラクターに話しかけるとその先に進めます!!(今回は右のキャラが正しいです!!)"]], ["右のキャラクターに話しかけよ!!"], (26,19)),
-            20: ([["次は全身白色のキャラクターに話しかけてみましょう!!"], ["彼らはプログラムの計算式を司っていて、話しかけるとその計算式を実行してくれます!!"]], ["計算式キャラクターに", "話しかけよ!!"], (27,17)),
+            20: ([["次は全身白色のキャラクターに話しかけてみましょう!!"], ["彼らはプログラムの計算式を司っていて、話しかけるとその計算式を実行してくれます!!"]], ["計算式キャラクターに", "話しかけろ!!"], (27,17)),
             24: ([["次はアイテム「finalResult」を取得しましょう!!"], ["どうやら計算式にtestCheckという関数が含まれているそうですね、、、"]], ["アイテム「finalResult」を", "取得せよ!!"], (5,11)),
             27: ([["あとは、茶色のキャラクターに話しかけてゴールするだけです!!"], ["操作に不安があるなら今までの処理を逆戻し(rollback)して確認してみましょう!!"]], ["ゴールキャラクターに", "話しかけろ!!"], (6,9)),
         }
@@ -1828,7 +1828,7 @@ class Player(Character):
             4: ([["With talking to the black character, as like \"return\", you can go back to the room you came from !!"]], ["Talk to the black character to be back the room you came from !!"], (13,3)),
             9: ([["Welcome to the C Dungeon Game !!"], ["You are a character with a blue hat !!"], ["Let's begin tutorial !!"],["Move right with right key, and get treasure !!", "Then, get item on the box with \"f\" key !!"]], ["Get item \"test\" !!"], (27,27)),
             11: ([["You got item !!"], ["You can check the item on the right-top window !!"], ["Get item left-top the next !! (dash moving with \"shift\" key)"]], ["Get item \"c\" !!"], (19,20)),
-            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["highlight is set to the item with new values,", "and you can check about the value clicking on the line !!"], ["Open the right door, and talk to the character on the way next !!", "(\"return\" or \"space\" for both opening and talking)"], ["You can go further talking to a character with a correct condition !!", "(the right character has a correct condition !!)"],
+            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["highlight is set to the item with new values,", "and you can check about the value clicking on the line !!"], ["Open the right door, and talk to the character on the way next !!"], ["You can go to the next step talking to a character with a correct condition !!", "(the right character has a correct condition !!)"],
             ["You can check the condition clicking a RED string in the top-middle window which appears as you face on the character !!"]], ["Talk to the right character !!"], (26,19)),
             20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white", "exp character !!"], (27,17)),
             24: ([["Open a treasure box down side !!"], ["You can see function \"testCheck\" in the expression of the box..."]], ["Get item \"finalResult\" !!"], (5,11)),
@@ -3254,28 +3254,6 @@ class PauseWindow(Window):
         self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 3 - 30, 200, 60)
         self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 3 - 30, 200, 60)
         self.mode = "pause"
-        # self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128)),),
-        #                          (pygame.transform.smoothscale(load_image("data", "itemwindow.png"), (160, 128)),),
-        #                          (pygame.transform.smoothscale(load_image("data", "itemname_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "itemname_off.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "minimapwindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "codewindow_on.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "no_rightwindow.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "game_quit.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128))),
-        #                          (pygame.transform.smoothscale(load_image("data", "status.png"), (160, 128)),),
-        #                          (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
-        #                          ]
-        # self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
-        #                          [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージをくらいます"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
-        #                          [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
-        #                          [["cキーでコマンドウィンドウを開きます", "stdinコマンドで標準入力", "rollbackで処理の巻戻しです"]],
-        #                          [["bキーでアイテムウィンドウを開きます", "取得したアイテム(変数)が表示されます", "カーソルで内部をスクロールできます"]],
-        #                          [["iキーで宝箱の上のアイテム名の", "表示を切り替えられます"], [""]],
-        #                          [["mキーで右上のウィンドウを切り替えられます", "全体マップにはキャラクターや", "宝箱などの位置が表示されています"], ["コードウィンドウでは現在の処理の", "行にハイライトが付きます", "カーソルで内部をスクロールできます"], ["右上のウィンドウが邪魔な時", "非表示にできます"]],
-        #                          [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
-        #                          [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
-        #                          [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
-        #                          ]
         self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
                                  (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
@@ -4795,8 +4773,8 @@ class StageButtonWindow:
             # mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
             # screen.blit(mode_change_label_surf, mode_change_label_rect)
 
-            pygame.draw.rect(screen, (255, 255, 255) if ISENGLISH else (0, 0, 0), self.english_mode_button_rect)
-            english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (0, 0, 0) if ISENGLISH else (255, 255, 255))
+            pygame.draw.rect(screen, (0, 0, 255) if ISENGLISH else (255, 0, 0), self.english_mode_button_rect)
+            english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (255, 255, 255))
             english_mode_label_rect = english_mode_label_surf.get_rect(center=self.english_mode_button_rect.center)
             screen.blit(english_mode_label_surf, english_mode_label_rect)
 
