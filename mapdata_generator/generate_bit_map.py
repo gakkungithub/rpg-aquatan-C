@@ -113,8 +113,8 @@ class CharaExpression:
         self.func = func
         self.comments_dict: dict[int, dict] = {}
     
-    def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str | dict], int]):
-        self.comments_dict[line_track[0]] = {"type": type, "exps": {"detail": f"{expNodeInfo[4]}行目の?を実行します", "hover": [expNodeInfo[0]], "type": "exps"}, "comments": expNodeInfo[3], "vars": [{"name": var_reference[0], "line": var_reference[1]} for var_reference in expNodeInfo[1]], "line_track": line_track}
+    def addExp(self, type: str, line_track: list[int | tuple[str, list[list[str]]] | None], expNodeInfo: tuple[str, set[tuple[str, int]], list[str], list[str | dict], int], is_english: bool):
+        self.comments_dict[line_track[0]] = {"type": type, "exps": {"detail": f"execute ? of line {expNodeInfo[4]}" if is_english else f"{expNodeInfo[4]}行目の?を実行します", "hover": [expNodeInfo[0]], "type": "exps"}, "comments": expNodeInfo[3], "vars": [{"name": var_reference[0], "line": var_reference[1]} for var_reference in expNodeInfo[1]], "line_track": line_track}
 
 class RoomInfo(TypedDict):
     room_size: tuple[int, int, int, int]
@@ -264,7 +264,7 @@ class MapInfo:
             y, x = zero_elements[np.random.choice(zero_elements.shape[0])]
             self.eventMap[local_y+self.offset["y"]+y+1, local_x+self.offset["x"]+x+1] = self.ISEVENT
             self.chara_expressions[crntRoomID] = CharaExpression((local_y+y+1, local_x+x+1), func)
-        self.chara_expressions[crntRoomID].addExp(type, line_track, expNodeInfo)
+        self.chara_expressions[crntRoomID].addExp(type, line_track, expNodeInfo, self.is_english)
 
     # マップデータの生成
     def mapDataGenerator(self, pname: str, gvar_str: str, floorMap, isUniversal: bool, line_info: dict, wall_chip_type: int):
@@ -1037,7 +1037,7 @@ class GenBitMap:
                 exp = self.getExpNodeInfo(nodeID)
                 # while or forの領域に入る (whileIn or forIn)
                 self.createPath(crntRoomID, nodeID, {
-                    "detail": f"in case that next is check of {self.getNodeLabel(nodeID)} ? in line {exp[4]}" if self.is_english else f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理なら", 
+                    "detail": f"if next is check of {self.getNodeLabel(nodeID)} ? in line {exp[4]}" if self.is_english else f"次が{exp[4]}行目の{self.getNodeLabel(nodeID)}文の?の真偽の確認処理なら", 
                     "hover": [exp[0]], "type": "cond-in"
                     })
                 # true
@@ -1054,7 +1054,7 @@ class GenBitMap:
             if (change_exp := self.getExpNodeInfo(nodeID)):
                 warp_comment = {
                     "detail": 
-                    f"in case that next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}+execute ? of line {change_exp[4]}"
+                    f"if next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}+execute ? of line {change_exp[4]}"
                     if self.is_english else
                     f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら+{change_exp[4]}行目の?を実行して", 
                     "hover": [loopBack_exp[0], change_exp[0]], "type": "cond-in-change"
@@ -1062,7 +1062,7 @@ class GenBitMap:
             else:
                 warp_comment = {
                     "detail": 
-                    f"in case that next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}"
+                    f"if next is check of {self.getNodeLabel(loopBackID)} ? in line {loopBack_exp[4]}"
                     if self.is_english else
                     f"次が{loopBack_exp[4]}行目の{self.getNodeLabel(loopBackID)}文の?の真偽の確認処理なら", 
                     "hover": [loopBack_exp[0]], "type": "cond-in"

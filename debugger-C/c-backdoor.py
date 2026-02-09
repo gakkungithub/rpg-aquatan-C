@@ -1243,7 +1243,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     skipStart = self.next_line_number
                                     skipEnd = self.line_data[self.func_name]["loops"][str(self.next_line_number)]
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while or for", "skip": True})
+                                    self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while or for", "skip": True})
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
@@ -1262,7 +1262,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         skipStart = self.line_number
                                         skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                         # ここでスキップするかどうかを確認する
-                                        self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True})
+                                        self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             while skipStart <= self.next_line_number <= skipEnd:
@@ -1300,7 +1300,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "skip to rightly before exit of loop" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
+                                    self.event_sender({"message": "Will you skip to rightly before exit of loop" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
@@ -1319,7 +1319,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 # ここでスキップするかどうを確認する
                                 skipStart = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 skipEnd = self.line_number
-                                self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
+                                self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
                                 event = self.event_reciever()
                                 if event.get('skip', False):
                                     while skipStart <= self.next_line_number <= skipEnd:
@@ -1337,7 +1337,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
+                                    self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         line_list: list[int] = [skipStart]

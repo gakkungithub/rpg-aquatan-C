@@ -4073,19 +4073,19 @@ class Detail:
                 y = and_rect.bottom + 4
             elif detail["type"] == "end":
                 x = 50
-                next_surf, _ = font.render("to the next step getting over here" if ISENGLISH else "この先に進むと次の処理に移行します", self.WHITE)
+                next_surf, _ = font.render("then, you can get in" if ISENGLISH else "この先に進むと次の処理に移行します", self.WHITE)
                 next_rect = next_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((next_surf, next_rect))
                 y = next_rect.bottom + 4
             elif detail["type"] in ("cond-in", "cond-in-change"):
                 x = 50
-                end_surf, _ = font.render("to the next step" if ISENGLISH else "先に進みます", self.WHITE)
+                end_surf, _ = font.render("then, you can get in" if ISENGLISH else "先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4        
             elif detail["type"] == "cond-check":
                 x = 50
-                end_surf, _ = font.render("then, to the next step" if ISENGLISH else "ならこの先に進みます", self.WHITE)
+                end_surf, _ = font.render("then, you can get in" if ISENGLISH else "ならこの先に進みます", self.WHITE)
                 end_rect = end_surf.get_rect(topleft=(x, y))
                 self.baseComment_info_list.append((end_surf, end_rect))
                 y = end_rect.bottom + 4
