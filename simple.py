@@ -95,7 +95,7 @@ def end_timer():
 
 def main():
     """Main"""
-    global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, ISENGLISH, cmd
+    global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, ISENGLISH, SMANAGER, cmd
     # 現状はグローバル変数にしているが、今後どうするかは考える
     global SCR_RECT, SCR_WIDTH, SCR_HEIGHT, MIN_MAP_SIZE, TXTBOX_HEIGHT
 
@@ -107,6 +107,8 @@ def main():
     env["PYTHONPATH"] = os.path.abspath("modules") + (
         ":" + env["PYTHONPATH"] if "PYTHONPATH" in env else ""
     )
+
+    SMANAGER = SoundManager()
 
     while True:
         if os.uname()[0] != 'Darwin':
@@ -149,11 +151,8 @@ def main():
         server = None
         
         try:
-            pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "stage_button_window.wav"))
-            pygame.mixer.music.set_volume(0.7)
-            pygame.mixer.music.play(-1)
-            button_io_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "button_io.wav"))
-            scroll_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "scroll.wav"))
+            SMANAGER.play_bgm("stage_button_window", 0.7)
+
             while stage_name is None:
                 for event in pygame.event.get():
                     if event.type == QUIT:
@@ -172,10 +171,10 @@ def main():
                     elif event.type == pygame.MOUSEBUTTONUP:
                         if event.button == 1 and SBWND.is_visible:
                             if button_name == SBWND.is_clicked(event.pos) == "color support":
-                                button_io_sound.play()
+                                SMANAGER.play_se("button_io")
                                 SBWND.color_support = not SBWND.color_support
                             elif button_name == SBWND.is_clicked(event.pos) == "check lldb":
-                                button_io_sound.play()
+                                SMANAGER.play_se("button_io")
                                 if server is not None:
                                     SBWND.close()
                                     server = None
@@ -187,7 +186,12 @@ def main():
                             elif button_name == SBWND.is_clicked(event.pos) == "tutorial":
                                 stage_index = 0
                                 SBWND.hide()
-                                stage_name = "tutorial_en" if ISENGLISH else "tutorial"                
+                                stage_name = "tutorial_en" if ISENGLISH else "tutorial"
+                            elif button_name == "bgm slider":
+                                SMANAGER.bgm_volume = (SBWND.sm_window.bgm_knob_x - SBWND.sm_window.knob_min_x) / (SBWND.sm_window.knob_max_x - SBWND.sm_window.knob_min_x)
+                                SMANAGER.set_bgm_volume()
+                            elif button_name == "se slider":
+                                SMANAGER.set_all_se_volume((SBWND.sm_window.se_knob_x - SBWND.sm_window.knob_min_x) / (SBWND.sm_window.knob_max_x - SBWND.sm_window.knob_min_x))            
                             # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
                             elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
                                 if SBWND.stage_selecting:
@@ -208,21 +212,29 @@ def main():
                                     server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
                                     SBWND.start_checking_lldb()
                             elif scroll_start == True:
-                                scroll_sound.play()
+                                SMANAGER.play_se("scroll")
+                            
                             mouse_down = False
                             scroll_start = False
+
                     if mouse_down and event.type == pygame.MOUSEMOTION:
                         scroll_start = True
-                        dx = - (event.pos[0] - sbw_scroll_mouse_pos[0])
-                        if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
-                            SBWND.scrollX += dx
-                        elif SBWND.scrollX + dx < 0:
-                            SBWND.scrollX = 0
+
+                        if button_name == "bgm slider" and SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
+                            SBWND.sm_window.bgm_knob_x = event.pos[0]
+                        elif button_name == "se slider" and SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
+                            SBWND.sm_window.se_knob_x = event.pos[0]
                         else:
-                            SBWND.scrollX = SBWND.maxScrollX
-                        if dx != 0:
-                            SBWND.load_sb()
-                        sbw_scroll_mouse_pos = event.pos
+                            dx = - (event.pos[0] - sbw_scroll_mouse_pos[0])
+                            if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
+                                SBWND.scrollX += dx
+                            elif SBWND.scrollX + dx < 0:
+                                SBWND.scrollX = 0
+                            else:
+                                SBWND.scrollX = SBWND.maxScrollX
+                            if dx != 0:
+                                SBWND.load_sb()
+                            sbw_scroll_mouse_pos = event.pos
                     
                     if server is not None and event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN):
                         # ステップ実行してプログラムの終了に到達した時プログラムを終了する
@@ -263,12 +275,8 @@ def main():
             print(f"subprocess failed with exit code {e.returncode}")
             sys.exit(1)   # 呼び出し元プログラムを終了
 
-        pygame.mixer.music.stop()
-        entry_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "stage_entry.wav"))
-        entry_sound.play()
-        pause_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_open.wav"))
-        pause_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "pause_close.wav"))
-        game_over_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "game_over.wav"))
+        SMANAGER.stop_bgm()
+        SMANAGER.play_se("stage_entry")
         # サーバを立てる
         c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""]
         if ISENGLISH:
@@ -453,12 +461,13 @@ def main():
         ctrl_scroll_mouse_pos = None
         log_scroll_mouse_pos = None
         
+        button_name = None
         while not PLAYER.goaled:
             clock.tick(MAX_FRAME_PER_SEC)
 
             if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
-                pygame.mixer.music.stop()
-                game_over_sound.play()
+                SMANAGER.stop_bgm()
+                SMANAGER.play_se("game_over")
                 if ISENGLISH:
                     MSGWND.set("Your HP ran off,,, \nGAME OVER !!", (["Go back to the Stage-Select Menu"], 'finished'))
                 else:
@@ -702,37 +711,9 @@ def main():
                     end_timer()
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
-                        pause_open_sound.play()
+                        SMANAGER.play_se("pause_open")
                         PAUSEWND.show()
-                        while PAUSEWND.is_visible:
-                            PAUSEWND.draw(screen)
-                            pygame.display.update()
-                            for event in pygame.event.get():
-                                if event.type == QUIT:
-                                    server.terminate()
-                                    print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
-                                    sys.exit()
-                                if event.type == KEYDOWN and event.key == K_ESCAPE:
-                                    server.terminate()
-                                    print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
-                                    sys.exit()
-                                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
-                                    local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
-                                    if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
-                                        pause_close_sound.play()
-                                        PAUSEWND.hide()
-                                    elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):  
-                                        pause_close_sound.play() 
-                                        PAUSEWND.hide()
-                                        PLAYER.goaled = True
-                                    elif PAUSEWND.button_left.rect.collidepoint(local_pos):
-                                        PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
-                                        scroll_sound.play()
-                                    elif PAUSEWND.button_right.rect.collidepoint(local_pos):
-                                        PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index + 1) % len(PAUSEWND.guide_images_list)
-                                        scroll_sound.play()
-                            offset = calc_offset(PLAYER)
-                            fieldmap.draw(screen, offset)
+
                 if mouse_down:
                     if event.type == pygame.MOUSEMOTION:
                         if code_scroll_mouse_pos:
@@ -778,6 +759,7 @@ def main():
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
                             CMNDWND.show()
+                
                 # endregion
                 
                 # region keydown event
@@ -787,31 +769,9 @@ def main():
                     CMNDWND.show()
 
                 if event.type == KEYDOWN and event.key == K_p:
+                    SMANAGER.play_se("pause_open")
                     PAUSEWND.show()
-                    PAUSEWND.draw(screen)
-                    pygame.display.update()
-                    while PAUSEWND.is_visible:
-                        for event in pygame.event.get():
-                            if event.type == QUIT:
-                                server.terminate()
-                                print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
-                                sys.exit()
-                            if event.type == KEYDOWN and event.key == K_ESCAPE:
-                                server.terminate()
-                                print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
-                                sys.exit()
-
-                            if event.type == pygame.MOUSEBUTTONDOWN:
-                                if event.button == 1 and PAUSEWND.is_visible:
-                                    local_pos = (event.pos[0] - PAUSEWND.x, event.pos[1] - PAUSEWND.y)
-                                    if PAUSEWND.button_toGame_rect.collidepoint(local_pos):
-                                        cmd = ""
-                                        PAUSEWND.hide()
-                                    elif PAUSEWND.button_toStageSelect_rect.collidepoint(local_pos):
-                                        cmd = ""    
-                                        PAUSEWND.hide()
-                                        PLAYER.goaled = True     
-
+                
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
                     if MSGWND.selectMsgText is not None:
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
@@ -840,10 +800,56 @@ def main():
                         PLAYER.talk(fieldmap)
 
                 # endregion
+            while PAUSEWND.is_visible:
+                PAUSEWND.draw(screen)
+                pygame.display.update()
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        server.terminate()
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        sys.exit()
+                    if event.type == KEYDOWN and event.key == K_ESCAPE:
+                        server.terminate()
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        sys.exit()
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
+                        if (button_name := PAUSEWND.sm_window.touchKnob(event.pos)):
+                            continue
+                        if PAUSEWND.button_toGame_rect.collidepoint(event.pos):
+                            SMANAGER.play_se("pause_close")
+                            PAUSEWND.hide()
+                        elif PAUSEWND.button_toStageSelect_rect.collidepoint(event.pos):  
+                            SMANAGER.play_se("pause_close")
+                            PAUSEWND.hide()
+                            PLAYER.goaled = True
+                        elif PAUSEWND.button_left.rect.collidepoint(event.pos):
+                            PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
+                            SMANAGER.play_se("scroll")
+                        elif PAUSEWND.button_right.rect.collidepoint(event.pos):
+                            PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index + 1) % len(PAUSEWND.guide_images_list)
+                            SMANAGER.play_se("scroll")
+                    elif event.type == MOUSEBUTTONUP:
+                        if button_name == "bgm slider":
+                            SMANAGER.bgm_volume = (PAUSEWND.sm_window.bgm_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)
+                            SMANAGER.set_bgm_volume()
+                        elif button_name == "se slider":
+                            SMANAGER.set_all_se_volume((PAUSEWND.sm_window.se_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)) 
+                        button_name = None
+
+                    if button_name:
+                        if event.type == pygame.MOUSEMOTION:
+                            if button_name == "bgm slider" and PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
+                                PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
+                            elif button_name == "se slider" and PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
+                                PAUSEWND.sm_window.se_knob_x = event.pos[0]
+                
+                offset = calc_offset(PLAYER)
+                fieldmap.draw(screen, offset)
+                
             pygame.display.flip()
 
-        sender.hp_warning_sound.stop()
-        pygame.mixer.music.stop()
+        SMANAGER.stop_se("hp_warning")
+        SMANAGER.stop_bgm()
         server.terminate()
 
 #                                                                                                                                                                                         
@@ -1136,7 +1142,6 @@ def split_image(image):
             image_list.append(surface)
     return image_list
 
-
 #                                                                                                                  
 # 88888888ba,                                 88                                         88                        
 # 88      `"8b               ,d               88                                         88                        
@@ -1179,7 +1184,7 @@ class DataLoader(Thread):
 class Map:
     """マップオブジェクト"""
     # main()のload_mapchips()でセットされる
-    images = []  # マップチップ（ID->イメージ）
+    images: list[pygame.Surface] = []  # マップチップ（ID->イメージ）
     bg_images = []
     movable_type = []  # マップチップが移動可能か？（0:移動不可, 1:移動可）
 
@@ -1341,20 +1346,17 @@ class Map:
         self.default = json_data["default"]
         if self.floor != json_data["floor"]:
             # bgm設定
-            pygame.mixer.music.stop()
+            SMANAGER.stop_bgm()
             if self.name in ("tutorial", "tutorial_en"):
-                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "tutorial.wav"))
-                pygame.mixer.music.set_volume(0.3)
+                SMANAGER.play_bgm("tutorial", 0.3)
             elif json_data["floor"] == 31: # sand
-                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_stage_bgm.wav"))
+                SMANAGER.play_bgm("sand_stage_bgm")
             elif json_data["floor"] == 390: # brick
-                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "brick_stage_bgm.wav"))
+                SMANAGER.play_bgm("brick_stage_bgm")
             elif json_data["floor"] == 43: # grass
-                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_stage_bgm.wav"))
-                pygame.mixer.music.set_volume(0.3)
+                SMANAGER.play_bgm("grass_stage_bgm", 0.3)
             else: # 402 = iron
-                pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "iron_stage_bgm.wav"))
-            pygame.mixer.music.play(-1)
+                SMANAGER.play_bgm("iron_stage_bgm")
         self.floor = json_data["floor"]
         self.map = json_data["map"]
         self.events = []
@@ -1826,23 +1828,15 @@ class Player(Character):
         self.help_dict_en: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
             3: ([["If you don't skip function, you warp to the room of function !!"]], ["Talk to the white", "character again !!"], (13,6)),
             4: ([["With talking to the black character, as like \"return\", you can go back to the room you came from !!"]], ["Talk to the black character to be back the room you came from !!"], (13,3)),
-            9: ([["Welcome to the C Dungeon Game !!"], ["You are a character with a blue hat !!"], ["Let's begin tutorial !!"],["Move right with right key, and get treasure !!", "Then, get item on the box with \"f\" key !!"]], ["Get item \"test\" !!"], (27,27)),
+            9: ([["Welcome to the C Dungeon Game !!"], ["You are a character with a blue hat !!"], ["Let's begin tutorial !!"],["Move right with the right key onto the treasure box !!", "Then, open the box with \"f\" key for item !!"]], ["Get item \"test\" !!"], (27,27)),
             11: ([["You got item !!"], ["You can check the item on the right-top window !!"], ["Get item left-top the next !! (dash moving with \"shift\" key)"]], ["Get item \"c\" !!"], (19,20)),
-            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["highlight is set to the item with new values,", "and you can check about the value clicking on the line !!"], ["Open the right door, and talk to the character on the way next !!"], ["You can go to the next step talking to a character with a correct condition !!", "(the right character has a correct condition !!)"],
-            ["You can check the condition clicking a RED string in the top-middle window which appears as you face on the character !!"]], ["Talk to the right character !!"], (26,19)),
+            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["Highlight is set to the item with new value, and you can check about the value clicking on the highlighted line !!"], ["Next, open the right door, and talk to the character with a correct C condition over the door !!"]], ["Talk to the right character !!"], (26,19)),
             20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white", "exp character !!"], (27,17)),
-            24: ([["Open a treasure box down side !!"], ["You can see function \"testCheck\" in the expression of the box..."]], ["Get item \"finalResult\" !!"], (5,11)),
+            24: ([["Open a treasure box after getting in the right warp zone !!"], ["It looks like the expression contains a function \"testCheck\"..."]], ["Get item \"finalResult\" !!"], (5,11)),
             27: ([["Then, the final mission is... to talk to a brown Goal character !!"], ["But, if you are nervous with how-to-play, check it going the past !!"], ["You can go back the past with \"rollback\" command !!", "(open the command window with \"c\" key, then input \"rollback\" !!)"]], ["Talk to the brown", "Goal Character !!"], (6,9)),
         }
         self.help_line_number_aquired: list[int] = []
         self.fp = open(PATH, mode='w')
-        self.walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "walk.wav"))
-        self.walk_sound.set_volume(0.2)
-        self.grass_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "grass_walk.wav"))
-        self.sand_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "sand_walk.wav"))
-        self.iron_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "iron_walk.wav"))
-        self.steel_walk_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "steel_walk.wav"))
-        self.goal_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "goal.wav"))
 
     def update(self, mymap: Map):
         """プレイヤー状態を更新する。
@@ -1861,15 +1855,15 @@ class Player(Character):
                 self.y = self.rect.top // GS
 
                 if mymap.map[self.y][self.x] == 43:
-                    self.grass_walk_sound.play()
+                    SMANAGER.play_se("grass_walk")
                 elif mymap.map[self.y][self.x] == 31:
-                    self.sand_walk_sound.play()
+                    SMANAGER.play_se("sand_walk")
                 elif mymap.map[self.y][self.x] == 402:
-                    self.iron_walk_sound.play()
+                    SMANAGER.play_se("iron_walk")
                 elif mymap.map[self.y][self.x] == 390:
-                    self.steel_walk_sound.play()
+                    SMANAGER.play_se("steel_walk")
                 else:
-                    self.walk_sound.play()
+                    SMANAGER.play_se("walk")
 
                 if (self.door and 
                     ((self.door["direction"] == DOWN and (self.door["x"], self.door["y"]-1) == (self.x, self.y)) or (self.door["direction"] == UP and (self.door["x"], self.door["y"]+1) == (self.x, self.y)) or
@@ -2064,7 +2058,7 @@ class Player(Character):
                         if (indexes := event.comments.get("indexes", None)):
                             item_get_message += "\f" + "\f".join(indexes)
                         if itemResult.get("undefined", False):
-                            item_get_message += f"\fbut, value of item {event.item} was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                            item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                         if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
                             self.completed_checkFuncs_key = (mymap.name, event.func, event.fromTo[0])
 
@@ -2431,8 +2425,8 @@ class Player(Character):
                 if returnResult.get('skipReturn', False):
                     MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                 elif returnResult.get('finished', False):
-                    pygame.mixer.music.stop()
-                    self.goal_sound.play()
+                    SMANAGER.stop_bgm()
+                    SMANAGER.play_se("goal")
                     self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
                     if mymap.name in ("tutorial", "tutorial_en"):
                         if ISENGLISH:
@@ -2544,7 +2538,7 @@ class Window:
     """ウィンドウの基本クラス"""
     EDGE_WIDTH = 4  # 白枠の幅
 
-    def __init__(self, rect):
+    def __init__(self, rect: pygame.Rect):
         self.width = rect[2]
         self.height = rect[3]
         self.x = rect[0]
@@ -2601,7 +2595,7 @@ class Window:
 
 class DimWindow:
     """薄暗いウインドウを作る"""
-    def __init__(self, rect, screen):
+    def __init__(self, rect: pygame.Rect, screen: pygame.Surface):
         self.screen = screen
         self.width = rect[2]
         self.height = rect[3]
@@ -2613,9 +2607,6 @@ class DimWindow:
         self.df = 0
         self.target_df = 0
         self.sound_type = None
-        self.warp_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "warp.wav"))
-        self.skip_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "skip.wav"))
-        self.rollback_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "rollback.wav"))
 
     def dim(self):
         """ウィンドウを描画"""
@@ -2627,7 +2618,7 @@ class DimWindow:
             self.target_df = 0
             self.df = 0
             if self.sound_type in ('skip', 'rollback'):
-                pygame.mixer.music.unpause()
+                SMANAGER.unpause_bgm()
             self.hide()
         self.surface.fill(Color(0, 0, 0, self.df))
         self.screen.blit(self.surface, (self.x, self.y))
@@ -2636,13 +2627,13 @@ class DimWindow:
         """薄暗さを設定してウィンドウを表示"""
         self.target_df = df
         if sound_type == 'warp':
-            self.warp_sound.play()
+            SMANAGER.play_se("warp")
         elif sound_type == 'skip':
-            pygame.mixer.music.pause()
-            self.skip_sound.play()
+            SMANAGER.pause_bgm()
+            SMANAGER.play_se("skip")
         elif sound_type == 'rollback':
-            pygame.mixer.music.pause()
-            self.rollback_sound.play()
+            SMANAGER.pause_bgm()
+            SMANAGER.play_se("rollback")
         self.sound_type = sound_type
         self.is_visible = True
 
@@ -2768,7 +2759,7 @@ class MessageWindow(Window):
     animcycle = MAX_FRAME_PER_SEC
     HIGHLIGHT_COLOR = (0, 0, 255)
 
-    def __init__(self, rect, msg_eng, sender):
+    def __init__(self, rect: pygame.Rect, msg_eng, sender):
         Window.__init__(self, rect)
         self.sender: EventSender | None = sender
         self.text_rect = self.inner_rect.inflate(-8, -8)  # テキストを表示する矩形
@@ -2792,13 +2783,11 @@ class MessageWindow(Window):
         self.file_message = ""
         self.memory_message = ""
         self.str_messages = []
-        self.message_window_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "message_window.wav"))
-        self.select_menu_cursor_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "select_menu_cursor.wav"))
 
     def set(self, base_message, selectMessages=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
-            self.message_window_sound.play()
+            SMANAGER.play_se("message_window")
             if selectMessages is not None:
                 PLAYER.funcInfoWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
@@ -2907,7 +2896,7 @@ class MessageWindow(Window):
 
     def selectMsg(self, dir: int):
         self.selectingIndex = (self.selectingIndex + dir) % len(self.selectMsgText)
-        self.select_menu_cursor_sound.play()
+        SMANAGER.play_se("select_menu_cursor")
 
     def next(self, fieldmap: Map):
         # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
@@ -3223,7 +3212,7 @@ class MessageWindow(Window):
                 self.hide()
             # ▼が表示されてれば次のページへ
             if self.next_flag:
-                self.message_window_sound.play()
+                SMANAGER.play_se("message_window")
                 self.cur_page += 1
                 self.cur_pos = 0
                 self.next_flag = False
@@ -3281,6 +3270,8 @@ class PauseWindow(Window):
         self.guide_images_index = 0
         self.button_right = Button("arrow.png", self.rect.width // 5 * 4, (self.height - BUTTON_WIDTH)//2, 0)
         self.button_left = Button("arrow.png", self.rect.width // 5, (self.height - BUTTON_WIDTH)//2, 180)
+        self.sm_window = SoundManageWindow(pygame.Rect(self.rect.width * 4/5 - 10, 50, self.rect.width * 1/5, 90))
+
 
     def draw(self, screen: pygame.Surface):
         """ポーズ画面を描画する"""
@@ -3327,6 +3318,8 @@ class PauseWindow(Window):
 
         self.button_left.draw(self.surface)
         self.button_right.draw(self.surface)
+
+        self.sm_window.draw(self.surface)
 
         Window.blit(self, screen)
 
@@ -4262,7 +4255,7 @@ class Treasure():
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos, item, comments, vartype: dict, func, fromTo, funcWarp, mapname):
+    def __init__(self, pos, item: str, comments, vartype: dict, func, fromTo, funcWarp, mapname):
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.x, self.y = pos[0], pos[1]  # 宝箱座標
         self.mapchip = 138  # 宝箱は138
@@ -4275,11 +4268,10 @@ class Treasure():
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
         self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
-        self.open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "treasure_open.wav"))
 
     def open(self, data: dict, line: int, comments: list[str]):
         """宝箱をあける"""
-        self.open_sound.play()
+        SMANAGER.play_se("treasure_open")
         # アイテムを追加する処理
         item = Item(self.item, line, data, comments, self.vartype)
         PLAYER.itembag.items[-1].append(item)
@@ -4442,8 +4434,6 @@ class SmallDoor(Door):
         self.x, self.y = pos[0], pos[1]  # ドア座標
         self.doorname = name  # ドア名
         self.direction = direction
-        self.door_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "door_open.wav"))
-        self.door_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "door_close.wav"))
         self.key = ""
 
     def draw(self, screen, offset):
@@ -4457,12 +4447,12 @@ class SmallDoor(Door):
 
     def open(self):
         """ドアをあける"""
-        self.door_open_sound.play()
+        SMANAGER.play_se("door_open")
         self.status = 1 # open
 
     def close(self):
         """ドアを閉める"""
-        self.door_close_sound.play()
+        SMANAGER.play_se("door_close")
         self.status = 0 # close
 
     def __str__(self):
@@ -4722,6 +4712,8 @@ class StageButtonWindow:
         self.stage_selecting = True
         self.color_support = False
 
+        self.sm_window = SoundManageWindow(pygame.Rect(SBW_WIDTH * 4/5 - 10, 50, SBW_WIDTH * 1/5, 90))
+
     def show(self):
         """ウィンドウを表示"""
         self.is_visible = True
@@ -4747,36 +4739,40 @@ class StageButtonWindow:
         screen.blit(self.surface, (self.rect[0], self.rect[1]))
 
     def draw(self, screen: pygame.Surface):
-        if self.is_visible:
-            self.blit(screen)
+        if not self.is_visible:
+            return
+        
+        self.blit(screen)
 
-            screen.blit(self.bg_image, (0, 0))
-            self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), ("Stage Select" if ISENGLISH else "ステージ選択") if self.stage_selecting else ("LLDB check" if ISENGLISH else "LLDB　処理チェック"), self.FONT_COLOR)
-            for button in self.button_stages:
-                button.draw(screen)
+        screen.blit(self.bg_image, (0, 0))
+        self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), ("Stage Select" if ISENGLISH else "ステージ選択") if self.stage_selecting else ("LLDB check" if ISENGLISH else "LLDB　処理チェック"), self.FONT_COLOR)
+        for button in self.button_stages:
+            button.draw(screen)
 
-            # チュートリアルボタン
-            pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
-            tutorial_label_surf, _ = self.mini_button_font.render("Tutorial" if ISENGLISH else "チュートリアル", (0, 0, 0))
-            tutorial_label_rect = tutorial_label_surf.get_rect(center=self.tutorial_button_rect.center)
-            screen.blit(tutorial_label_surf, tutorial_label_rect)
+        # チュートリアルボタン
+        pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
+        tutorial_label_surf, _ = self.mini_button_font.render("Tutorial" if ISENGLISH else "チュートリアル", (0, 0, 0))
+        tutorial_label_rect = tutorial_label_surf.get_rect(center=self.tutorial_button_rect.center)
+        screen.blit(tutorial_label_surf, tutorial_label_rect)
 
-            # 色覚サポートのあり/なしボタン
-            pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
-            color_support_label_surf, _ = self.mini_button_font.render(("Color Support ON" if ISENGLISH else "色覚サポートあり") if self.color_support else ("Color Support OFF" if ISENGLISH else "色覚サポートなし"), (0, 0, 0) if self.color_support else (255, 255, 255))
-            color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
-            screen.blit(color_support_label_surf, color_support_label_rect)
+        # 色覚サポートのあり/なしボタン
+        pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
+        color_support_label_surf, _ = self.mini_button_font.render(("Color Support ON" if ISENGLISH else "色覚サポートあり") if self.color_support else ("Color Support OFF" if ISENGLISH else "色覚サポートなし"), (0, 0, 0) if self.color_support else (255, 255, 255))
+        color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
+        screen.blit(color_support_label_surf, color_support_label_rect)
 
-            # ゲームモード/デバッグモードのボタン
-            # pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
-            # mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
-            # mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
-            # screen.blit(mode_change_label_surf, mode_change_label_rect)
+        # ゲームモード/デバッグモードのボタン
+        # pygame.draw.rect(screen, (0, 0, 255) if self.stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
+        # mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
+        # mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+        # screen.blit(mode_change_label_surf, mode_change_label_rect)
 
-            pygame.draw.rect(screen, (0, 0, 255) if ISENGLISH else (255, 0, 0), self.english_mode_button_rect)
-            english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (255, 255, 255))
-            english_mode_label_rect = english_mode_label_surf.get_rect(center=self.english_mode_button_rect.center)
-            screen.blit(english_mode_label_surf, english_mode_label_rect)
+        pygame.draw.rect(screen, (0, 0, 255) if ISENGLISH else (255, 0, 0), self.english_mode_button_rect)
+        english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (255, 255, 255))
+        english_mode_label_rect = english_mode_label_surf.get_rect(center=self.english_mode_button_rect.center)
+        screen.blit(english_mode_label_surf, english_mode_label_rect)
+
+        self.sm_window.draw(screen)
 
     def is_clicked(self, pos):
         # ステージの内容と説明を両方code_namesリストに格納したいので、ステージボタンはインデックスで取得する
@@ -4791,7 +4787,8 @@ class StageButtonWindow:
         #     return "check lldb"
         if self.english_mode_button_rect.collidepoint(pos):
             return "switch language"
-        return None
+        
+        return self.sm_window.touchKnob(pos)
     
     def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
         start = time.time()
@@ -4981,8 +4978,6 @@ class CommandWindow(Window):
         self.myfont = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.txt = ""
-        self.command_open_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "command_open.wav"))
-        self.command_close_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "command_close.wav"))
 
     def read(self,screen,font):
         self.txt = ""
@@ -4997,7 +4992,7 @@ class CommandWindow(Window):
                     elif event.key == K_ESCAPE:
                         self.txt = ""
                         isEnd = True
-                        self.command_close_sound.play()
+                        SMANAGER.play_se("command_close")
                     elif event.key in (K_LEFT, K_BACKSPACE):
                         self.txt = self.txt[:-1]
 
@@ -5046,7 +5041,7 @@ class CommandWindow(Window):
     def draw(self, screen, font):
         Window.draw(self)
         Window.blit(self, screen)
-        self.command_open_sound.play()
+        SMANAGER.play_se("command_open")
         result = self.read(screen, font)
         return result
                                                                                                                                                                                                                                    
@@ -5374,8 +5369,6 @@ class CodeWindow(Window):
 
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
 
-        self.rollback_cursor_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "rollback_cursor.wav"))
-
     def load_code_lines(self):
         """Cファイルからコードを読み込む"""
         if not os.path.exists(self.c_file_path):
@@ -5474,7 +5467,7 @@ class CodeWindow(Window):
             if self.rollback_index >= len(self.history):
                 self.rollback_index = crnt_rollback_index
         
-        self.rollback_cursor_sound.play()
+        SMANAGER.play_se("rollback_cursor")
 
         if self.is_auto_scroll:
             self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
@@ -5488,18 +5481,9 @@ class CodeWindow(Window):
 # 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
 # 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
 
-# if: ifはいつも通り ifEndは } の時は一個前、 } ではない時はその行
-# while: 一つ前の行ならwhileIn、その行ならwhileTrue or whileFalse
-# do-while: doWhileInitはいつも通り、doWhileInは一つ前、doWhileTrue or doWhileFalseはその行
-# for: 一つ前の行(forの中身)からならforIn、一つ前の行(forの外)なら変数の初期化(あれば)、その行ならforTrue or forFalse
-# switch: switchCaseはいつも通り、
-
 class EventSender:
     def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
         self.code_window = code_window
-        self.incorrect_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "incorrect_action.wav"))
-        self.hp_warning_sound = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", "hp_warning.wav"))
-
         start = time.time()
         last_error = None
         while time.time() - start < wait_timeout:
@@ -5534,20 +5518,20 @@ class EventSender:
                     except json.JSONDecodeError:
                         continue  # JSONがまだ途中なら続けて読む
                 if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
-                    self.incorrect_sound.play()
+                    SMANAGER.play_se("incorrect_action")
                     PLAYER.status["HP"] -= 10
                     PLAYER.damage = "-10"
                     PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
                     if "message" in msg:
                         msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
                     if PLAYER.status["HP"] == 30:
-                        self.hp_warning_sound.play(loops=-1)
+                        SMANAGER.play_se_loop("hp_warning")
                     elif PLAYER.status["HP"] == 0:
-                        self.hp_warning_sound.stop()
+                        SMANAGER.stop_se("hp_warning")
                     return msg
                 if msg["status"] == "rollback":
                     self.code_window.set_rollback_mode()
-                    MSGWND.set("Do you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
+                    MSGWND.set("Will you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
                     return msg
                 if msg["status"] == "rollbackFalse":
                     return msg
@@ -5638,6 +5622,154 @@ class EventSender:
         
     def close(self):
         self.sock.close()
-  
+                                                                                                                                                 
+#  ad88888ba                                               88 88b           d88                                                                      
+# d8"     "8b                                              88 888b         d888                                                                      
+# Y8,                                                      88 88`8b       d8'88                                                                      
+# `Y8aaaaa,    ,adPPYba,  88       88 8b,dPPYba,   ,adPPYb,88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 8b,dPPYba,  
+#   `"""""8b, a8"     "8a 88       88 88P'   `"8a a8"    `Y88 88  `8b   d8'  88 ""     `Y8 88P'   `"8a ""     `Y8 a8"    `Y88 a8P_____88 88P'   "Y8  
+#         `8b 8b       d8 88       88 88       88 8b       88 88   `8b d8'   88 ,adPPPPP88 88       88 ,adPPPPP88 8b       88 8PP""""""" 88          
+# Y8a     a8P "8a,   ,a8" "8a,   ,a88 88       88 "8a,   ,d88 88    `888'    88 88,    ,88 88       88 88,    ,88 "8a,   ,d88 "8b,   ,aa 88          
+#  "Y88888P"   `"YbbdP"'   `"YbbdP'Y8 88       88  `"8bbdP"Y8 88     `8'     88 `"8bbdP"Y8 88       88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88          
+#                                                                                                                  aa,    ,88                        
+#                                                                                                                   "Y8bbdP"                         
+
+class SoundManager:
+    def __init__(self):
+        self.sounds: dict[str, pygame.mixer.Sound] = {}
+        self.load_initial()
+        self.bgm_volume: float = 1.0
+        self.crnt_bgm_volume: float = 0
+        self.se_volume: float = 1.0
+
+    def load_initial(self):
+        self.load("button_io")
+        self.load("scroll")
+        self.load("stage_entry")
+        self.load("pause_open")
+        self.load("pause_close")
+        self.load("game_over")
+        self.load("walk")
+        self.load("grass_walk")
+        self.load("sand_walk")
+        self.load("iron_walk")
+        self.load("steel_walk")
+        self.load("goal")
+        self.load("warp")
+        self.load("skip")
+        self.load("rollback")
+        self.load("message_window")
+        self.load("select_menu_cursor")
+        self.load("treasure_open")
+        self.load("door_open")
+        self.load("door_close")
+        self.load("command_open")
+        self.load("command_close")
+        self.load("rollback_cursor")
+        self.load("incorrect_action")
+        self.load("hp_warning")
+
+    def load(self, name: str):
+        self.sounds[name] = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", f"{name}.wav"))
+    
+    def set_all_se_volume(self, vol: float):
+        for s in self.sounds.values():
+            s.set_volume(vol)
+        self.se_volume = vol
+
+    def play_se(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].play()
+    
+    def play_se_loop(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].play(loops=-1)
+
+    def stop_se(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].stop()
+    
+    def play_bgm(self, name: str, vol: float = 1.0):
+        pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", f"{name}.wav"))
+        self.crnt_bgm_volume = vol
+        pygame.mixer.music.set_volume(vol * self.bgm_volume)
+        pygame.mixer.music.play(-1)
+    
+    def set_bgm_volume(self):
+        pygame.mixer.music.set_volume(self.crnt_bgm_volume * self.bgm_volume)
+
+    def pause_bgm(self):
+        pygame.mixer.music.pause()
+
+    def unpause_bgm(self):
+        pygame.mixer.music.unpause()
+
+    def stop_bgm(self):
+        pygame.mixer.music.stop()
+
+class SoundManageWindow(Window):
+    KNOB_SIZE = 8
+    SLIDER_RECT_SIZE = 2
+    FONT_SIZE = 12
+    FONT_COLOR = Color(255, 0, 0, 255)
+    SLIDER_COVERED_COLOR = Color(255, 255, 0, 255)
+    SLIDER_NONCOVERED_COLOR = Color(0, 0, 0, 255)
+
+    def __init__(self, rect: pygame.Rect):
+        Window.__init__(self, rect)
+        # 1/3 ~ 8/9の範囲で音量調整ノブを調整する
+        self.knob_min_x = self.x + self.width * 1/3
+        self.knob_max_x = self.x + self.width * 8/9
+        self.bgm_knob_x: float = float(self.knob_min_x + self.width * 5/9 * SMANAGER.bgm_volume)
+        self.se_knob_x: float = float(self.knob_min_x + self.width * 5/9 * SMANAGER.se_volume)
+        self.bgm_knob_y: float = float(self.y + self.height * 1/3)
+        self.se_knob_y: float = float(self.y + self.height * 2/3)
+        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.is_visible = True
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.FONT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+
+    def draw(self, screen: pygame.Surface):
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        
+        self.draw_string(10, self.bgm_knob_y - self.y - self.FONT_SIZE / 2, "BGM vol" if ISENGLISH else "BGM音量")
+        pygame.draw.rect(self.surface, self.SLIDER_COVERED_COLOR, 
+                         pygame.Rect(
+                             self.knob_min_x - self.x, self.bgm_knob_y - self.y - self.SLIDER_RECT_SIZE, 
+                             self.bgm_knob_x - self.knob_min_x, self.SLIDER_RECT_SIZE * 2
+                             )
+                        )
+        pygame.draw.circle(self.surface, self.SLIDER_COVERED_COLOR,
+                           (self.bgm_knob_x - self.x, self.bgm_knob_y - self.y), self.KNOB_SIZE)
+        
+        self.draw_string(10, self.se_knob_y - self.y - self.FONT_SIZE / 2, "SE vol" if ISENGLISH else "SE音量")
+        pygame.draw.rect(self.surface, self.SLIDER_COVERED_COLOR, 
+                         pygame.Rect(
+                             self.knob_min_x - self.x, self.se_knob_y - self.y - self.SLIDER_RECT_SIZE, 
+                             self.se_knob_x - self.knob_min_x, self.SLIDER_RECT_SIZE * 2
+                             )
+                        )
+        pygame.draw.circle(self.surface, self.SLIDER_COVERED_COLOR,
+                           (self.se_knob_x - self.x, self.se_knob_y - self.y), self.KNOB_SIZE)
+        
+        Window.blit(self, screen)
+
+    def touchKnob(self, pos: tuple[int, int]):
+        if (self.bgm_knob_x - self.KNOB_SIZE <= pos[0] <= self.bgm_knob_x + self.KNOB_SIZE
+            and self.bgm_knob_y - self.KNOB_SIZE <= pos[1] <= self.bgm_knob_y + self.KNOB_SIZE):
+            return "bgm slider"
+        elif (self.se_knob_x - self.KNOB_SIZE <= pos[0] <= self.se_knob_x + self.KNOB_SIZE
+              and self.se_knob_y - self.KNOB_SIZE <= pos[1] <= self.se_knob_y + self.KNOB_SIZE):
+            return "se slider"
+        return None
+
 if __name__ == "__main__":
     main()

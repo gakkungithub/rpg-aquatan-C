@@ -842,7 +842,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     line_number_track.append(self.next_line_number)
                                     if funcWarp[0]["name"] == self.func_crnt_name and funcWarp[0]["line"] == self.next_line_number:
                                         func_num += 1
-                                        self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True, "skippedFunc": skipped_func})
+                                        self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?", "undefined": False, "status": "ok", "skip": True, "skippedFunc": skipped_func})
                                         event = self.event_reciever()
                                         if event.get('skip', False):
                                             back_line_number = self.line_number
@@ -975,7 +975,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
@@ -1126,7 +1126,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if self.next_frame_num > self.frame_num:
                             if line_number_track[-1] == self.next_line_number:
                                 func_num += 1
-                                self.event_sender({"message": f"Will you skip function {self.func_crnt_name} ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
                                 event = self.event_reciever()
                                 # スキップする
                                 if event.get('skip', False):
