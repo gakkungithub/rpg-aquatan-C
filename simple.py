@@ -220,10 +220,20 @@ def main():
                     if mouse_down and event.type == pygame.MOUSEMOTION:
                         scroll_start = True
 
-                        if button_name == "bgm slider" and SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
-                            SBWND.sm_window.bgm_knob_x = event.pos[0]
-                        elif button_name == "se slider" and SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
-                            SBWND.sm_window.se_knob_x = event.pos[0]
+                        if button_name == "bgm slider":
+                            if SBWND.sm_window.knob_min_x < event.pos[0] < SBWND.sm_window.knob_max_x:
+                                SBWND.sm_window.bgm_knob_x = event.pos[0]
+                            elif event.pos[0] <= SBWND.sm_window.knob_min_x != SBWND.sm_window.bgm_knob_x:
+                                SBWND.sm_window.bgm_knob_x = SBWND.sm_window.knob_min_x
+                            elif event.pos[0] >= SBWND.sm_window.knob_max_x != SBWND.sm_window.bgm_knob_x:
+                                SBWND.sm_window.bgm_knob_x = SBWND.sm_window.knob_max_x
+                        elif button_name == "se slider":
+                            if SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
+                                SBWND.sm_window.se_knob_x = event.pos[0]
+                            elif event.pos[0] <= SBWND.sm_window.knob_min_x != SBWND.sm_window.se_knob_x:
+                                SBWND.sm_window.se_knob_x = SBWND.sm_window.knob_min_x
+                            elif event.pos[0] >= SBWND.sm_window.knob_max_x != SBWND.sm_window.se_knob_x:
+                                SBWND.sm_window.se_knob_x = SBWND.sm_window.knob_max_x
                         else:
                             dx = - (event.pos[0] - sbw_scroll_mouse_pos[0])
                             if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
@@ -833,15 +843,26 @@ def main():
                             SMANAGER.bgm_volume = (PAUSEWND.sm_window.bgm_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)
                             SMANAGER.set_bgm_volume()
                         elif button_name == "se slider":
+                            print("here")
                             SMANAGER.set_all_se_volume((PAUSEWND.sm_window.se_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)) 
                         button_name = None
 
                     if button_name:
                         if event.type == pygame.MOUSEMOTION:
-                            if button_name == "bgm slider" and PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
-                                PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
-                            elif button_name == "se slider" and PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
-                                PAUSEWND.sm_window.se_knob_x = event.pos[0]
+                            if button_name == "bgm slider":
+                                if PAUSEWND.sm_window.knob_min_x < event.pos[0] < PAUSEWND.sm_window.knob_max_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
+                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.bgm_knob_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_min_x
+                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.bgm_knob_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_max_x
+                            elif button_name == "se slider":
+                                if PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
+                                    PAUSEWND.sm_window.se_knob_x = event.pos[0]
+                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.se_knob_x:
+                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_min_x
+                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.se_knob_x:
+                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_max_x
                 
                 offset = calc_offset(PLAYER)
                 fieldmap.draw(screen, offset)
