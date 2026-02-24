@@ -801,7 +801,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                             else:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action !!20" if self.is_english else f"異なる行動をしようとしています!!20", "status": "ng", "skippedFunc": skipped_func})
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": "HINT: Get a correct item !!" if self.is_english else "アイテムを取得してください !!", "status": "ng", "skippedFunc": skipped_func})
+                                else:
+                                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng", "skippedFunc": skipped_func})
                                 continue
                 
                             # アイテムを正しく取得できたら次の変数に移る
@@ -877,20 +880,30 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                                     else:
                                         errorCnt += 1
-                                        self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています10!!", "status": "ng", "skippedFunc": skipped_func})
+                                        if errorCnt >= 3:
+                                            self.event_sender({"message": "HINT: Get a correct item !!" if self.is_english else "アイテムを取得してください !!", "status": "ng", "skippedFunc": skipped_func})
+                                        else:
+                                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                 # ここは次が関数以外の場合(構造体や配列の最初の行から最初の関数に行番が移る場合)
                                 else:
                                     # self.step_conditionally(var_check=False)
                                     self.step_conditionally()
                                     if crntFromTo[0] != self.line_number:
-                                        self.event_sender({"message": "You cannot get this item !!" if self.is_english else "このアイテムは取得できません11!!", "status": "ng", "skippedFunc": skipped_func})
+                                        errorCnt += 1
+                                        if errorCnt >= 3:
+                                            self.event_sender({"message": f"HINT: Get {var[0]} (check line {self.line_number}) !!" if self.is_english else f"ヒント: アイテム {var[0]} を取得してください ({self.line_number}行を確認してください) !!", "status": "ng", "skippedFunc": skipped_func})
+                                        else:
+                                            self.event_sender({"message": "You cannot get this item !!" if self.is_english else "このアイテムは取得できません !!", "status": "ng", "skippedFunc": skipped_func})
                                         break
                                     line_number_track.append(self.line_number)
                                     crntFromTo.pop(0)
                         else:
                             errorCnt += 1
-                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています1!!", "status": "ng"})
+                            if errorCnt >= 3:
+                                self.event_sender({"message": "HINT: Get a correct item !!" if self.is_english else "アイテムを取得してください !!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
             else:
                 values_changed = []
                 for varname in self.vars_tracker.vars_changed.keys():
@@ -942,20 +955,20 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": f"You cannot get over here 2!! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                        self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             condition_type_get = event.get('type', '')
                             if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action1 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました1!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action2 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました2!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action3 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             else:
                                 break
                         continue
@@ -1033,20 +1046,24 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     self.func_checked.pop(-1)
                                     line_number_track.append(self.next_line_number)
                             else:
-                                self.event_sender({"message": "You cannot get over here10 !!" if self.is_english else "ここから先は進入できません10!!", "status": "ng", "skippedFunc": skipped_func})
+                                errorCnt += 1
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": f"HINT: Check line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}行を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
+                                else:
+                                    self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 condition_type_get = event.get('type', '')
                                 if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                     errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action4 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました4!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action5 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました5!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action6 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました6!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1055,17 +1072,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             self.step_conditionally()
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You cannot get over here3 !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません3!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                                self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
                                     condition_type_get = event.get('type', '')
                                     if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                         errorCnt += 1
-                                        self.event_sender({"message": f"You did a different action7 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました7!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     elif (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": f"You did a different action8 {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"NG行動をしました8!! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                        self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
@@ -1098,16 +1115,25 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
                     else:
                         errorCnt += 1
-                        self.event_sender({"message": "You cannot get over here22 !!" if self.is_english else "ここから先は進入できません22!!", "status": "ng", "skippedFunc": skipped_func})
+                        if errorCnt >= 3:
+                            self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文を見ましょう !!", "status": "ng", "skippedFunc": skipped_func})
+                        else:
+                            self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             if (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": "You did a different action9 !!" if self.is_english else "NG行動をしました9!!", "status": "ng"})
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                                else:
+                                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": "You did a different action10 !!" if self.is_english else f"NG行動をしました10!!", "status": "ng"})
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                                else:
+                                    self.event_sender({"message": "You did a different action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
                             else:
                                 break
                         continue
@@ -1115,7 +1141,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # crntFromToが 空 => 行番が完全一致になる
                     if not crntFromTo:
                         retVal = thread.GetStopReturnValue().GetValue()
-                        self.event_sender({"message": f"go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
+                        self.event_sender({"message": f"We go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
                         # 戻ってきた場所からnext_line_numberまででskipped_linesを取得する
                         self.skipped_lines = [l for l in self.skipped_lines if fromTo[-1] < int(l) < self.next_line_number]
                         self.step_conditionally()
@@ -1147,7 +1173,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                                         self.event_sender({"message": "Congraturations !! Here is a goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
                                                         raise ProgramFinished()
                                                     else:
-                                                        self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください!!", "status": "ng"})
+                                                        errorCnt += 1
+                                                        if errorCnt >= 3:
+                                                            self.event_sender({"message": f"HINT: Talk to a Return Character of line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}のreturnキャラに話しかけてください !!", "status": "ng"})
+                                                        else:
+                                                            self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください !!", "status": "ng"})
                                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                                             break
                                 # スキップしない
@@ -1171,16 +1201,26 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             break
                                 line_number_track.append(self.next_line_number)
                             else:
-                                self.event_sender({"message": "You cannot get over here10 !!" if self.is_english else "ここから先は進入できません10!!", "status": "ng"})
+                                errorCnt += 1
+                                if errorCnt >=3:
+                                    self.event_sender({"message": f"HINT: Check function {self.func_crnt_name} !!" if self.is_english else f"関数 {self.func_crnt_name} を確認してください !!", "status": "ng"})
+                                else:
+                                    self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng"})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 if (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": "You did a differene taction11 !!" if self.is_english else "NG行動をしました11!!", "status": "ng"})
+                                    if errorCnt >= 3:
+                                        self.event_sender({"message": f"HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
+                                    else:
+                                        self.event_sender({"message": "You did a differenet action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": "You did a differene taction12 !!" if self.is_english else f"NG行動をしました12!!", "status": "ng"})
+                                    if errorCnt >= 3:
+                                        self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng"})
+                                    else:
+                                        self.event_sender({"message": "You did a differenet action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
                                 else:
                                     break
                             break
@@ -1189,16 +1229,25 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             self.step_conditionally()
                             if crntFromTo[0] != self.next_line_number:
                                 errorCnt += 1
-                                self.event_sender({"message": "You cannot over here3 !!" if self.is_english else "ここから先は進入できません3!!", "status": "ng", "skippedFunc": skipped_func})
+                                if errorCnt >= 3:
+                                    self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
+                                else:
+                                    self.event_sender({"message": "You cannot over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
                                 while True:
                                     if (event := self.event_reciever()) is None:
                                         continue
                                     if (fromTo := event.get('fromTo', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": "You did a different action13 !!" if self.is_english else "NG行動をしました13!!", "status": "ng"})
+                                        if errorCnt >= 3:
+                                            self.event_sender({"message": "HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
+                                        else:
+                                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                                     elif (funcWarp := event.get('funcWarp', None)) is None:
                                         errorCnt += 1
-                                        self.event_sender({"message": "You did a different action14 !!" if self.is_english else f"NG行動をしました14!!", "status": "ng"})
+                                        if errorCnt >= 3:
+                                            self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng"})
+                                        else:
+                                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                                     else:
                                         break
                                 line_number_track.append(self.next_line_number)
@@ -1233,8 +1282,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "", "status": "ok"})
                                 self.vars_tracker.trackStart(self.frame)
                                 self.vars_checker()
-                            # elif type == 'ifEnd':
-                            #     self.event_sender({"message": "", "status": "ok"})
                             elif type == 'switchEnd':
                                 self.event_sender({"message": "", "status": "ok"})
                             elif type == 'continue':
@@ -1300,7 +1347,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "Will you skip to rightly before exit of loop" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
+                                    self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         while skipStart <= self.next_line_number <= skipEnd:
@@ -1330,6 +1377,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "doWhile"}, False)
                             else:
                                 self.event_sender({"message": "", "status": "ok", "type": "doWhile"}, False)
+                                # なお、ループの始まりの行を管理するself.line_loopへの登録はdo-while-initの時にやっているのでここでは行わない
                         elif type == 'forIn':
                             values = self.get_new_values(self.vars_tracker.vars_changed.keys())
                             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
@@ -1370,6 +1418,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         else:
                             self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
                         return CONTINUE
+                    # 条件なしに入れるワープゾーンを見る
                     elif len(fromTo) == 0 and type == "":
                         self.event_sender({"message": "", "status": "ok", "line": self.line_number}, False)
                         return CONTINUE

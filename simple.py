@@ -80,6 +80,11 @@ def start_timer():
 def end_timer():
     pygame.time.set_timer(LONGPRESS_EVENT, 0)
 
+def resource_path(relative_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 #                                               
 #                               88              
 #                               ""              
@@ -279,7 +284,7 @@ def main():
                     cfcode.append("-u")
                 if ISENGLISH:
                     cfcode.append("-e")
-                subprocess.run(cfcode, cwd="mapdata_generator", check=True)
+                subprocess.run(cfcode, cwd=resource_path("mapdata_generator"), check=True)
             subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
         except subprocess.CalledProcessError as e:
             print(f"subprocess failed with exit code {e.returncode}")
@@ -472,7 +477,7 @@ def main():
         log_scroll_mouse_pos = None
         
         button_name = None
-        while not PLAYER.goaled:
+        while PLAYER.game_status == "playing":
             clock.tick(MAX_FRAME_PER_SEC)
 
             if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
@@ -831,7 +836,7 @@ def main():
                         elif PAUSEWND.button_toStageSelect_rect.collidepoint(event.pos):  
                             SMANAGER.play_se("pause_close")
                             PAUSEWND.hide()
-                            PLAYER.goaled = True
+                            PLAYER.game_status = "quitted"
                         elif PAUSEWND.button_left.rect.collidepoint(event.pos):
                             PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
                             SMANAGER.play_se("scroll")
@@ -843,7 +848,6 @@ def main():
                             SMANAGER.bgm_volume = (PAUSEWND.sm_window.bgm_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)
                             SMANAGER.set_bgm_volume()
                         elif button_name == "se slider":
-                            print("here")
                             SMANAGER.set_all_se_volume((PAUSEWND.sm_window.se_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)) 
                         button_name = None
 
@@ -869,6 +873,13 @@ def main():
                 
             pygame.display.flip()
 
+        if PLAYER.game_status == "goaled" and mapname not in ("tutorial", "tutorial_en"):
+            with open(f"{BASE_DIR}/score.json", 'w') as f:
+                if PLAYER.status["HP"] > 0:
+                    SBWND.scores_dict[mapname] = max(PLAYER.status["HP"] // 20, 1)
+                else:
+                    SBWND.scores_dict[mapname] = 0
+                json.dump(SBWND.scores_dict, f)
         SMANAGER.stop_se("hp_warning")
         SMANAGER.stop_bgm()
         server.terminate()
@@ -917,7 +928,7 @@ def get_sunrise_sunset(dt):
 def draw_string(screen, x, y, string, color):
     """画面上に文字列を表示"""
     font_height = 16
-    surf, rect = pygame.freetype.Font(FONT_DIR + FONT_NAME, 18).render(string, color)
+    surf, rect = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 18).render(string, color)
     screen.blit(surf, (x, y+(font_height-4)-rect[3]))
 
 #                                                                                                                                                          
@@ -1122,7 +1133,7 @@ def load_image(imgdir, file, colorkey=None):
     """画像をロードする"""
     file = os.path.join(imgdir, file)
     try:
-        image = pygame.image.load(file)
+        image = pygame.image.load(resource_path(file))
     except pygame.error as message:
         print("Cannot load image:", file)
         raise SystemExit(message)
@@ -1738,7 +1749,7 @@ class Character:
         offsetx, offsety = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 20)
+        font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 20)
         screen.blit(self.image, (px-offsetx, py-offsety))
         screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
                     0], (px-offsetx, py-offsety-18))
@@ -1797,7 +1808,7 @@ class Player(Character):
 
     def __init__(self, name, pos, direction, sender: "EventSender"):
         Character.__init__(self, name, pos, direction, False, None)
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.prevPos = [pos, pos]
         self.damage_motion: list[int] = []
         self.dest = {}
@@ -1824,7 +1835,7 @@ class Player(Character):
         # そのための変数
         self.completed_checkFuncs_key: tuple[str, str, int] | None = None
 
-        self.goaled = False
+        self.game_status = "playing"
         self.funcInfoWindow_list: list[FuncInfoWindow] = []
         self.funcInfoWindowIndex = 0
         self.std_messages = []
@@ -2434,7 +2445,6 @@ class Player(Character):
                     self.fp.write("moveout, " + mapname + "," + str(self.x)+", " + str(self.y) + "\n")
                     MSGWND.set(chara.message)
                 return
-            
         # mainのreturnキャラ
         else:
             self.sender.send_event({"type": 'return', "fromTo": fromTo + [0] if len(chara.funcWarp) else fromTo, "funcWarp": chara.funcWarp, 'main': True})
@@ -2517,7 +2527,7 @@ class MessageEngine:
     def __init__(self):
         self.color = self.WHITE
         self.myfont = pygame.freetype.Font(
-            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
 
     def set_color(self, color):
         """文字色をセット"""
@@ -3217,7 +3227,8 @@ class MessageWindow(Window):
                 else:
                     MSGWND.set("stopped rollback" if ISENGLISH else "巻き戻しを取り止めました")
             elif self.select_type == 'finished':
-                PLAYER.goaled = True
+                PLAYER.game_status = "goaled"
+                
             
             self.selectMsgText = None
             self.select_type = None
@@ -3260,7 +3271,7 @@ class PauseWindow(Window):
 
     def __init__(self, rect):
         Window.__init__(self, rect)
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 3 - 30, 200, 60)
         self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 3 - 30, 200, 60)
         self.mode = "pause"
@@ -3362,7 +3373,7 @@ class FileWindow(Window):
     def __init__(self):
         Window.__init__(self, pygame.Rect(SBW_WIDTH // 3, 10, SBW_WIDTH // 3 , SBW_HEIGHT // 2))
         self.is_visible = False  # ウィンドウを表示中か？
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.filename = None
         self.filelines = []
 
@@ -3422,7 +3433,7 @@ class ItemWindow(Window):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
         self.myfont = pygame.freetype.Font(
-            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
         self.itemChips = ItemChips()
@@ -3734,7 +3745,7 @@ class StatusWindow(Window):
         Window.__init__(self, rect)
         self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
         self.myfont = pygame.freetype.Font(
-            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
         self.name = "AQUATAN" + self.player.name if ISENGLISH else "あくあたん" + self.player.name
@@ -3829,7 +3840,7 @@ class CharaReturn(Character):
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
         
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
@@ -3894,7 +3905,7 @@ class CharaCheckCondition(Character):
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
 
     def set_checked(self):
         self.avoiding = True
@@ -3954,7 +3965,7 @@ class CharaExpression(Character):
             offsetx, offsety = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load("comment.png").convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
 
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
@@ -4002,7 +4013,7 @@ class MoveEvent():
             offsetx, offsety = offset
             px = self.rect.midtop[0] - 16
             py = self.rect.topright[1] - 28
-            screen.blit(pygame.image.load("reaction.png").convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("reaction.png")).convert_alpha(), (px-offsetx, py-offsety))
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
@@ -4116,7 +4127,7 @@ class FuncInfoWindow(Window):
         # 200は適当
         Window.__init__(self, Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - 300 - 20, 200))
         # 日本語対応フォントの指定
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.funcs = funcs
         self.warpPos = warpPos
         self.detail = Detail(detail, self.font) if detail else None
@@ -4364,7 +4375,7 @@ class Sign():
         self.x, self.y = pos[0], pos[1]  # ドア座標
         self.text = text  # アイテム名
         self.myfont = pygame.freetype.Font(
-            FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
 
     def draw(self, screen, offset):
         """オフセットを考慮して看板を描画"""
@@ -4727,9 +4738,17 @@ class StageButtonWindow:
         self.bg_image = load_image("data", "c_background.png", -1)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
+
+        try:
+            with open(f"{BASE_DIR}/score.json", 'r') as f:
+                self.scores_dict: dict[str, int] = json.load(f)
+        except:
+            print("error in reading a score file")
+            sys.exit(-1)
+
         self.load_sb()
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
-        self.mini_button_font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.MINI_BUTTON_FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.mini_button_font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.MINI_BUTTON_FONT_SIZE)
         self.stage_selecting = True
         self.color_support = False
 
@@ -4748,11 +4767,11 @@ class StageButtonWindow:
         self.button_stages = []
         if ISENGLISH:
             for i, code_name in enumerate(self.code_names):
-                self.button_stages.append(StageButton(code_name, self.code_explanations_en[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+                self.button_stages.append(StageButton(code_name, self.code_explanations_en[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT, self.scores_dict.get(code_name, 0)))
                 x += self.SB_WIDTH + 10
         else:
             for i, code_name in enumerate(self.code_names):
-                self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT))
+                self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT, self.scores_dict.get(code_name, 0)))
                 x += self.SB_WIDTH + 10
 
     def blit(self, screen):
@@ -4872,25 +4891,35 @@ class StageButton:
     BG_COLOR = (0, 255, 255)
     STAGE_NAME_COLOR = (0, 0, 0)
     STAGE_EXPLANTION_COLOR = (0, 31, 63)
+    STAR_COLOR = (254, 230, 0)
 
-    def __init__(self, code_name, code_explanation, stage_num, pos_x, pos_y, button_w, button_h):
+    def __init__(self, code_name: str, code_explanation: str, stage_num: int, pos_x: int, pos_y: int, button_w: int, button_h: int, score: int):
         self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
         self.code_name: str = code_name
         self.code_explanation: str = code_explanation
         self.stage_num = stage_num + 1
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, 24)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 24)
+        self.star_image = pygame.image.load("star.png").convert_alpha()
+        self.score = score
     
     def draw(self, surface: pygame.Surface):
         pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
         text_surf, _ = self.font.render(f"Stage {self.stage_num}" if ISENGLISH else f"ステージ　{self.stage_num}", self.STAGE_NAME_COLOR)
         text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
         self.surface.blit(text_surf, text_rect)
+
         self.font.size = 12
         explanation_surf, _ = self.font.render(self.code_explanation, self.STAGE_EXPLANTION_COLOR)
         explanation_rect = explanation_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2 + 30))
         self.surface.blit(explanation_surf, explanation_rect)
         self.font.size = 24
+
+        self.surface.blit(self.star_image, self.star_image.get_rect(center=(self.rect.width // 4, self.rect.height * 3 // 4)))
+        score_surf, _ = self.font.render(f"× {self.score}/5", self.STAR_COLOR if self.score == 3 else self.STAGE_EXPLANTION_COLOR)
+        score_rect = score_surf.get_rect(center=(self.rect.width * 2 // 3, self.rect.height * 3 // 4))
+        self.surface.blit(score_surf, score_rect)
+
         surface.blit(self.surface, self.rect)
                                                                                                                                                     
 #        db                                                             88888888ba                                                   I8,        8        ,8I 88                      88                                 
@@ -4913,11 +4942,11 @@ class ArrowButtonWindow:
         self.button_up = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0,90)
         self.button_down = Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH, -90)
         self.button_pause = Button("pause.png", self.rect[0] + 0, self.rect[1] + 0, 0)
-        self.button_return = Button("return.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
+        self.button_forward = Button("forward.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0)
         self.button_foot = Button("foot.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1], 0)
         self.button_command = Button("command.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1] + BUTTON_WIDTH, 0)
 
-    def blit(self,screen):
+    def blit(self, screen: pygame.Surface):
         """blit"""
         screen.blit(self.surface, (self.rect[0], self.rect[1]))
     
@@ -4934,7 +4963,7 @@ class ArrowButtonWindow:
         self.button_up.draw(screen)
         self.button_down.draw(screen)
         self.button_pause.draw(screen)
-        self.button_return.draw(screen)
+        self.button_forward.draw(screen)
         self.button_foot.draw(screen)
         self.button_command.draw(screen)
         self.blit(screen)
@@ -4950,7 +4979,7 @@ class ArrowButtonWindow:
             return "down"
         elif self.button_pause.rect.collidepoint(pos):
             return "pause"
-        elif self.button_return.rect.collidepoint(pos):
+        elif self.button_forward.rect.collidepoint(pos):
             return "action"
         elif self.button_foot.rect.collidepoint(pos):
             return "foot"
@@ -4971,12 +5000,12 @@ class ArrowButtonWindow:
 class Button:
     """ボタン"""
     def __init__(self, file_plase, pos_x, pos_y, angle):
-        self.button_image = pygame.image.load(file_plase).convert_alpha()
+        self.button_image = pygame.image.load(resource_path(file_plase)).convert_alpha()
         self.button_image = pygame.transform.scale(self.button_image, (BUTTON_WIDTH, BUTTON_WIDTH))
         self.button_image = pygame.transform.rotate(self.button_image, angle)
         self.rect = pygame.Rect(pos_x, pos_y, BUTTON_WIDTH, BUTTON_WIDTH)
     
-    def draw(self, surface):
+    def draw(self, surface: pygame.Surface):
         surface.blit(self.button_image, self.rect)
                                                                                                                                                                              
 #   ,ad8888ba,                                                                                    88 I8,        8        ,8I 88                      88                                 
@@ -4996,7 +5025,7 @@ class CommandWindow(Window):
 
     def __init__(self, rect):
         Window.__init__(self, rect)
-        self.myfont = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_HEIGHT)
+        self.myfont = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
         self.color = self.WHITE
         self.txt = ""
 
@@ -5082,7 +5111,7 @@ class ControllerGuideWindow(Window):
 
     def __init__(self, rect, mmapwnd: "MiniMapWindow", cmndwnd: "CommandWindow"):
         Window.__init__(self, rect)
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
         self.offset_y = 10
@@ -5090,7 +5119,7 @@ class ControllerGuideWindow(Window):
 
     def draw_string(self, x: int, y: int, string: str, color: pygame.Color = None, size=None):
         """文字列出力"""
-        if y < 34 and string not in ("操作", "CONTROLLER"):
+        if y < 34 and string not in ("操作", "INSTRUCTION"):
             return
          
         if size:
@@ -5106,13 +5135,13 @@ class ControllerGuideWindow(Window):
         Window.draw(self)
         offset_x = 10
         offset_y = self.offset_y
-        self.draw_string(10, 10+4, "CONTROLLER" if ISENGLISH else "操作", self.CYAN, 20)
+        self.draw_string(10, 10+4, "INSTRUCTION" if ISENGLISH else "操作", self.CYAN, 20)
         offset_y += 24
 
         if self.cmndwnd.is_visible:
             self.draw_string(offset_x, offset_y, "escape:")
             offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "hide the Command Window" if ISENGLISH else "コマンドウィンドウを非表示")
+            self.draw_string(offset_x, offset_y, "close the Command Window" if ISENGLISH else "コマンドウィンドウを閉じる")
             offset_y += self.FONT_SIZE + 4
             self.draw_string(offset_x, offset_y, "space: execute command" if ISENGLISH else "space: コマンドを実行")
             offset_y += (self.FONT_SIZE + 4) * 2
@@ -5149,7 +5178,7 @@ class ControllerGuideWindow(Window):
             offset_y += self.FONT_SIZE
             self.draw_string(offset_x, offset_y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
             offset_y += (self.FONT_SIZE + 4) * 2
-            self.draw_string(offset_x, offset_y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを表示")
+            self.draw_string(offset_x, offset_y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを開く")
             offset_y += self.FONT_SIZE + 4
         
         self.is_bottom_edge = offset_y <= self.rect.height
@@ -5180,7 +5209,7 @@ class LogWindow(Window):
 
     def __init__(self, rect):
         Window.__init__(self, rect)
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.offset_y = 10
         self.scrollY = 0
         self.is_bottom_edge = True
@@ -5272,7 +5301,7 @@ class MiniMapWindow(Window, Map):
         self.radius = MIN_MAP_SIZE // (self.tile_num+1)
         self.is_auto_scroll = True
         # 日本語対応フォントの指定
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.auto_scroll_button_rect = pygame.Rect(self.x + self.rect[2] - 110, self.y + self.rect[3] - 40, 100, 30)
         self.hide()
 
@@ -5378,7 +5407,7 @@ class CodeWindow(Window):
         self.scrollY = 0
         
         # 日本語対応フォントの指定
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         
         self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
@@ -5730,7 +5759,17 @@ class SoundManager:
 
     def stop_bgm(self):
         pygame.mixer.music.stop()
-
+                                                                                                                                                                                                                         
+#  ad88888ba                                               88 88b           d88                                                        I8,        8        ,8I 88                      88                                 
+# d8"     "8b                                              88 888b         d888                                                        `8b       d8b       d8' ""                      88                                 
+# Y8,                                                      88 88`8b       d8'88                                                         "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa,    ,adPPYba,  88       88 8b,dPPYba,   ,adPPYb,88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, a8"     "8a 88       88 88P'   `"8a a8"    `Y88 88  `8b   d8'  88 ""     `Y8 88P'   `"8a ""     `Y8 a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 8b       d8 88       88 88       88 8b       88 88   `8b d8'   88 ,adPPPPP88 88       88 ,adPPPPP88 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P "8a,   ,a8" "8a,   ,a88 88       88 "8a,   ,d88 88    `888'    88 88,    ,88 88       88 88,    ,88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"   `"YbbdP"'   `"YbbdP'Y8 88       88  `"8bbdP"Y8 88     `8'     88 `"8bbdP"Y8 88       88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                                                  aa,    ,88                                                                                             
+#                                                                                                                   "Y8bbdP"                                                                                             
 class SoundManageWindow(Window):
     KNOB_SIZE = 8
     SLIDER_RECT_SIZE = 2
@@ -5748,7 +5787,7 @@ class SoundManageWindow(Window):
         self.se_knob_x: float = float(self.knob_min_x + self.width * 5/9 * SMANAGER.se_volume)
         self.bgm_knob_y: float = float(self.y + self.height * 1/3)
         self.se_knob_y: float = float(self.y + self.height * 2/3)
-        self.font = pygame.freetype.Font(FONT_DIR + FONT_NAME, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.is_visible = True
 
     def draw_string(self, x, y, string):
