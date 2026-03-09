@@ -1,6 +1,4 @@
 mapdata/*
-mapdata_generator/preprocessed.c
-debugger-C/*.txt
 .mypy_cache/
 charachip/.DS_Store
 .DS_Store
