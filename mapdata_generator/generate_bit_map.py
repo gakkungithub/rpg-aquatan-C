@@ -391,7 +391,7 @@ class MapInfo:
             if funcName == "main":
                 characters.append({"type": "CHARARETURN", "name": "15161", "x": int(local_pos[1]+self.offset["x"]), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"Congraturations !! Here is A Goal !!" if self.is_english else f"おめでとうございます!! ここがゴールです!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
             else:
-                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"This is the end of function {funcName} !!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
+                characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"This is the end of function {funcName} !!" if self.is_english else f"ここが {funcName} の終了地点です!!", "dest_map": pname, "fromTo": converted_fromTo, "func": funcName, "funcWarp": func_warp, "comments": chara_return.comments})
 
         # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
@@ -403,13 +403,13 @@ class MapInfo:
             pos = (int(chara_checkCondition.local_pos[0] + self.offset["y"]), int(chara_checkCondition.local_pos[1] + self.offset["x"]))
             
             max_y, max_x = bitMap.shape
-            if max_y != pos[0] + 1 and bitMap[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
+            if max_y >= pos[0] + 1 and bitMap[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(0)
-            if pos[1] != 0 and bitMap[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
+            if pos[1] >= 0 and bitMap[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(1)
-            if max_x != pos[1] + 1 and bitMap[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
+            if max_x >= pos[1] + 1 and bitMap[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(2)
-            if pos[0] != 0 and bitMap[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
+            if pos[0] >= 0 and bitMap[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(3)
             move_dir = random.choice(move_dir_list)
             characters.append({"type": "CHARACHECKCONDITION", "name": str(color), "x": pos[1], "y": pos[0], "dir": chara_checkCondition.dir, "moveDir": move_dir,

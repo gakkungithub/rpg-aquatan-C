@@ -163,8 +163,10 @@ def main():
                     if event.type == QUIT:
                         print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                         sys.exit()
-                    if event.type == KEYDOWN and event.key == K_ESCAPE:
+                    # Command + W の同時押し検知 (Mac: KMOD_META、Windows/Linuxなら KMOD_CTRL)
+                    if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
                         print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        pygame.quit()
                         sys.exit()
 
                     # region mouse click event
@@ -387,10 +389,10 @@ def main():
         items = ast.literal_eval(config.get("game", "items"))
 
         ## コードウィンドウを作る
-        CODEWND = CodeWindow(MCODE_RECT, mapname)
-        CODEWND.show()
+        PCODEWND = ProgramCodeWindow(MCODE_RECT, mapname)
+        PCODEWND.show()
 
-        sender = EventSender(CODEWND)
+        sender = EventSender(PCODEWND)
         
         PLAYER = Player(init_player_chara, (init_player_x, init_player_y), DOWN, sender)
         initialResult = sender.receive_json()
@@ -421,12 +423,12 @@ def main():
         if fieldmap.name in ("tutorial", "tutorial_en"):
             mission_message_list: list[str] = []
             if ISENGLISH:
-                for help_message_list in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][0]:
+                for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
                     mission_message_list.append('\n'.join(help_message_list))
             else:
-                for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
                     mission_message_list.append('\n'.join(help_message_list))
-            PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
+            PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
             MSGWND.set('\f'.join(mission_message_list))
 
         DIMWND = DimWindow(Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
@@ -470,11 +472,12 @@ def main():
 
         PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
 
-        code_scroll_mouse_pos = None
-        item_expand_mouse_pos = None
-        item_scroll_mouse_pos = None
-        ctrl_scroll_mouse_pos = None
-        log_scroll_mouse_pos = None
+        programCodeWindow_scroll_mouse_pos = None
+        itemWindow_expand_mouse_pos = None
+        itemWindow_scroll_mouse_pos = None
+        controllerGuideWindow_scroll_mouse_pos = None
+        logWindow_scroll_mouse_pos = None
+        codeElementWindow_scroll_mouse_pos = None
         
         button_name = None
         while PLAYER.game_status == "playing":
@@ -492,15 +495,15 @@ def main():
             if not MSGWND.is_visible:
                 fieldmap.update()
                 # チュートリアルステージではhelp用のメッセージがあり、それを表示させる
-                if fieldmap.name in ("tutorial", "tutorial_en") and PLAYER.sender.code_window.linenum not in PLAYER.help_line_number_aquired:
+                if fieldmap.name in ("tutorial", "tutorial_en") and PLAYER.sender.programCodeWindow.linenum not in PLAYER.help_line_number_aquired:
                     mission_message_list: list[str] = []
                     if ISENGLISH:
-                        for help_message_list in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][0]:
+                        for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
                             mission_message_list.append('\n'.join(help_message_list))
                     else:
-                        for help_message_list in PLAYER.help_dict[PLAYER.sender.code_window.linenum][0]:
+                        for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
                             mission_message_list.append('\n'.join(help_message_list))
-                    PLAYER.help_line_number_aquired.append(PLAYER.sender.code_window.linenum)
+                    PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
                     MSGWND.set('\f'.join(mission_message_list))
             elif PLAYER.damage_motion:
                 PLAYER.update(fieldmap)
@@ -534,7 +537,7 @@ def main():
             if not MSGWND.is_visible:
                 MMAPWND.draw(screen, fieldmap)
 
-            CODEWND.draw(screen)
+            PCODEWND.draw(screen)
 
             draw_string(screen, SCR_WIDTH-60, 10,
                         f"{PLAYER.x},{PLAYER.y}", Color(255, 255, 255, 128))  # プレイヤー座標
@@ -560,7 +563,7 @@ def main():
                 if cmd == "":
                     continue
                 elif cmd == "rollback":
-                    if len(CODEWND.history) > 1:
+                    if len(PCODEWND.history) > 1:
                         sender.send_event({"rollback": True})
                         sender.receive_json()
                     else:
@@ -680,7 +683,8 @@ def main():
                     PLAYER.fp.close()
                     server.terminate()
                     sys.exit()
-                if event.type == KEYDOWN and event.key == K_ESCAPE:
+                # Command + W の同時押し検知 (Mac: KMOD_META、Windows/Linuxなら KMOD_CTRL)
+                if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
                     PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     PLAYER.fp.close()
                     server.terminate()
@@ -690,91 +694,107 @@ def main():
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mouse_down = True
                     start_timer()
-                    if CODEWND.is_visible:
-                        local_pos = (event.pos[0] - CODEWND.x, event.pos[1] - CODEWND.y)
-                        if CODEWND.auto_scroll_button_rect.collidepoint(local_pos):
-                            CODEWND.is_auto_scroll = True
-                            CODEWND.scrollY = max(min(CODEWND.linenum, len(CODEWND.lines)-13)-12, 0) * (CODEWND.FONT_SIZE + 4)
-                            CODEWND.scrollX = 0
-                        elif CODEWND.isCursorInWindow(event.pos):
-                            code_scroll_mouse_pos = event.pos
+                    if PCODEWND.is_visible:
+                        local_pos = (event.pos[0] - PCODEWND.x, event.pos[1] - PCODEWND.y)
+                        if PCODEWND.auto_scroll_button_rect.collidepoint(local_pos):
+                            PCODEWND.is_auto_scroll = True
+                            PCODEWND.update_displayed_area(PCODEWND.linenum)
+                        elif PCODEWND.isCursorInWindow(event.pos):
+                            programCodeWindow_scroll_mouse_pos = event.pos
                     if ITEMWND.is_visible:
                         if (action_type := ITEMWND.isCursorInWindow(event.pos)):
                             if action_type == 'expand':
-                                item_expand_mouse_pos = event.pos
+                                itemWindow_expand_mouse_pos = event.pos
                             elif action_type == 'scroll':
-                                item_scroll_mouse_pos = event.pos
+                                itemWindow_scroll_mouse_pos = event.pos
                     if CTRLGWND.is_visible:
                         if CTRLGWND.isCursorInWindow(event.pos):
-                            ctrl_scroll_mouse_pos = event.pos
+                            controllerGuideWindow_scroll_mouse_pos = event.pos
                     if LOGWND.is_visible:
                         if LOGWND.isCursorInWindow(event.pos):
-                            log_scroll_mouse_pos = event.pos
+                            logWindow_scroll_mouse_pos = event.pos
 
-                    if len(PLAYER.funcInfoWindow_list):
-                        PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].isCursorInWindow(event.pos)
+                    if len(PLAYER.codeElementWindow_list):
+                        ###### 計算式、条件文、関数表示ウィンドウをスクロールできるようにしたい
+                        if PLAYER.codeElementWindow_list[PLAYER.codeElementWindow_index].isCursorInWindow(event.pos):
+                            codeElementWindow_scroll_mouse_pos = event.pos
                     
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     mouse_down = False
-                    code_scroll_mouse_pos = None
-                    if item_expand_mouse_pos:
-                        item_expand_mouse_pos = None
+                    if itemWindow_expand_mouse_pos:
                         pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
-                    elif item_scroll_mouse_pos:
-                        item_scroll_mouse_pos = None
+                    elif itemWindow_scroll_mouse_pos:
                         ITEMWND.is_inAction = True
                     end_timer()
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
                         SMANAGER.play_se("pause_open")
                         PAUSEWND.show()
+                    programCodeWindow_scroll_mouse_pos = None
+                    itemWindow_expand_mouse_pos = None
+                    itemWindow_scroll_mouse_pos = None
+                    controllerGuideWindow_scroll_mouse_pos = None
+                    logWindow_scroll_mouse_pos = None
+                    codeElementWindow_scroll_mouse_pos = None
 
                 if mouse_down:
                     if event.type == pygame.MOUSEMOTION:
-                        if code_scroll_mouse_pos:
-                            dy = - (event.pos[1] - code_scroll_mouse_pos[1])
-                            dx = - (event.pos[0] - code_scroll_mouse_pos[0])
-                            if CODEWND.scrollY + dy > 0:
-                                CODEWND.scrollY += dy
-                            else:
-                                CODEWND.scrollY = 0
-                            if CODEWND.scrollX + dx > 0:
-                                CODEWND.scrollX += dx
-                            else:
-                                CODEWND.scrollX = 0
-                            code_scroll_mouse_pos = event.pos
-                        elif item_scroll_mouse_pos:
-                            dy = event.pos[1] - item_scroll_mouse_pos[1]
-                            dx = event.pos[0] - item_scroll_mouse_pos[0]
-                            if dy < 0 and not ITEMWND.is_bottom_edge:
-                                ITEMWND.offset_y += dy
-                            elif dy >= 0:
+                        if programCodeWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - programCodeWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - programCodeWindow_scroll_mouse_pos[0]
+                            if dy < 0 and PCODEWND.offset_y + PCODEWND.maxY > PCODEWND.rect.height:
+                                PCODEWND.offset_y = max(PCODEWND.offset_y+dy, PCODEWND.rect.height - PCODEWND.maxY)
+                            elif dy >= 0 and PCODEWND.offset_y < 10:
+                                PCODEWND.offset_y = min(PCODEWND.offset_y+dy, 10)
+                            if dx < 0 and PCODEWND.offset_x + PCODEWND.local_right_edge_x > PCODEWND.rect.width:
+                                PCODEWND.offset_x = max(PCODEWND.offset_x+dx, PCODEWND.rect.width - PCODEWND.local_right_edge_x)
+                            elif dx >= 0 and PCODEWND.offset_x < 10:
+                                PCODEWND.offset_x = min(PCODEWND.offset_x+dx, 10)
+                            programCodeWindow_scroll_mouse_pos = event.pos
+                        elif itemWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - itemWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - itemWindow_scroll_mouse_pos[0]
+                            if dy < 0 and ITEMWND.offset_y + ITEMWND.local_bottom_edge_y > ITEMWND.rect.height:
+                                ITEMWND.offset_y = max(ITEMWND.offset_y+dy, ITEMWND.rect.height - ITEMWND.local_bottom_edge_y)
+                            elif dy >= 0 and ITEMWND.offset_y < 10:
                                 ITEMWND.offset_y = min(ITEMWND.offset_y+dy, 10)
-                            if dx < 0 and not ITEMWND.is_right_edge:
-                                ITEMWND.offset_x += dx
-                            elif dx >= 0:
+                            if dx < 0 and ITEMWND.offset_x + ITEMWND.local_right_edge_x > ITEMWND.rect.width:
+                                ITEMWND.offset_x = max(ITEMWND.offset_x+dx, ITEMWND.rect.width - ITEMWND.local_right_edge_x)
+                            elif dx >= 0 and ITEMWND.offset_x < 10:
                                 ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
-                            item_scroll_mouse_pos = event.pos
-                        elif ctrl_scroll_mouse_pos:
-                            dy = event.pos[1] - ctrl_scroll_mouse_pos[1]
-                            if dy < 0 and not CTRLGWND.is_bottom_edge:
-                                CTRLGWND.offset_y += dy
-                            elif dy >= 0:
+                            itemWindow_scroll_mouse_pos = event.pos
+                        elif controllerGuideWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - controllerGuideWindow_scroll_mouse_pos[1]
+                            if dy < 0 and CTRLGWND.offset_y + CTRLGWND.local_bottom_edge_y > CTRLGWND.rect.height:
+                                CTRLGWND.offset_y = max(CTRLGWND.offset_y+dy, CTRLGWND.rect.height - CTRLGWND.local_bottom_edge_y)
+                            elif dy >= 0 and CTRLGWND.offset_y < 10:
                                 CTRLGWND.offset_y = min(CTRLGWND.offset_y+dy, 10)
-                            ctrl_scroll_mouse_pos = event.pos
-                        elif log_scroll_mouse_pos:
-                            dy = - (event.pos[1] - log_scroll_mouse_pos[1])
-                            if LOGWND.scrollY + dy > 0 and not LOGWND.is_bottom_edge:
-                                LOGWND.scrollY += dy
-                            else:
-                                LOGWND.scrollY = 0
-                            log_scroll_mouse_pos = event.pos
+                            controllerGuideWindow_scroll_mouse_pos = event.pos
+                        elif logWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - logWindow_scroll_mouse_pos[1]
+                            if dy < 0 and LOGWND.offset_y + LOGWND.local_bottom_edge_y > LOGWND.rect.height:
+                                LOGWND.offset_y = max(LOGWND.offset_y+dy, LOGWND.rect.height - LOGWND.local_bottom_edge_y)
+                            elif dy >= 0 and LOGWND.offset_y < 10:
+                                LOGWND.offset_y = min(LOGWND.offset_y+dy, 10)
+                            logWindow_scroll_mouse_pos = event.pos
+                        elif codeElementWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - codeElementWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - codeElementWindow_scroll_mouse_pos[0]
+                            crnt_codeElementWindow = PLAYER.codeElementWindow_list[PLAYER.codeElementWindow_index]
+                            if dy < 0 and not crnt_codeElementWindow.is_bottom_edge:
+                                crnt_codeElementWindow.offset_y += dy
+                            elif dy >= 0:
+                                crnt_codeElementWindow.offset_y = min(crnt_codeElementWindow.offset_y+dy, 10)
+                            if dx < 0 and not crnt_codeElementWindow.is_right_edge:
+                                crnt_codeElementWindow.offset_x += dx
+                            elif dx >= 0:
+                                crnt_codeElementWindow.offset_x = min(crnt_codeElementWindow.offset_x+dx, 10)
+                            codeElementWindow_scroll_mouse_pos = event.pos
                                       
-                    elif code_scroll_mouse_pos is None and item_expand_mouse_pos is None and item_scroll_mouse_pos is None:
+                    elif programCodeWindow_scroll_mouse_pos is None and itemWindow_expand_mouse_pos is None and itemWindow_scroll_mouse_pos is None and controllerGuideWindow_scroll_mouse_pos is None and logWindow_scroll_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
                             CMNDWND.show()
-                
                 # endregion
                 
                 # region keydown event
@@ -792,8 +812,8 @@ def main():
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
 
                 if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
-                    if CODEWND.rollback_index is not None:
-                        CODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
+                    if PCODEWND.rollback_index is not None:
+                        PCODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
 
                 if (event.type == KEYDOWN and event.key == K_f) or cmd == "foot":
                     cmd = ""
@@ -813,8 +833,8 @@ def main():
 
                         # 表示中でないなら話す
                         PLAYER.talk(fieldmap)
-
                 # endregion
+
             while PAUSEWND.is_visible:
                 PAUSEWND.draw(screen)
                 pygame.display.update()
@@ -823,7 +843,7 @@ def main():
                         server.terminate()
                         print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                         sys.exit()
-                    if event.type == KEYDOWN and event.key == K_ESCAPE:
+                    if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
                         server.terminate()
                         print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
                         sys.exit()
@@ -1112,9 +1132,9 @@ class ItemChips():
 
 def calc_offset(p):
     """オフセット(全体マップ中の相対マップ位置)を計算する"""
-    offsetx = p.rect.topleft[0] - SCR_RECT.width//2
-    offsety = p.rect.topleft[1] - SCR_RECT.height//2
-    return offsetx, offsety
+    offset_x = p.rect.topleft[0] - SCR_RECT.width//2
+    offset_y = p.rect.topleft[1] - SCR_RECT.height//2
+    return offset_x, offset_y
 
 #                                                                                                          
 # 88                                 88           88                                                       
@@ -1253,11 +1273,11 @@ class Map:
 
     def draw(self, screen: pygame.Surface, offset):
         """マップを描画する"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         # マップの描画範囲を計算
-        startx = offsetx // GS
+        startx = offset_x // GS
         endx = startx + SCR_RECT.width//GS + 1
-        starty = offsety // GS
+        starty = offset_y // GS
         endy = starty + SCR_RECT.height//GS + 1
         # マップの描画
         for y in range(starty, endy):
@@ -1266,31 +1286,31 @@ class Map:
                 # この条件がないとマップの端に行くとエラー発生
                 if x < 0 or y < 0 or x > self.col-1 or y > self.row-1:
                     screen.blit(self.images[self.default],
-                                (x*GS-offsetx, y*GS-offsety))
+                                (x*GS-offset_x, y*GS-offset_y))
                 else:
                     if 3200 <= self.map[y][x] <= 3299:
                         screen.blit(self.images[32],
-                                    (x*GS-offsetx, y*GS-offsety))
+                                    (x*GS-offset_x, y*GS-offset_y))
                         screen.blit(self.bg_images[self.map[y][x] % 100],
-                                    (x*GS-offsetx, y*GS-offsety))
+                                    (x*GS-offset_x, y*GS-offset_y))
                     elif self.map[y][x] == 16000:
                         screen.blit(self.images[160],
-                                    (x*GS-offsetx, y*GS-offsety))
+                                    (x*GS-offset_x, y*GS-offset_y))
                         screen.blit(self.bg_images[100],
-                                    (x*GS-offsetx, y*GS-offsety))
+                                    (x*GS-offset_x, y*GS-offset_y))
                     else:
                         screen.blit(self.images[self.map[y][x]],
-                                    (x*GS-offsetx, y*GS-offsety))
+                                    (x*GS-offset_x, y*GS-offset_y))
 
         if self.name in ("tutorial", "tutorial_en"):
             is_visible = (pygame.time.get_ticks() // 300) % 5 != 0
             # このマップにあるイベントを描画
             for event in self.events:
-                if is_visible or not (PLAYER.sender.code_window.linenum in PLAYER.help_dict and (event.x, event.y) == PLAYER.help_dict[PLAYER.sender.code_window.linenum][2]):
+                if is_visible or not (PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict and (event.x, event.y) == PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][2]):
                     event.draw(screen, offset)
             # このマップにいるキャラクターを描画
             for chara in self.charas:
-                if isinstance(chara, Player) or is_visible or not (PLAYER.sender.code_window.linenum in PLAYER.help_dict and (chara.x, chara.y) == PLAYER.help_dict[PLAYER.sender.code_window.linenum][2]):
+                if isinstance(chara, Player) or is_visible or not (PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict and (chara.x, chara.y) == PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][2]):
                     chara.draw(screen, offset)
         else:
             # このマップにあるイベントを描画
@@ -1301,8 +1321,8 @@ class Map:
                 chara.draw(screen, offset)
 
         # 条件・関数ウィンドウはイベント・キャラクターより上に描画したいので、上のループの後に描画する
-        if len(PLAYER.funcInfoWindow_list):
-            PLAYER.funcInfoWindow_list[PLAYER.funcInfoWindowIndex].draw(screen)
+        if len(PLAYER.codeElementWindow_list):
+            PLAYER.codeElementWindow_list[PLAYER.codeElementWindow_index].draw(screen)
 
         if PLAYER.status["HP"] <= 30:
             self.red_overlay.fill((255, 0, 0, 110 - PLAYER.status["HP"] * 3))
@@ -1729,11 +1749,11 @@ class Character:
 
     def draw_light(self, screen, color, offset):
         """オフセットを考慮し光を描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]-80
         py = self.rect.topleft[1]-80
         light_surface = pygame.Surface((160, 160), pygame.SRCALPHA)
-#        screen.blit(self.image, (px-offsetx, py-offsety))
+#        screen.blit(self.image, (px-offset_x, py-offset_y))
         pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//6),
                            (80,80),80,0)
         pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//4),
@@ -1741,20 +1761,20 @@ class Character:
         pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//2),
                            (80,80),60,0)
         pygame.draw.circle(light_surface,Color(0,0,0,color.a),(80,80),48,0)
-        screen.blit(light_surface, (px-offsetx+15, py-offsety+15),
+        screen.blit(light_surface, (px-offset_x+15, py-offset_y+15),
                     special_flags=BLEND_RGBA_SUB)
 
     def draw(self, screen, offset):
         """オフセットを考慮してプレイヤーを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
         font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 20)
-        screen.blit(self.image, (px-offsetx, py-offsety))
+        screen.blit(self.image, (px-offset_x, py-offset_y))
         screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
-                    0], (px-offsetx, py-offsety-18))
+                    0], (px-offset_x, py-offset_y-18))
         screen.blit(font.render(self.damage, self.damage_color)
-                    [0], (px-offsetx+32, py-offsety))
+                    [0], (px-offset_x+32, py-offset_y))
 
     def set_pos(self, x, y, direction):
         """キャラクターの位置と向きをセット"""
@@ -1821,7 +1841,7 @@ class Player(Character):
         self.itembag = ItemBag()
         self.commonItembag = ItemBag()
         self.sender : EventSender = sender
-        self.sender.code_window.history.append(("", 0, {"x": self.x, "y": self.y, "door": None, "ccchara": None, "checkedFuncs": {}, "func": "main", "gvars": {}, "vars": []}))
+        self.sender.programCodeWindow.history.append(("", 0, {"x": self.x, "y": self.y, "door": None, "ccchara": None, "checkedFuncs": {}, "func": "main", "gvars": {}, "vars": []}))
         self.itemNameShow = True
         # スモールドアを扉を閉じるために記憶
         self.door: dict | None = None 
@@ -1836,8 +1856,8 @@ class Player(Character):
         self.completed_checkFuncs_key: tuple[str, str, int] | None = None
 
         self.game_status = "playing"
-        self.funcInfoWindow_list: list[FuncInfoWindow] = []
-        self.funcInfoWindowIndex = 0
+        self.codeElementWindow_list: list[CodeElementWindow] = []
+        self.codeElementWindow_index = 0
         self.std_messages = []
         self.address_to_fname = {}
         self.address_to_size = {}
@@ -1873,7 +1893,7 @@ class Player(Character):
     def update(self, mymap: Map):
         """プレイヤー状態を更新する。
         mapは移動可能かの判定に必要。"""
-        self.funcInfoWindow_list = []
+        self.codeElementWindow_list = []
         self.isFootActionValid = False
         self.isFowardActionValid = False
         # プレイヤーの移動処理
@@ -1998,7 +2018,7 @@ class Player(Character):
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent) or isinstance(event, Treasure):
-                    self.funcInfoWindow_list.append(event.funcInfoWindow)
+                    self.codeElementWindow_list.append(event.codeElementWindow)
                     self.isFootActionValid = True
                 if self.direction == DOWN:
                     nextx = self.x
@@ -2019,11 +2039,12 @@ class Player(Character):
 
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
-                    self.funcInfoWindow_list.append(chara.funcInfoWindow)
+                    self.codeElementWindow_list.append(chara.codeElementWindow)
                     self.isFowardActionValid = True
-                elif isinstance(chara, CharaExpression) and str(self.sender.code_window.linenum) in chara.funcInfoWindow_dict:
-                    self.funcInfoWindow_list.append(chara.funcInfoWindow_dict[str(self.sender.code_window.linenum)])
+                elif isinstance(chara, CharaExpression) and str(self.sender.programCodeWindow.linenum) in chara.codeElementWindow_dict:
+                    self.codeElementWindow_list.append(chara.codeElementWindow_dict[str(self.sender.programCodeWindow.linenum)])
                     self.isFowardActionValid = True
+
                 event = mymap.get_event(nextx, nexty)
                 if isinstance(event, SmallDoor) and not event.status:
                     self.isFowardActionValid = True
@@ -2261,7 +2282,7 @@ class Player(Character):
 
             if isinstance(chara, Character):
                 if isinstance(chara, CharaExpression):
-                    linenum = self.sender.code_window.linenum
+                    linenum = self.sender.programCodeWindow.linenum
                     if chara.linenum is None:
                         chara.linenum = linenum
 
@@ -2303,9 +2324,9 @@ class Player(Character):
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                                     self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
                                 
-                                self.add_log(f"executed expression {chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
+                                self.add_log(f"executed expression {chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
                                              if ISENGLISH else
-                                             f"{chara.linenum}行目の計算式「{chara.funcInfoWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
+                                             f"{chara.linenum}行目の計算式「{chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
 
                                 # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
@@ -2577,7 +2598,7 @@ class Window:
         self.surface = pygame.Surface(
             (self.width, self.height), pygame.SRCALPHA)
         # self.surface.convert_alpha()
-        self.rect = Rect(0, 0, self.width, self.height)  # 一番外側の白い矩形
+        self.rect: pygame.Rect = Rect(0, 0, self.width, self.height)  # 一番外側の白い矩形
         
         # 内側の黒い矩形
         self.inner_rect = self.rect.inflate(-self.EDGE_WIDTH, -self.EDGE_WIDTH)
@@ -2610,6 +2631,62 @@ class Window:
     def hide(self):
         """ウィンドウを隠す"""
         self.is_visible = False
+                                                                                                                                                                         
+#  ad88888ba                                    88 88            88          88          I8,        8        ,8I 88                      88                                 
+# d8"     "8b                                   88 88            88          88          `8b       d8b       d8' ""                      88                                 
+# Y8,                                           88 88            88          88           "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa,    ,adPPYba, 8b,dPPYba,  ,adPPYba,  88 88 ,adPPYYba, 88,dPPYba,  88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, a8"     "" 88P'   "Y8 a8"     "8a 88 88 ""     `Y8 88P'    "8a 88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 8b         88         8b       d8 88 88 ,adPPPPP88 88       d8 88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P "8a,   ,aa 88         "8a,   ,a8" 88 88 88,    ,88 88b,   ,a8" 88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"   `"Ybbd8"' 88          `"YbbdP"'  88 88 `"8bbdP"Y8 8Y"Ybbd8"'  88  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                                                                                                
+class ScrollableWindow(Window):
+    STRING_COLOR = Color(255, 255, 255, 255)
+    TITLE_COLOR = Color(100, 248, 248, 255)
+    TITLE_FONT_SIZE = 20
+    
+    def __init__(self, rect: pygame.Rect, font_size: int):
+        Window.__init__(self, rect)
+        self.offset_x = 10
+        self.offset_y = 10
+        self.local_right_edge_x = 0
+        self.local_bottom_edge_y = 0
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), font_size)
+        self.font_size = font_size
+
+    # offset_x, yにローカル座標x, yを加えて、文字列を出力する座標を取得する。
+    def draw_string(self, x: int, y: int, string: str, color: pygame.Color | None = None):
+        """文字列出力"""
+        surf, rect = self.font.render(string, color or self.STRING_COLOR)
+        if self.offset_y+y >= 10+self.TITLE_FONT_SIZE+4:
+            self.surface.blit(surf, (self.offset_x+x, self.offset_y+y))
+        self.local_right_edge_x = max(self.local_right_edge_x, x+rect.width+4)
+        self.local_bottom_edge_y = max(self.local_bottom_edge_y, y+rect.height+4)
+    
+    # スクロールウィンドウの共通部分を描画する
+    def draw_base(self, title: str):
+        # まずはタイトル
+        self.font.size = self.TITLE_FONT_SIZE
+        surf, _ = self.font.render(title, self.TITLE_COLOR)
+        self.surface.blit(surf, (10, 10))
+        self.font.size = self.font_size
+
+        # もし、枠に収まり切らない場合は、'▼'のような、「スクロール可能」マークを表示させる
+        if self.offset_x + self.local_right_edge_x > self.rect[2]:
+            surf, _ = self.font.render('▶', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16-self.font_size, self.height-16))
+        if self.offset_x < 10:
+            surf, _ = self.font.render('◀', self.STRING_COLOR)
+            self.surface.blit(surf, (10, self.height-16))
+        if self.offset_y + self.local_bottom_edge_y > self.rect[3]:
+            surf, _ = self.font.render('▼', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16, self.height-16))
+        if self.offset_y < 10:
+            surf, _ = self.font.render('▲', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16, 10))
+
+        return 10 + self.TITLE_FONT_SIZE + 4
 
 #                                                                                                                      
 # 88888888ba,   88                  I8,        8        ,8I 88                      88                                 
@@ -2820,7 +2897,7 @@ class MessageWindow(Window):
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
             SMANAGER.play_se("message_window")
             if selectMessages is not None:
-                PLAYER.funcInfoWindow_list = []
+                PLAYER.codeElementWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
             message_list = []
             if len(self.new_std_messages):
@@ -2936,10 +3013,10 @@ class MessageWindow(Window):
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # 暗転
                     DIMWND.show(200, 'skip')
-                    startLine = self.sender.code_window.linenum
+                    startLine = self.sender.programCodeWindow.linenum
                     self.sender.send_event({"skip": True})
                     skipResult = self.sender.receive_json()
-                    self.sender.code_window.linenum = skipResult["finalLine"]
+                    self.sender.programCodeWindow.linenum = skipResult["finalLine"]
                     if startLine != skipResult["finalLine"]:
                         for event in fieldmap.events:
                             if isinstance(event, MoveEvent) and event.fromTo[0] == skipResult["finalLine"]:
@@ -3144,13 +3221,13 @@ class MessageWindow(Window):
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             elif self.select_type == 'rollback':
-                self.sender.code_window.scrollY = 0
-                self.sender.code_window.scrollX = 0
+                self.sender.programCodeWindow.scrollY = 0
+                self.sender.programCodeWindow.scrollX = 0
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
-                    self.sender.send_event({"rollback": True, "index": self.sender.code_window.rollback_index-1})
+                    self.sender.send_event({"rollback": True, "index": self.sender.programCodeWindow.rollback_index-1})
                     rollbackResult = self.sender.receive_json()
-                    player_history = self.sender.code_window.history[self.sender.code_window.rollback_index]
-                    self.sender.code_window.linenum = player_history[1]
+                    player_history = self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index]
+                    self.sender.programCodeWindow.linenum = player_history[1]
                     # 暗転
                     DIMWND.show(200, 'rollback')
                     PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
@@ -3180,15 +3257,15 @@ class MessageWindow(Window):
                     PLAYER.door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
                     PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
-                    PLAYER.funcInfoWindow_list = []
-                    PLAYER.funcInfoWindowIndex = 0
+                    PLAYER.codeElementWindow_list = []
+                    PLAYER.codeElementWindow_index = 0
                     PLAYER.std_messages = []
                     PLAYER.address_to_fname = {}
                     PLAYER.address_to_size = {}
                     PLAYER.func = player_history[2]["func"]
                     PLAYER.log_lists = player_history[2]["logLists"]
 
-                    self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
 
                     fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                     fieldmap.add_chara(PLAYER)  # マップに再登録
@@ -3197,10 +3274,10 @@ class MessageWindow(Window):
                     self.sender.send_event({"rollback": False})
                     self.sender.receive_json()
                     MSGWND.set("巻き戻しを取り止めました")
-                self.sender.code_window.rollback_index = None
+                self.sender.programCodeWindow.rollback_index = None
             elif self.select_type == 'rollback_to_init':
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
-                    player_history = self.sender.code_window.history[0]
+                    player_history = self.sender.programCodeWindow.history[0]
                     # 暗転
                     DIMWND.show(200, 'rollback')
                     PLAYER.set_pos(player_history[2]["x"], player_history[2]["y"], DOWN)  # プレイヤーを移動先座標へ
@@ -3214,13 +3291,13 @@ class MessageWindow(Window):
                     PLAYER.door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
                     PLAYER.checkedFuncs = player_history[2]["checkedFuncs"]
-                    PLAYER.funcInfoWindow_list = []
-                    PLAYER.funcInfoWindowIndex = 0
+                    PLAYER.codeElementWindow_list = []
+                    PLAYER.codeElementWindow_index = 0
                     PLAYER.std_messages = []
                     PLAYER.address_to_fname = {}
                     PLAYER.address_to_size = {}
                     PLAYER.func = player_history[2]["func"]
-                    self.sender.code_window.history[:] = self.sender.code_window.history[:self.sender.code_window.rollback_index]
+                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
                     fieldmap.create(fieldmap.name)  # 移動先のマップで再構成
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     MSGWND.set("Back to rightly after game began" if ISENGLISH else "ゲーム開始時点まで巻き戻しました")
@@ -3228,7 +3305,6 @@ class MessageWindow(Window):
                     MSGWND.set("stopped rollback" if ISENGLISH else "巻き戻しを取り止めました")
             elif self.select_type == 'finished':
                 PLAYER.game_status = "goaled"
-                
             
             self.selectMsgText = None
             self.select_type = None
@@ -3419,7 +3495,7 @@ class FileWindow(Window):
 #                                                                                                                          
 # 
 
-class ItemWindow(Window):
+class ItemWindow(ScrollableWindow):
     """ステータスウィンドウ"""
     FONT_HEIGHT = 16
     WHITE = Color(255, 255, 255, 255)
@@ -3430,10 +3506,7 @@ class ItemWindow(Window):
     CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect, player):
-        Window.__init__(self, rect)
-        self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
-        self.myfont = pygame.freetype.Font(
-            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
+        ScrollableWindow.__init__(self, rect, self.FONT_HEIGHT)
         self.color = self.WHITE
         self.player = player
         self.itemChips = ItemChips()
@@ -3443,45 +3516,28 @@ class ItemWindow(Window):
         self.file_window = FileWindow()
         self.is_inAction = True
         self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
-        self.offset_y = 10
-        self.offset_x = 10
-        self.is_bottom_edge = True
-        self.is_right_edge = True
 
-    def draw_string(self, x: int, y: int, string: str, color: pygame.Color, size=None):
-        """文字列出力"""
-        if size:
-            self.myfont.size = size
-        surf, rect = self.myfont.render(string, color)
-        if y >= 34 or color == self.CYAN:
-            self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
-            if self.is_right_edge and self.rect[2] - 10 < x + rect.width:
-                self.is_right_edge = False
-            if self.is_bottom_edge and self.rect[3] - 10 < y + 24:
-                self.is_bottom_edge = False
-        if size:
-            self.myfont.size = self.FONT_HEIGHT
-        return x + rect.width
-
-    def draw_itemValueChangedRect(self, comments: list[str], offset_y: int):
-        if offset_y < 34:
+    def draw_itemValueChangedRect(self, comments: list[str], local_y: int):
+        y = self.offset_y + local_y
+        if y < 34:
             return
         
-        if not MSGWND.is_visible and self.check_comments_line[0] == offset_y // 24:
+        if not MSGWND.is_visible and self.check_comments_line[0] == y // 24:
             if self.check_comments_line[1]:
                 self.check_comments_line = (-1, False)
             else:
                 MSGWND.set('\f'.join(comments))
                 self.check_comments_line = (self.check_comments_line[0], True)
-        self.item_changed_lines.add(offset_y // 24)
-        pygame.draw.rect(self.surface, self.RED if self.check_comments_line[0] == offset_y // 24 and self.check_comments_line[1] else self.WHITE, 
-                            pygame.Rect(0, offset_y, self.rect.width, 24))
+        self.item_changed_lines.add(y // 24)
+        pygame.draw.rect(self.surface, self.RED if self.check_comments_line[0] == y // 24 and self.check_comments_line[1] else self.WHITE, 
+                            pygame.Rect(0, y, self.rect.width, 24))
 
-    def draw_icon(self, icon, icon_x, icon_y):
-        if icon_y < 34:
+    def draw_icon(self, icon, local_x, local_y):
+        y = self.offset_y + local_y
+        if y < 34:
             return
         
-        self.surface.blit(icon, (icon_x, icon_y))
+        self.surface.blit(icon, (self.offset_x + local_x, y))
         
     def draw(self, screen):
         """メッセージを描画する
@@ -3489,33 +3545,31 @@ class ItemWindow(Window):
         if not self.is_visible:
             return
         
-        Window.draw(self)
-        offset_y = self.offset_y
-        offset_x = self.offset_x
+        ScrollableWindow.draw(self)
+
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
 
         # ウィンドウ名表示
-        self.draw_string(10, 8, "ITEM" if ISENGLISH else "アイテム", self.CYAN, 20)
+        self.draw_base("ITEM" if ISENGLISH else "アイテム")
 
-        offset_y += 24
-
-        right_edge = self.offset_x
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = True
             if item.itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, offset_y)
+                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
             elif item.index_comments is not None:
-                self.draw_itemValueChangedRect(item.index_comments, offset_y)
+                self.draw_itemValueChangedRect(item.index_comments, y)
             elif item.itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, offset_y)
+                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
                 
-            icon_x = offset_x
+            icon_x = x
             if item.itemvalue.children:
-                self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN, 16)
+                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = (item.itemvalue, icon_x)
+                    self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
@@ -3523,112 +3577,106 @@ class ItemWindow(Window):
 
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.draw_icon(icon[0], icon_x+8, offset_y+4)
-                self.draw_icon(icon[1], icon_x+4, offset_y+12)
-                self.draw_icon(icon[2], icon_x+12, offset_y+12)
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
+                self.draw_icon(icon, icon_x, y)
                 text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
-                self.draw_icon(icon, icon_x, offset_y)
 
             if constLock:
-                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
             # アイコンの右に名前と値を描画
-            right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.GREEN), right_edge)
+            self.draw_string(text_x, y+4, f"{item.name:<8}", self.GREEN)
 
-            name_offset = self.myfont.get_rect(item.name).width + text_x
+            offset_name = self.font.get_rect(item.name).width + text_x
+
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
-                name_offset += 30
-                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({item.itemvalue.value})", self.GREEN), right_edge)
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", self.GREEN)
             
-            offset_y += 24
+            y += 24
 
             if item.itemvalue.is_open:
-                offset_y, children_right_edge = self.draw_values([item.name], item.itemvalue.children, offset_y, icon_x, item.vartype["children"], False)
-                right_edge = max(children_right_edge, right_edge)
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], False)
             
         # ローカル変数
         for item in PLAYER.itembag.items[-1]:
             is_item_changed = True
             if item.itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_comments], offset_y)
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_comments], y)
             elif item.index_comments is not None:
-                self.draw_itemValueChangedRect(item.index_comments, offset_y)
+                self.draw_itemValueChangedRect(item.index_comments, y)
             elif item.itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, offset_y)
+                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
 
-            icon_x = offset_x
+            icon_x = x
             if item.itemvalue.children and item.vartype["type"] != "FILE *":
-                self.draw_string(icon_x, offset_y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE, 16)
+                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = (item.itemvalue, icon_x)
+                    self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.draw_icon(icon[0], icon_x+8, offset_y+4)
-                self.draw_icon(icon[1], icon_x+4, offset_y+12)
-                self.draw_icon(icon[2], icon_x+12, offset_y+12)
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
-                self.draw_icon(icon, icon_x, offset_y)
+                self.draw_icon(icon, icon_x, y)
 
             if constLock:
-                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
             if item.itemvalue.value in PLAYER.address_to_size:
-                self.draw_string(text_x - 12, offset_y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
+                self.draw_string(text_x - 12, y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
 
             # アイコンの右に名前と値を描画
-            right_edge = max(self.draw_string(text_x, offset_y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE), right_edge)
+            self.draw_string(text_x, y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
-            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and offset_y >= 34:
-                name_offset = self.myfont.get_rect(item.name).width + 30
-                file_button = pygame.Rect(text_x + name_offset, offset_y + 2, 100, 20)
+            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and self.offset_y+y >= 34:
+                offset_name = self.font.get_rect(item.name).width + 30
+                file_button = pygame.Rect(text_x + offset_name, y + 2, 100, 20)
                 pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
-                label_surf, _ = self.myfont.render(PLAYER.address_to_fname[item.itemvalue.value][1:-1], (255, 255, 255))
+                label_surf, _ = self.font.render(PLAYER.address_to_fname[item.itemvalue.value][1:-1], (255, 255, 255))
                 label_rect = label_surf.get_rect(center=file_button.center)
                 self.file_buttons[PLAYER.address_to_fname[item.itemvalue.value]] = file_button
                 self.surface.blit(label_surf, label_rect)
 
-            name_offset = self.myfont.get_rect(item.name).width + text_x
+            offset_name = self.font.get_rect(item.name).width + text_x
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None and item.vartype["type"] != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
-                name_offset += 30
-                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({item.itemvalue.value})", value_color), right_edge)
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", value_color)
 
-            offset_y += 24
+            y += 24
 
             if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
-                offset_y, children_right_edge = self.draw_values([item.name], item.itemvalue.children, offset_y, icon_x, item.vartype["children"], True)
-                right_edge = max(children_right_edge, right_edge)
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], True)
 
         if self.is_inAction:
             self.is_inAction = False
-        if not self.is_bottom_edge and offset_y <= self.rect[3]:
-            self.is_bottom_edge = True
-        if not self.is_right_edge and right_edge <= self.rect[2]:
-            self.is_right_edge = True
 
         self.file_window.draw(screen)
-        Window.blit(self, screen)
+        ScrollableWindow.blit(self, screen)
 
-    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, "ItemValue"], offset_y: int, offset_x: int, type_dict: dict, isLocal: bool):
-        right_edge = 10
+    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, "ItemValue"], y: int, x: int, type_dict: dict, isLocal: bool):
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = True
             if itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in itemvalue.declared_comments], offset_y)
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in itemvalue.declared_comments], y)
             elif itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(itemvalue.changed_comments, offset_y)
+                self.draw_itemValueChangedRect(itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
                 
@@ -3644,45 +3692,43 @@ class ItemWindow(Window):
             else:
                 color = self.GREEN
                 
-            icon_x = offset_x
+            icon_x = x
             if itemvalue.children:
-                self.draw_string(icon_x, offset_y+4, '▼' if itemvalue.is_open else '▶', color, 16)
+                self.draw_string(icon_x, y+4, '▼' if itemvalue.is_open else '▶', color)
                 if self.is_inAction:
-                    self.action_trigger_line_dict[offset_y // 24] = (itemvalue, icon_x)
+                    self.action_trigger_line_dict[y // 24] = (itemvalue, icon_x)
                 icon_x += 15
 
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.draw_icon(icon[0], icon_x+8, offset_y+4)
-                self.draw_icon(icon[1], icon_x+4, offset_y+12)
-                self.draw_icon(icon[2], icon_x+12, offset_y+12)
-                text_x = icon_x + icon[0].get_width() * 2 + 10
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
+                text_x: int = icon_x + icon[0].get_width() * 2 + 10
             else:
-                text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
-                self.draw_icon(icon, icon_x, offset_y)
+                self.draw_icon(icon, icon_x, y)
+                text_x: int = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
 
             if constLock:
-                self.draw_icon(constLock, icon_x + icon.get_width() - 12, offset_y)
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
             varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename])
             
-            right_edge = max(self.draw_string(text_x, offset_y+4, f"{varname:<8}", color), right_edge)
-            name_offset = self.myfont.get_rect(varname).width + 20
+            self.draw_string(text_x, y+4, f"{varname:<8}", color)
+            offset_name = self.font.get_rect(varname).width + text_x
 
-            name_offset = self.myfont.get_rect(varname).width + text_x
             # 配列などの値がないvalueは表示しない
             if itemvalue.value is not None:
                 value_color = self.BLACK if is_item_changed else self.WHITE 
-                name_offset += 30
-                right_edge = max(self.draw_string(name_offset, offset_y+4, f"({itemvalue.value})", value_color), right_edge)
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({itemvalue.value})", value_color)
 
-            offset_y += 24
+            y += 24
 
             if itemvalue.is_open:
-                offset_y, children_right_edge = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename], itemvalue.children, offset_y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
-                right_edge = max(children_right_edge, right_edge)
+                y = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename], itemvalue.children, y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
 
-        return offset_y, right_edge
+        return y
     
     def isCursorInWindow(self, pos: tuple[int, int]):
         if self.is_inAction:
@@ -3700,8 +3746,8 @@ class ItemWindow(Window):
             and not MSGWND.is_visible):
             # ▶︎を閉じた後に表示文字列の見切れがなくなることもあるので右端/下端の判別をリセットする
             if self.action_trigger_line_dict[y_line][0].is_open:
-                self.is_right_edge = True
-                self.is_bottom_edge = True
+                self.local_right_edge_x = 0
+                self.local_bottom_edge_y = 0
             self.action_trigger_line_dict[y_line][0].is_open = not self.action_trigger_line_dict[y_line][0].is_open
             self.is_inAction = True
             self.action_trigger_line_dict = {}
@@ -3803,10 +3849,10 @@ class AutoEvent():
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        screen.blit(self.image, (px-offsetx, py-offsety))
+        screen.blit(self.image, (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"AUTO,{self.x},{self.y},{self.mapchip},{''.join(self.sequence)},{self.type}"
@@ -3832,15 +3878,15 @@ class CharaReturn(Character):
         self.func: str = func
         self.funcWarp: dict = funcWarp
         self.comments = comments
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
         
     def draw(self, screen, offset):
         super().draw(screen, offset)
-        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
-            offsetx, offsety = offset
+        if self.fromTo[0] == PLAYER.sender.programCodeWindow.linenum:
+            offset_x, offset_y = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
         
     def __str__(self):
         return f"CHARARETURN,{self.name:s},{self.x:d},{self.y:d},"\
@@ -3868,7 +3914,7 @@ class CharaCheckCondition(Character):
         self.funcWarp = funcWarp
         self.func_argcomments = func_argcomments
         self.avoiding = avoiding
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
+        self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
 
     def update(self, mymap: Map):
         """キャラクター状態を更新する。
@@ -3899,13 +3945,13 @@ class CharaCheckCondition(Character):
 
     def draw(self, screen, offset):
         super().draw(screen, offset)
-        if self.fromTo[0] == PLAYER.sender.code_window.linenum:
+        if self.fromTo[0] == PLAYER.sender.programCodeWindow.linenum:
             if (('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore):
                 return
-            offsetx, offsety = offset
+            offset_x, offset_y = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
 
     def set_checked(self):
         self.avoiding = True
@@ -3957,15 +4003,15 @@ class CharaExpression(Character):
         self.func = func
         self.comments = comments_dict
         self.linenum = None
-        self.funcInfoWindow_dict: dict[str, FuncInfoWindow] = {line: FuncInfoWindow(exp["funcWarp"], (mapname, self.func, int(line)), detail=exp["exps"]) for line, exp in comments_dict.items()}
+        self.codeElementWindow_dict: dict[str, CodeElementWindow] = {line: CodeElementWindow(exp["funcWarp"], (mapname, self.func, int(line)), detail=exp["exps"]) for line, exp in comments_dict.items()}
 
     def draw(self, screen, offset):
         super().draw(screen, offset)
-        if str(PLAYER.sender.code_window.linenum) in self.funcInfoWindow_dict:
-            offsetx, offsety = offset
+        if str(PLAYER.sender.programCodeWindow.linenum) in self.codeElementWindow_dict:
+            offset_x, offset_y = offset
             px = self.rect.topright[0] - 14
             py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"CHARAEXPRESSION,{self.name:s},{self.x:d},{self.y:d},"\
@@ -3999,21 +4045,21 @@ class MoveEvent():
         self.func_argcomments = func_argcomments
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0] if len(fromTo) else 0), detail)
+        self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0] if len(fromTo) else 0), detail)
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        screen.blit(self.image, (px-offsetx, py-offsety))
-        if len(self.fromTo) and self.fromTo[0] == PLAYER.sender.code_window.linenum:
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+        if len(self.fromTo) and self.fromTo[0] == PLAYER.sender.programCodeWindow.linenum:
             if ((('True' in self.type or 'False' in self.type) and not PLAYER.isLoopStatementInBefore) or ('In' in self.type and PLAYER.isLoopStatementInBefore)) and self.type != "ifAllFalse":
                 return
-            offsetx, offsety = offset
+            offset_x, offset_y = offset
             px = self.rect.midtop[0] - 16
             py = self.rect.topright[1] - 28
-            screen.blit(pygame.image.load(resource_path("reaction.png")).convert_alpha(), (px-offsetx, py-offsety))
+            screen.blit(pygame.image.load(resource_path("reaction.png")).convert_alpha(), (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
@@ -4102,18 +4148,19 @@ class Detail:
             pygame.draw.rect(surface, self.HOVER_BG_COLOR, hoverLink_info[2], border_radius=10)
             pygame.draw.rect(surface, self.HOVER_TEXT_COLOR, hoverLink_info[2], width=2, border_radius=10)
             surface.blit(hoverLink_info[0], hoverLink_info[1])
-
-# 88888888888                                88               ad88          I8,        8        ,8I 88                      88                                 
-# 88                                         88              d8"            `8b       d8b       d8' ""                      88                                 
-# 88                                         88              88              "8,     ,8"8,     ,8"                          88                                 
-# 88aaaaa 88       88 8b,dPPYba,   ,adPPYba, 88 8b,dPPYba, MM88MMM ,adPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
-# 88""""" 88       88 88P'   `"8a a8"     "" 88 88P'   `"8a  88   a8"     "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
-# 88      88       88 88       88 8b         88 88       88  88   8b       d8  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
-# 88      "8a,   ,a88 88       88 "8a,   ,aa 88 88       88  88   "8a,   ,a8"   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
-# 88       `"YbbdP'Y8 88       88  `"Ybbd8"' 88 88       88  88    `"YbbdP"'     `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
-
-class FuncInfoWindow(Window):
-    """関数の遷移歴を表示するウィンドウ"""
+                                                                                                                                                                                                   
+#   ,ad8888ba,                       88            88888888888 88                                                           I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                      88            88          88                                                       ,d  `8b       d8b       d8' ""                      88                                 
+# d8'                                88            88          88                                                       88   "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,   ,adPPYb,88  ,adPPYba, 88aaaaa     88  ,adPPYba, 88,dPYba,,adPYba,   ,adPPYba, 8b,dPPYba, MM88MMM Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a a8"    `Y88 a8P_____88 88"""""     88 a8P_____88 88P'   "88"    "8a a8P_____88 88P'   `"8a  88    `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 8b       88 8PP""""""" 88          88 8PP""""""" 88      88      88 8PP""""""" 88       88  88     `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa 88          88 "8b,   ,aa 88      88      88 "8b,   ,aa 88       88  88,     `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"' 88888888888 88  `"Ybbd8"' 88      88      88  `"Ybbd8"' 88       88  "Y888    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                             
+                                                                                                                                                                                                         
+class CodeElementWindow(Window):
+    """関数の遷移歴や条件文、計算式を表示するウィンドウ"""
     FONT_SIZE = 18
     NOT_CHECKED_COLOR = (255, 0, 0)
     SKIPPED_CHECK_COLOR = (0, 0, 255)
@@ -4135,12 +4182,21 @@ class FuncInfoWindow(Window):
         self.right_arrow, _ = self.font.render("▶", (255, 255, 255, 255))
         self.left_rect = self.left_arrow.get_rect(center=(20, 140))
         self.right_rect = self.right_arrow.get_rect(center=(476, 140))
+        self.offset_x = 50
+        self.offset_y = 10
+
+        self.is_bottom_edge = True
+        self.is_right_edge = True
         self.show()
 
-    def draw_string(self, x, y, string, color):
+    def draw_string(self, x, y, string, color, size=None):
         """文字列出力"""
+        if size:
+            self.font.size = size
         surf, rect = self.font.render(string, color)
         self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+        if size:
+            self.font.size = self.FONT_SIZE
 
     def draw_arrow(self, surface, color, start, end, width=3, arrow_size=10):
         # 直線を描画
@@ -4164,16 +4220,26 @@ class FuncInfoWindow(Window):
             return
         
         Window.draw(self)
-        x_offset = 50
-        y_offset = 10
+        offset_x = self.offset_x
+        offset_y = self.offset_y
+        right_edge = self.offset_x
+
+        # 条件文や計算式の内容
         if self.detail:
             self.detail.draw(self.surface)
-            y_offset = self.detail.bottom_y
+            offset_y = self.detail.bottom_y
+
         checkedFuncs = PLAYER.checkedFuncs.get(self.warpPos, [])
         func_pos_list: list[tuple[int, int]] = []
+
+        if len(self.funcs):
+            self.draw_string(offset_x, offset_y, "FUNCTION" if ISENGLISH else "関数", self.CYAN, 20)
+            offset_y += 24
+
         for i, func in enumerate(self.funcs):
-            text = f"{func['name']} : {checkedFuncs[i][1]}" if i < len(checkedFuncs) and checkedFuncs[i][2] else func["name"]
-            text_width = self.font.get_rect(text).width
+            text = f"{func['name']}: {checkedFuncs[i][1]}" if i < len(checkedFuncs) and checkedFuncs[i][2] else func["name"]
+            # ハイライトにはパディングをつける
+            highlight_width = self.font.get_rect(text).width + 4
             # 引数に関数が含まれる場合は段落をつけて関係を描画する
             x_pos_list = []
             y_pos_list = []
@@ -4182,8 +4248,8 @@ class FuncInfoWindow(Window):
                     func_pos = func_pos_list.pop(0)
                     x_pos_list.append(func_pos[0])
                     y_pos_list.append(func_pos[1])
-            x_pos = max(x_pos_list) + 60 if len(x_pos_list) else x_offset
-            y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else y_offset
+            x_pos = max(x_pos_list) + 60 if len(x_pos_list) else offset_x
+            y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else offset_y
 
             # 関数と関数(関数とその引数に含まれる関数)を繋げる矢印を描画する
             for x_pos_index, x_pos_start in enumerate(x_pos_list):
@@ -4197,25 +4263,37 @@ class FuncInfoWindow(Window):
                     highlightColor = self.SKIPPED_CHECK_COLOR
             else:
                 highlightColor = self.NOT_CHECKED_COLOR
-            pygame.draw.rect(self.surface, highlightColor, pygame.Rect(x_pos, y_pos, text_width, self.FONT_SIZE + 4))
+            # 背景色をつける
+            pygame.draw.rect(self.surface, highlightColor, pygame.Rect(x_pos, y_pos, highlight_width, self.FONT_SIZE + 4))
             
             # 関数名を描画する
-            self.draw_string(x_pos, y_pos+2, text, self.TEXT_COLOR)
+            self.draw_string(x_pos+2, y_pos+2, text, self.TEXT_COLOR)
             # 現在の関数と次の関数に矢印を繋げるために先に登録しておく
-            func_pos_list.append((x_pos+text_width, y_pos))
+            func_pos_list.append((x_pos+highlight_width, y_pos))
+            right_edge = max(right_edge, x_pos+highlight_width)
+
             # 引数に関数がない時は現在の関数の下に次の関数を描画する
             if len(y_pos_list) == 0:
-                y_offset += self.FONT_SIZE + 10
+                offset_y += self.FONT_SIZE + 10
 
-        if len(PLAYER.funcInfoWindow_list) != 1:
+        if len(PLAYER.codeElementWindow_list) != 1:
             self.surface.blit(self.left_arrow, self.left_rect)
             self.surface.blit(self.right_arrow, self.right_rect)
+
+        if not self.is_bottom_edge and offset_y <= self.rect[3]:
+            self.is_bottom_edge = True
+        else:
+            self.is_bottom_edge = False
+        if not self.is_right_edge and right_edge <= self.rect[2]:
+            self.is_right_edge = True
+        else:
+            self.is_right_edge = False
 
         Window.blit(self, screen)
 
     def isCursorInWindow(self, pos: tuple[int, int]):
         if MSGWND.is_visible:
-            return False
+            return None
             
         local_pos = (pos[0] - self.x, pos[1] - self.y)
         if self.left_rect.collidepoint(local_pos):
@@ -4226,16 +4304,19 @@ class FuncInfoWindow(Window):
             for i, hoverLink_info in enumerate(self.detail.hoverLink_info_list):
                 if hoverLink_info[1].collidepoint(local_pos):
                     MSGWND.set(self.detail.hoverComment_list[i])
-                    return True
+                    return None
+            if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
+                return 'scroll'
+            return None
         else:
-            return False
+            return None
 
-        if len(PLAYER.funcInfoWindow_list) != 1:
-            self.funcInfoWindowIndex = (self.funcInfoWindowIndex + shift) % len(PLAYER.funcInfoWindow_list)
+        if len(PLAYER.codeElementWindow_list) != 1:
+            self.codeElementWindow_index = (self.codeElementWindow_index + shift) % len(PLAYER.codeElementWindow_list)
         else:
-            self.funcInfoWindowIndex = 0
+            self.codeElementWindow_index = 0
 
-        return True
+        return None
 
 #                                                                                                                                 
 # 88888888ba  88                                                               88888888888                                        
@@ -4262,10 +4343,10 @@ class PlacesetEvent():
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        screen.blit(self.image, (px-offsetx, py-offsety))
+        screen.blit(self.image, (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"PLACESET,{self.x},{self.y},{self.mapchip},{self.place_label}"
@@ -4299,7 +4380,7 @@ class Treasure():
         self.func = func
         self.fromTo = fromTo # 宝箱を開けるタイミング
         self.funcWarp = funcWarp # 関数による遷移
-        self.funcInfoWindow = FuncInfoWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
+        self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0]))
 
     def open(self, data: dict, line: int, comments: list[str]):
         """宝箱をあける"""
@@ -4310,10 +4391,10 @@ class Treasure():
 
     def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        screen.blit(self.image, (px-offsetx, py-offsety))
+        screen.blit(self.image, (px-offset_x, py-offset_y))
 
         # アイテム名を描画（宝箱の上に）
         if self.item and PLAYER.x == self.x and PLAYER.y == self.y or PLAYER.itemNameShow:
@@ -4335,8 +4416,8 @@ class Treasure():
             )
 
             # アイテム名表示枠をアイテムに対して中央上に寄せる
-            bg_rect.centerx = self.rect.centerx - offsetx
-            bg_rect.bottom = self.rect.top - offsety
+            bg_rect.centerx = self.rect.centerx - offset_x
+            bg_rect.bottom = self.rect.top - offset_y
             # テキストを枠の中央に配置
             text_rect.center = bg_rect.center
 
@@ -4388,20 +4469,20 @@ class Sign():
         for i in range(panels):
             self._draw(screen,offset,1 + i,0,self.mapchip_center)
         self._draw(screen,offset,panels + 1,0,self.mapchip_right)
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         rect = surf.get_rect(topleft=((self.x)*GS, (self.y)*GS))
         px = rect.topleft[0]
         py = rect.topleft[1] + 10
-        screen.blit(surf, (px-offsetx, py-offsety))
+        screen.blit(surf, (px-offset_x, py-offset_y))
 
     def _draw(self, screen, offset, dx, dy, mchip):
         """mchipで指定される看板部品をオフセットを考慮して描画"""
         image = Map.images[mchip]
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         rect = image.get_rect(topleft=((self.x+dx)*GS, (self.y+dy)*GS))
         px = rect.topleft[0]
         py = rect.topleft[1]
-        screen.blit(image, (px-offsetx, py-offsety))
+        screen.blit(image, (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"SIGN,{self.x},{self.y},{self.text}"
@@ -4448,11 +4529,11 @@ class Door():
     def _draw(self, screen, offset, dx, dy, mchip):
         """mchipで指定されるドア部品をオフセットを考慮して描画"""
         image = Map.images[mchip]
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         rect = image.get_rect(topleft=((self.x+dx)*GS, (self.y+dy)*GS))
         px = rect.topleft[0]
         py = rect.topleft[1]
-        screen.blit(image, (px-offsetx, py-offsety))
+        screen.blit(image, (px-offset_x, py-offset_y))
 
     def __str__(self):
         return f"DOOR,{self.x},{self.y},{self.doorname}"
@@ -4470,12 +4551,12 @@ class SmallDoor(Door):
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         image = Map.images[self.mapchip_list[self.status]]
         rect = image.get_rect(topleft=(self.x*GS, self.y*GS))
         px = rect.topleft[0]
         py = rect.topleft[1]
-        screen.blit(image, (px-offsetx, py-offsety))
+        screen.blit(image, (px-offset_x, py-offset_y))
 
     def open(self):
         """ドアをあける"""
@@ -4519,10 +4600,10 @@ class Light():
 
     def draw(self, screen, color, offset):
         """オフセットを考慮し光を描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-#        screen.blit(self.image, (px-offsetx, py-offsety))
+#        screen.blit(self.image, (px-offset_x, py-offset_y))
         pygame.draw.circle(self.surface,Color(color.r,color.g,color.b,color.a//6),
                            (80,80),80,0)
         pygame.draw.circle(self.surface,Color(color.r,color.g,color.b,color.a//4),
@@ -4530,7 +4611,7 @@ class Light():
         pygame.draw.circle(self.surface,Color(color.r,color.g,color.b,color.a//2),
                            (80,80),60,0)
         pygame.draw.circle(self.surface,Color(0,0,0,color.a),(80,80),48,0)
-        screen.blit(self.surface, (px-offsetx+15, py-offsety+15),
+        screen.blit(self.surface, (px-offset_x+15, py-offset_y+15),
                     special_flags=BLEND_RGBA_SUB)
 
     def __str__(self):
@@ -4561,10 +4642,10 @@ class Object:
 
     def draw(self, screen, offset):
         """オフセットを考慮してイベントを描画"""
-        offsetx, offsety = offset
+        offset_x, offset_y = offset
         px = self.rect.topleft[0]
         py = self.rect.topleft[1]
-        screen.blit(self.image, (px-offsetx, py-offsety))
+        screen.blit(self.image, (px-offset_x, py-offset_y))
 
     def pos(self):
         """座標を返す"""
@@ -4916,7 +4997,7 @@ class StageButton:
         self.font.size = 24
 
         self.surface.blit(self.star_image, self.star_image.get_rect(center=(self.rect.width // 4, self.rect.height * 3 // 4)))
-        score_surf, _ = self.font.render(f"× {self.score}/5", self.STAR_COLOR if self.score == 3 else self.STAGE_EXPLANTION_COLOR)
+        score_surf, _ = self.font.render(f"× {self.score}/5", self.STAR_COLOR if self.score == 5 else self.STAGE_EXPLANTION_COLOR)
         score_rect = score_surf.get_rect(center=(self.rect.width * 2 // 3, self.rect.height * 3 // 4))
         self.surface.blit(score_surf, score_rect)
 
@@ -5104,86 +5185,69 @@ class CommandWindow(Window):
 #  Y8a.    .a8P "8a,   ,a8" 88       88  88,   88         "8a,   ,a8" 88 88 "8b,   ,aa 88          Y8a.    .a88 "8a,   ,a88 88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
 #   `"Y8888Y"'   `"YbbdP"'  88       88  "Y888 88          `"YbbdP"'  88 88  `"Ybbd8"' 88           `"Y88888P"   `"YbbdP'Y8 88  `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
 
-class ControllerGuideWindow(Window):
+class ControllerGuideWindow(ScrollableWindow):
     FONT_SIZE = 12
-    TEXT_COLOR = Color(255, 255, 255, 255)
-    CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect, mmapwnd: "MiniMapWindow", cmndwnd: "CommandWindow"):
-        Window.__init__(self, rect)
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
         self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
-        self.offset_y = 10
-        self.is_bottom_edge = True
-
-    def draw_string(self, x: int, y: int, string: str, color: pygame.Color = None, size=None):
-        """文字列出力"""
-        if y < 34 and string not in ("操作", "INSTRUCTION"):
-            return
-         
-        if size:
-            self.font.size = size
-        surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
-        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
-        if size:
-            self.font.size = self.FONT_SIZE
 
     def draw(self, screen: pygame.Surface, isSelectMsgText: bool):
         if not self.is_visible:
             return
-        Window.draw(self)
-        offset_x = 10
-        offset_y = self.offset_y
-        self.draw_string(10, 10+4, "INSTRUCTION" if ISENGLISH else "操作", self.CYAN, 20)
-        offset_y += 24
+        ScrollableWindow.draw(self)
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+        self.draw_base("INSTRUCTION" if ISENGLISH else "操作")
 
         if self.cmndwnd.is_visible:
-            self.draw_string(offset_x, offset_y, "escape:")
-            offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "close the Command Window" if ISENGLISH else "コマンドウィンドウを閉じる")
-            offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "space: execute command" if ISENGLISH else "space: コマンドを実行")
-            offset_y += (self.FONT_SIZE + 4) * 2
-            self.draw_string(offset_x, offset_y, "input command:" if ISENGLISH else "入力コマンド:", Color(255, 0, 0, 255))
-            offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "rollback: back to past" if ISENGLISH else "rollback: 過去に戻る")
-            offset_y += self.FONT_SIZE + 4
-            # self.draw_string(offset_x, offset_y, "stdio A B...:")
-            # offset_y += self.FONT_SIZE
-            # self.draw_string(offset_x, offset_y, "input A B..." if ISENGLISH else "A B...を標準入力")
-            # offset_y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "escape:")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "close the Command Window" if ISENGLISH else "コマンドウィンドウを閉じる")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "space: execute command" if ISENGLISH else "space: コマンドを実行")
+            y += (self.FONT_SIZE + 4) * 2
+            self.draw_string(x, y, "input command:" if ISENGLISH else "入力コマンド:", Color(255, 0, 0, 255))
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "rollback: back to past" if ISENGLISH else "rollback: 過去に戻る")
+            y += self.FONT_SIZE + 4
+            # self.draw_string(x, y, "stdio A B...:")
+            # y += self.FONT_SIZE
+            # self.draw_string(x, y, "input A B..." if ISENGLISH else "A B...を標準入力")
+            # y += self.FONT_SIZE + 4
         elif isSelectMsgText:
-            self.draw_string(offset_x, offset_y, "←/→: select" if ISENGLISH else "←/→: 選択")
-            offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "space: decide" if ISENGLISH else "space: 決定")
-            if PLAYER.sender.code_window.rollback_index is not None:
-                offset_y += self.FONT_SIZE + 4
-                self.draw_string(offset_x, offset_y, "↑/↓: choose line" if ISENGLISH else "↑/↓: 行を選ぶ")
-            offset_y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "←/→: select" if ISENGLISH else "←/→: 選択")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "space: decide" if ISENGLISH else "space: 決定")
+            if PLAYER.sender.programCodeWindow.rollback_index is not None:
+                y += self.FONT_SIZE + 4
+                self.draw_string(x, y, "↑/↓: choose line" if ISENGLISH else "↑/↓: 行を選ぶ")
+            y += self.FONT_SIZE + 4
         else:
+            self.draw_string(x, y, "cmd+q: quit game" if ISENGLISH else "cmd+q: ゲームを止める")
+            y += self.FONT_SIZE + 4
             if PLAYER.isFootActionValid:
-                self.draw_string(offset_x, offset_y, "f: action on foot" if ISENGLISH else "f: 足元へのアクション")
-                offset_y += self.FONT_SIZE + 4
+                self.draw_string(x, y, "f: action on foot" if ISENGLISH else "f: 足元へのアクション")
+                y += self.FONT_SIZE + 4
             if PLAYER.isFowardActionValid:
-                self.draw_string(offset_x, offset_y, "space: action to forward" if ISENGLISH else "space: 前方へのアクション")
-                offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "move with shift: dash" if ISENGLISH else "shift押下中に移動: ダッシュ")
-            offset_y += self.FONT_SIZE + 4
-            self.draw_string(offset_x, offset_y, "cursor:" if ISENGLISH else "カーソル:")
-            offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "click on button" if ISENGLISH else "クリックでボタンを押す")
-            offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "or" if ISENGLISH else "または")
-            offset_y += self.FONT_SIZE
-            self.draw_string(offset_x, offset_y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
-            offset_y += (self.FONT_SIZE + 4) * 2
-            self.draw_string(offset_x, offset_y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを開く")
-            offset_y += self.FONT_SIZE + 4
+                self.draw_string(x, y, "space: action to forward" if ISENGLISH else "space: 前方へのアクション")
+                y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "move with shift: dash" if ISENGLISH else "shift押下中に移動: ダッシュ")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "cursor:" if ISENGLISH else "カーソル:")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "click on button" if ISENGLISH else "クリックでボタンを押す")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "or" if ISENGLISH else "または")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
+            y += (self.FONT_SIZE + 4) * 2
+            self.draw_string(x, y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを開く")
+            y += self.FONT_SIZE + 4
         
-        self.is_bottom_edge = offset_y <= self.rect.height
-        
-        Window.blit(self, screen)
+        ScrollableWindow.blit(self, screen)
 
     def isCursorInWindow(self, pos : tuple[int, int]):
         if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.rect.height:
@@ -5202,74 +5266,55 @@ class ControllerGuideWindow(Window):
 #                         aa,    ,88                                                                                  
 #                          "Y8bbdP"                                                                                   
 
-class LogWindow(Window):
+class LogWindow(ScrollableWindow):
     FONT_SIZE = 12
     TEXT_COLOR = Color(255, 255, 255, 255)
-    CYAN = Color(100, 248, 248, 255)
+    MISSION_LABEL_COLOR = Color(255, 0, 0, 255)
+    MISSION_COLOR = Color(100, 248, 248, 255)
 
     def __init__(self, rect):
-        Window.__init__(self, rect)
-        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
-        self.offset_y = 10
-        self.scrollY = 0
-        self.is_bottom_edge = True
-
-    def draw_string(self, x: int, y: int, string: str, color=None, size=None):
-        """文字列出力"""
-        if y < 34 and string not in ("ログ", "LOG", "MISSION"):
-            return
-
-        if size:
-            self.font.size = size
-        surf, rect = self.font.render(string, color if color else self.TEXT_COLOR)
-        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
-        if size:
-            self.font.size = self.FONT_SIZE
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
 
     def draw(self, screen, isTutorial):
         if not self.is_visible:
             return
         
         Window.draw(self)
-        offset_x = 10
-        offset_y = 14
 
-        if isTutorial and PLAYER.sender.code_window.linenum in PLAYER.help_dict:
-            self.font.size = 20
-            self.draw_string(offset_x, offset_y, "MISSION", Color(255, 0, 0, 255))
-            self.font.size = self.FONT_SIZE
-            offset_y += 20
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        self.draw_base("LOG" if ISENGLISH else "ログ")
+
+        if isTutorial and PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict:
+            self.draw_string(x, y, "MISSION" if ISENGLISH else "ミッション", self.MISSION_LABEL_COLOR)
+            y += self.FONT_SIZE + 4
+
             if ISENGLISH:
-                for help_message_part in PLAYER.help_dict_en[PLAYER.sender.code_window.linenum][1]:
-                    self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
-                    offset_y += self.FONT_SIZE + 4
+                for help_message_part in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][1]:
+                    self.draw_string(x, y, help_message_part, self.MISSION_COLOR)
+                    y += self.FONT_SIZE + 4
             else:
-                for help_message_part in PLAYER.help_dict[PLAYER.sender.code_window.linenum][1]:
-                    self.draw_string(offset_x, offset_y, help_message_part, Color(100, 248, 248, 255))
-                    offset_y += self.FONT_SIZE + 4
-            offset_y += self.FONT_SIZE + 4
+                for help_message_part in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][1]:
+                    self.draw_string(x, y, help_message_part, self.MISSION_COLOR)
+                    y += self.FONT_SIZE + 4
 
-        self.draw_string(10, offset_y, "LOG" if ISENGLISH else "ログ", self.CYAN, 20)
-        
-        self.offset_y = offset_y + 20
-        offset_y = self.offset_y - self.scrollY
+            y += self.FONT_SIZE + 4
 
         for log_list in PLAYER.log_lists:
             for log in log_list:
-                self.draw_string(offset_x, offset_y, log)
-                offset_y += self.FONT_SIZE + 4
-            offset_y += self.FONT_SIZE + 4
+                self.draw_string(x, y, log)
+                y += self.FONT_SIZE + 4
+            y += self.FONT_SIZE + 4
 
-        self.is_bottom_edge = offset_y <= self.rect.height
-
-        Window.blit(self, screen)
+        ScrollableWindow.blit(self, screen)
 
     def isCursorInWindow(self, pos : tuple[int, int]):
         if self.x <= pos[0] <= self.x + self.rect.width and self.y + self.offset_y <= pos[1] <= self.y + self.rect.height:
             return True
         else:
             return False
-        
+    
 # 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
 # 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
 # 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 
@@ -5381,18 +5426,20 @@ class MiniMapWindow(Window, Map):
             return True
         
         return False
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+# 88888888ba                                                                                ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
+# 88      "8b                                                                              d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
+# 88      ,8P                                                                             d8'                                88           "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaaa8P' 8b,dPPYba,  ,adPPYba,   ,adPPYb,d8 8b,dPPYba, ,adPPYYba, 88,dPYba,,adPYba,  88             ,adPPYba,   ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""""'   88P'   "Y8 a8"     "8a a8"    `Y88 88P'   "Y8 ""     `Y8 88P'   "88"    "8a 88            a8"     "8a a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          88         8b       d8 8b       88 88         ,adPPPPP88 88      88      88 Y8,           8b       d8 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88         "8a,   ,a8" "8a,   ,d88 88         88,    ,88 88      88      88  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          88          `"YbbdP"'   `"YbbdP"Y8 88         `"8bbdP"Y8 88      88      88   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                     aa,    ,88                                                                                                                                                                            
+#                                      "Y8bbdP"                                                                                                                                                                             
 
-#   ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
-#  d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
-# d8'                                88           "8,     ,8"8,     ,8"                          88                                 
-# 88             ,adPPYba,   ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
-# 88            a8"     "8a a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
-# Y8,           8b       d8 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
-#  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
-#   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
-                                                                                                                                                                                                                                                    
-class CodeWindow(Window):
-    """デバッグコードウィンドウ"""
+class ProgramCodeWindow(ScrollableWindow):
+    """プログラムコードウィンドウ"""
     FONT_SIZE = 12
     HIGHLIGHT_COLOR = (0, 0, 255)
     ROLLBACK_COLOR = Color(100, 248, 248, 255)
@@ -5400,23 +5447,16 @@ class CodeWindow(Window):
     CYAN = Color(100, 248, 248, 255)
 
     def __init__(self, rect, name):
-        Window.__init__(self, rect)
-        self.maxX = self.x + self.width
-        self.maxY = self.y + self.height
-        self.scrollX = 0
-        self.scrollY = 0
-        
-        # 日本語対応フォントの指定
-        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
         
         self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
+        self.maxY = len(self.lines) * (self.font_size + 4) + self.TITLE_FONT_SIZE + 4
         self.linenum = 1
         self.is_auto_scroll = True
         self.history: list[tuple] = []
         self.history_index_not_allowed_chosen_list = []
         self.rollback_index: int | None = None
-
         self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
 
     def load_code_lines(self):
@@ -5425,15 +5465,6 @@ class CodeWindow(Window):
             return ["// File not found"]
         with open(self.c_file_path, 'r', encoding="utf-8") as f:
             return f.readlines()
-        
-    def draw_string(self, x, y, string, color, size=None):
-        """文字列出力"""
-        if size:
-            self.font.size = size
-        surf, rect = self.font.render(string, color)
-        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
-        if size:
-            self.font.size = self.FONT_SIZE
 
     def update_code_line(self, linenum):
         self.linenum = linenum
@@ -5444,25 +5475,29 @@ class CodeWindow(Window):
     def draw(self, screen):
         if not self.is_visible:
             return
-        Window.draw(self)
-        x_offset = 10 - self.scrollX
-        y_offset = 10 - self.scrollY
+        
+        ScrollableWindow.draw(self)
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        # コード表示の左端の行数の桁揃えのために、最終行の桁数を取得する
+        # 最終行が120の場合、一度'120'に変換して、その文字数をカウントすることで桁数である3を取得できる
         digit_line = len(str(len(self.lines)))
         
-        self.draw_string(10, 14, "CODE" if ISENGLISH else "ソースコード", self.CYAN, 20)
-        y_offset += 30
+        self.draw_base("CODE" if ISENGLISH else "ソースコード")
 
         for i, line in enumerate(self.lines):
-            if y_offset < 40:
-                y_offset += self.FONT_SIZE + 4
+            if self.offset_y + y < 34:
+                y += self.FONT_SIZE + 4
                 continue
-            if y_offset > self.maxY:
+            if self.offset_y + y > self.rect.height:
                 break
+
             text = f"{str(i+1):>{digit_line}}  {line.rstrip()}"
             if (i + 1) == self.linenum:
                 bg_rect = pygame.Rect(
                     5,
-                    y_offset,
+                    self.offset_y + y,
                     self.rect.width - 10,
                     self.FONT_SIZE + 4
                 )
@@ -5470,24 +5505,25 @@ class CodeWindow(Window):
             if self.rollback_index is not None and (i + 1) == self.history[self.rollback_index][1]:
                 bg_rect = pygame.Rect(
                     5,
-                    y_offset,
+                    self.offset_y + y,
                     self.rect.width - 10,
                     self.FONT_SIZE + 4
                 )
                 pygame.draw.rect(self.surface, self.ROLLBACK_COLOR, bg_rect)
-            # freetypeの描画 (Surfaceには直接描画) surface内の座標は本windowとの相対座標
-            self.draw_string(x_offset, y_offset, text, self.TEXT_COLOR)
-            y_offset += self.FONT_SIZE + 4
+            
+            self.draw_string(x, y, text, self.TEXT_COLOR)
+            y += self.FONT_SIZE + 4
+
         if not self.is_auto_scroll:
             pygame.draw.rect(self.surface, (100, 100, 100), self.auto_scroll_button_rect)  # グレーのボタン
             label_surf, _ = self.font.render("自動スクロール", (255, 255, 255))
             label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
             self.surface.blit(label_surf, label_rect)
         
-        Window.blit(self, screen)
+        ScrollableWindow.blit(self, screen)
     
     def isCursorInWindow(self, pos : tuple[int, int]):
-        if self.x <= pos[0] <= self.maxX and self.y <= pos[1] <= self.maxY:
+        if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.height:
             self.is_auto_scroll = False
             return True
         else:
@@ -5498,8 +5534,8 @@ class CodeWindow(Window):
         while self.rollback_index in self.history_index_not_allowed_chosen_list:
             self.rollback_index -= 1
         self.is_auto_scroll = True
-        self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
-        self.scrollX = 0
+
+        self.update_displayed_area(self.history[self.rollback_index][1])
 
     def selectRollBackLine(self, dir: int):
         if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
@@ -5520,7 +5556,20 @@ class CodeWindow(Window):
         SMANAGER.play_se("rollback_cursor")
 
         if self.is_auto_scroll:
-            self.scrollY = max(min(self.history[self.rollback_index][1], len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
+            self.update_displayed_area(self.history[self.rollback_index][1])
+
+    # 自動更新の場合のコードの表示領域の調整
+    def update_displayed_area(self, linenum: int):
+        # もし、現在ロールバックしようとしている行数が13未満の場合、offset_yを10にして、ソースコードの表示を第1行から開始する
+        if linenum < 13:
+            self.offset_y = 10
+        # もし、現在ロールバックしようとしている行数が後から12行以内の場合、ウィンドウの下端にプログラムの最終行が表示されるようにoffset_yを調整する
+        elif len(self.lines) - linenum < 12:
+            self.offset_y = 10 - (len(self.lines) - 25) * (self.font_size + 4)
+        # それ以外なら、現在ロールバックしようとしている行がウィンドウの真ん中に来るように調整する
+        else:
+            self.offset_y = 10 - (linenum - 12) * (self.font_size + 4)
+        self.offset_x = 10
 
 # 88888888888                                        ad88888ba                                  88                        
 # 88                                          ,d    d8"     "8b                                 88                        
@@ -5532,8 +5581,8 @@ class CodeWindow(Window):
 # 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
 
 class EventSender:
-    def __init__(self, code_window: CodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
-        self.code_window = code_window
+    def __init__(self, programCodeWindow: ProgramCodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
+        self.programCodeWindow = programCodeWindow
         start = time.time()
         last_error = None
         while time.time() - start < wait_timeout:
@@ -5580,7 +5629,7 @@ class EventSender:
                         SMANAGER.stop_se("hp_warning")
                     return msg
                 if msg["status"] == "rollback":
-                    self.code_window.set_rollback_mode()
+                    self.programCodeWindow.set_rollback_mode()
                     MSGWND.set("Will you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
                     return msg
                 if msg["status"] == "rollbackFalse":
@@ -5597,14 +5646,14 @@ class EventSender:
                             var_dict[(var.name, var.line)] = var.vartype
                         var_list.append(var_dict)
 
-                    self.code_window.history.append((msg["message"], self.code_window.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists.copy()}))
+                    self.programCodeWindow.history.append((msg["message"], self.programCodeWindow.linenum, {"x": PLAYER.x, "y": PLAYER.y, "door": PLAYER.door, "ccchara": PLAYER.ccchara, "checkedFuncs": PLAYER.checkedFuncs.copy(), "func": PLAYER.func, "gvars": gvar_dict, "vars": var_list, "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, "logLists": PLAYER.log_lists.copy()}))
                     
                     if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
-                        self.code_window.history_index_not_allowed_chosen_list.append(len(self.code_window.history))
+                        self.programCodeWindow.history_index_not_allowed_chosen_list.append(len(self.programCodeWindow.history))
                     PLAYER.isLoopStatementInBefore = False
 
                 if "line" in msg:
-                    self.code_window.update_code_line(msg["line"])
+                    self.programCodeWindow.update_code_line(msg["line"])
                 if "removed" in msg:
                     for item in msg["removed"]:
                         PLAYER.itembag.remove(item["name"], item["line"])
@@ -5664,7 +5713,7 @@ class EventSender:
             except json.JSONDecodeError:
                 continue  # JSONがまだ完全でないので続けて待つ
             except socket.timeout:
-                if self.code_window.rollback_index is None:
+                if self.programCodeWindow.rollback_index is None:
                     raise TimeoutError("timeout in socket connection. endless loop or length of exection may result in this problem." if ISENGLISH else "ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
             except Exception as e:
                 print(f"受信エラー: {e}")
@@ -5769,7 +5818,9 @@ class SoundManager:
 # Y8a     a8P "8a,   ,a8" "8a,   ,a88 88       88 "8a,   ,d88 88    `888'    88 88,    ,88 88       88 88,    ,88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
 #  "Y88888P"   `"YbbdP"'   `"YbbdP'Y8 88       88  `"8bbdP"Y8 88     `8'     88 `"8bbdP"Y8 88       88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
 #                                                                                                                  aa,    ,88                                                                                             
-#                                                                                                                   "Y8bbdP"                                                                                             
+#       
+#                                                                                                             "Y8bbdP"                                                                                             
+
 class SoundManageWindow(Window):
     KNOB_SIZE = 8
     SLIDER_RECT_SIZE = 2

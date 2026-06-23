@@ -514,6 +514,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             # 変数が合致していればstepinを実行して次に進む
 
+            print(self.line_number, self.next_line_number, self.skipped_lines)
             while len(self.skipped_lines):
                 line = self.skipped_lines.pop(0)
                 skipped_varDecls = list([(var, int(line)) for var in self.varsDeclLines_list[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
@@ -928,331 +929,338 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             }
                         ]
 
-        def analyze_frame(self, backToLine: int = None) -> int: # Literal[PROGRESS, CONTINUE]
-            def check_condition(condition_type: str, fromTo: list[int], funcWarp: list[dict]) -> None:
-                errorCnt = 0
-                line_number_track: list[int] = fromTo[:2]
-                func_num = 0
-                while True:
-                    skipped_func = []
-                    # まず、if文でどの行まで辿ったかを確かめる
-                    if fromTo[:len(line_number_track)] == line_number_track:
-                        crntFromTo = fromTo[len(line_number_track):]
-                        if len(funcWarp) != 0:
-                            funcWarp = funcWarp[func_num:]
-                    # orやandで確認されない関数がある場合
-                    elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
-                        notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+        def check_condition(self, condition_type: str, fromTo: list[int], funcWarp: list[dict]) -> None:
+            errorCnt = 0
+            line_number_track: list[int] = fromTo[:2]
+            func_num = 0
+            while True:
+                skipped_func = []
+                # まず、if文でどの行まで辿ったかを確かめる
+                if fromTo[:len(line_number_track)] == line_number_track:
+                    crntFromTo = fromTo[len(line_number_track):]
+                    if len(funcWarp) != 0:
                         funcWarp = funcWarp[func_num:]
-                        while notCheckedFromTo[0] != line_number_track[-1]:
-                            if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
-                                skipped_func.append(funcWarp[0]["name"])
-                                func_num += 1
-                                funcWarp.pop(0)
-                            line_number_track.insert(-1, notCheckedFromTo[0])
-                            notCheckedFromTo.pop(0)
-                        crntFromTo = notCheckedFromTo[1:]
-                    # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
-                    else:
-                        errorCnt += 1
-                        self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                # orやandで確認されない関数がある場合
+                elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
+                    notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+                    funcWarp = funcWarp[func_num:]
+                    while notCheckedFromTo[0] != line_number_track[-1]:
+                        if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                            skipped_func.append(funcWarp[0]["name"])
+                            func_num += 1
+                            funcWarp.pop(0)
+                        line_number_track.insert(-1, notCheckedFromTo[0])
+                        notCheckedFromTo.pop(0)
+                    crntFromTo = notCheckedFromTo[1:]
+                # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                else:
+                    errorCnt += 1
+                    self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
+                    while True:
+                        if (event := self.event_reciever()) is None:
+                            continue
+                        condition_type_get = event.get('type', '')
+                        if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
+                            errorCnt += 1
+                            self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        elif (fromTo := event.get('fromTo', None)) is None:
+                            errorCnt += 1
+                            self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        elif (funcWarp := event.get('funcWarp', None)) is None:
+                            errorCnt += 1
+                            self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                        else:
+                            break
+                    continue
+                # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
+                # crntFromToが 空 => 行番が完全一致になる
+                if not crntFromTo:
+                    # 条件文での値の変化はここで一括で取得する
+                    if condition_type in ("whileFalse", "doWhileFalse", "forFalse"):
+                        self.skipped_lines = [
+                            line
+                            for line in self.varsDeclLines_list
+                            if self.line_number < int(line) < self.next_line_number
+                        ]
+                    self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                    self.vars_tracker.trackStart(self.frame)
+                    self.vars_checker(condition_type == 'forFalse')
+                    if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
+                        self.skipped_lines = [l for l in self.skipped_lines if fromTo[0] < int(l) < self.next_line_number]
+                    break
+
+                while crntFromTo:
+                    # 何かしらの関数に遷移したとき
+                    if self.next_frame_num > self.frame_num:
+                        if line_number_track[-1] == self.next_line_number:
+                            func_num += 1
+                            self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
+                            event = self.event_reciever()
+                            # スキップする
+                            if event.get('skip', False):
+                                retVal = None
+                                back_line_number = self.line_number
+                                back_frame_num = self.frame_num
+                                skipped_func_name = self.func_crnt_name
+                                self.func_checked.append([skipped_func_name])
+                                while 1:
+                                    self.step_conditionally()
+                                    if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
+                                        retVal = thread.GetStopReturnValue().GetValue()
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                    elif back_line_number == self.line_number and back_frame_num == self.frame_num:
+                                        line_number_track.append(self.next_line_number)
+                                        break
+                                    # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
+                                    elif condition_type == "exp" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
+                                        line_number_track = fromTo
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
+                                        break
+                                self.func_checked.pop(-1)
+                            # スキップしない
+                            else:
+                                items = {}
+                                func = funcWarp.pop(0)
+                                for argname, arg_info in func["args"].items():
+                                    items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
+                                self.event_sender({"message": f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                self.func_checked.append([self.func_crnt_name])
+                                back_line_number = self.line_number
+                                back_frame_num = self.frame_num
+                                # 変数が初期化されない時、スキップされるので、それも読み取る
+                                vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
+                                self.skipped_lines = [
+                                    line
+                                    for line in self.varsDeclLines_list
+                                    if (int(line) < self.next_line_number)
+                                    and {
+                                        (var, int(line))
+                                        for var in self.varsDeclLines_list[line]
+                                        if (var, int(line)) not in vars_declared
+                                    }
+                                ]
+                                # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
+                                self.step_conditionally()
+
+                                # 遷移先の関数に変数宣言がある場合のために変数確認する
+                                self.vars_checker()
+                                while 1:
+                                    if self.analyze_frame(fromTo[0]):
+                                        continue
+                                    if back_line_number == self.line_number and back_frame_num == self.frame_num:
+                                        break
+                                self.func_checked.pop(-1)
+                                line_number_track.append(self.next_line_number)
+                        else:
+                            errorCnt += 1
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"HINT: Check line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}行を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
+                            else:
+                                self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             condition_type_get = event.get('type', '')
                             if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
-                                self.event_sender({"message": f"You did a different action !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
                             else:
                                 break
-                        continue
-                    # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
-                    # crntFromToが 空 => 行番が完全一致になる
-                    if not crntFromTo:
-                        # 条件文での値の変化はここで一括で取得する
-                        self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
-                        self.vars_tracker.trackStart(self.frame)
-                        self.vars_checker(condition_type == 'forFalse')
-                        if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
-                            self.skipped_lines = [l for l in self.skipped_lines if fromTo[0] < int(l) < self.next_line_number]
                         break
-
-                    while crntFromTo:
-                        # 何かしらの関数に遷移したとき
-                        if self.next_frame_num > self.frame_num:
-                            if line_number_track[-1] == self.next_line_number:
-                                func_num += 1
-                                self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipCond": True, "skippedFunc": skipped_func})
-                                event = self.event_reciever()
-                                # スキップする
-                                if event.get('skip', False):
-                                    retVal = None
-                                    back_line_number = self.line_number
-                                    back_frame_num = self.frame_num
-                                    skipped_func_name = self.func_crnt_name
-                                    self.func_checked.append([skipped_func_name])
-                                    while 1:
-                                        self.step_conditionally()
-                                        if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
-                                            retVal = thread.GetStopReturnValue().GetValue()
-                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                        elif back_line_number == self.line_number and back_frame_num == self.frame_num:
-                                            line_number_track.append(self.next_line_number)
-                                            break
-                                        # たまにvoid型の関数限定で元の場所より後の行に戻ってくることがあるので、その場合に対応する
-                                        elif condition_type == "exp" and back_frame_num == self.next_frame_num and self.line_number in self.line_data[self.func_name]["voidreturn"]:
-                                            line_number_track = fromTo
-                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_name, "skippedFunc": skipped_func_name, "retVal": None})
-                                            break
-                                    self.func_checked.pop(-1)
-                                # スキップしない
-                                else:
-                                    items = {}
-                                    func = funcWarp.pop(0)
-                                    for argname, arg_info in func["args"].items():
-                                        items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
-                                    self.event_sender({"message": f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
-                                    self.func_checked.append([self.func_crnt_name])
-                                    back_line_number = self.line_number
-                                    back_frame_num = self.frame_num
-                                    # 変数が初期化されない時、スキップされるので、それも読み取る
-                                    vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
-                                    self.skipped_lines = [
-                                        line
-                                        for line in self.varsDeclLines_list
-                                        if (int(line) < self.next_line_number)
-                                        and {
-                                            (var, int(line))
-                                            for var in self.varsDeclLines_list[line]
-                                            if (var, int(line)) not in vars_declared
-                                        }
-                                    ]
-                                    # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
-                                    self.step_conditionally()
-
-                                    # 遷移先の関数に変数宣言がある場合のために変数確認する
-                                    self.vars_checker()
-                                    while 1:
-                                        if self.analyze_frame(fromTo[0]):
-                                            continue
-                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
-                                            break
-                                    self.func_checked.pop(-1)
-                                    line_number_track.append(self.next_line_number)
-                            else:
-                                errorCnt += 1
-                                if errorCnt >= 3:
-                                    self.event_sender({"message": f"HINT: Check line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}行を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
-                                else:
-                                    self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
+                    else:
+                        # self.step_conditionally(var_check=False)
+                        self.step_conditionally()
+                        if crntFromTo[0] != self.next_line_number:
+                            errorCnt += 1
+                            self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 condition_type_get = event.get('type', '')
                                 if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
                                     errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 elif (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
-                                elif (funcWarp := event.get('funcWarp', None)) is None:
-                                    errorCnt += 1
-                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng"})
+                                    self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
                                 else:
                                     break
+                            line_number_track.append(self.next_line_number)
                             break
-                        else:
-                            # self.step_conditionally(var_check=False)
-                            self.step_conditionally()
-                            if crntFromTo[0] != self.next_line_number:
-                                errorCnt += 1
-                                self.event_sender({"message": f"You cannot get over here !! {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"ここから先は進入できません !! {f"ヒント: {condition_type} 条件を見ましょう!!" if errorCnt >= 3 else ""}", "status": "ng", "skippedFunc": skipped_func})
-                                while True:
-                                    if (event := self.event_reciever()) is None:
-                                        continue
-                                    condition_type_get = event.get('type', '')
-                                    if not ((condition_type_get in ('if', 'else', 'ifAllFalse') and condition_type in ('if', 'else', 'ifAllFalse')) or condition_type_get == condition_type):
-                                        errorCnt += 1
-                                        self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
-                                    elif (fromTo := event.get('fromTo', None)) is None:
-                                        errorCnt += 1
-                                        self.event_sender({"message": f"You did a different action {f"HINT: Check condition {condition_type} !!" if errorCnt >= 3 else ""}" if self.is_english else f"異なる行動をしようとしています !! {f"ヒント: {condition_type} 条件を見ましょう !!" if errorCnt >= 3 else ""}", "status": "ng"})
-                                    else:
-                                        break
-                                line_number_track.append(self.next_line_number)
-                                break
-                            line_number_track.append(crntFromTo.pop(0))
+                        line_number_track.append(crntFromTo.pop(0))
 
-            def check_return(fromTo: list[int], funcWarp: list[dict]) -> None:
-                errorCnt = 0
-                line_number_track: list[int] = fromTo[:2]
-                func_num = 0
-                while True:
-                    skipped_func = []
-                    # まず、if文でどの行まで辿ったかを確かめる
-                    if fromTo[:len(line_number_track)] == line_number_track:
-                        crntFromTo = fromTo[len(line_number_track):]
-                        if len(funcWarp) != 0:
-                            funcWarp = funcWarp[func_num:]
-                    # orやandで確認されない関数がある場合
-                    elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
-                        notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+        def check_return(self, fromTo: list[int], funcWarp: list[dict], backToLine: int | None) -> None:
+            errorCnt = 0
+            line_number_track: list[int] = fromTo[:2]
+            func_num = 0
+            while True:
+                skipped_func = []
+                # まず、if文でどの行まで辿ったかを確かめる
+                if fromTo[:len(line_number_track)] == line_number_track:
+                    crntFromTo = fromTo[len(line_number_track):]
+                    if len(funcWarp) != 0:
                         funcWarp = funcWarp[func_num:]
-                        while notCheckedFromTo[0] != line_number_track[-1]:
-                            if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
-                                skipped_func.append(funcWarp[0]["name"])
-                                func_num += 1
-                                funcWarp.pop(0)
-                            line_number_track.insert(-1, notCheckedFromTo[0])
-                            notCheckedFromTo.pop(0)
-                        crntFromTo = notCheckedFromTo[1:]
-                    # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                # orやandで確認されない関数がある場合
+                elif line_number_track[-1] in fromTo[(len(line_number_track)-1):]:
+                    notCheckedFromTo = fromTo[(len(line_number_track)-1):]
+                    funcWarp = funcWarp[func_num:]
+                    while notCheckedFromTo[0] != line_number_track[-1]:
+                        if len(funcWarp) and notCheckedFromTo[0] == funcWarp[0]["line"]:
+                            skipped_func.append(funcWarp[0]["name"])
+                            func_num += 1
+                            funcWarp.pop(0)
+                        line_number_track.insert(-1, notCheckedFromTo[0])
+                        notCheckedFromTo.pop(0)
+                    crntFromTo = notCheckedFromTo[1:]
+                # もし、fromToと今まで辿った行が部分一致しなければ新たな通信を待つ
+                else:
+                    errorCnt += 1
+                    if errorCnt >= 3:
+                        self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文を見ましょう !!", "status": "ng", "skippedFunc": skipped_func})
                     else:
-                        errorCnt += 1
-                        if errorCnt >= 3:
-                            self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文を見ましょう !!", "status": "ng", "skippedFunc": skipped_func})
+                        self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
+                    while True:
+                        if (event := self.event_reciever()) is None:
+                            continue
+                        if (fromTo := event.get('fromTo', None)) is None:
+                            errorCnt += 1
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
+                        elif (funcWarp := event.get('funcWarp', None)) is None:
+                            errorCnt += 1
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": "You did a different action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
                         else:
-                            self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
+                            break
+                    continue
+                # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
+                # crntFromToが 空 => 行番が完全一致になる
+                if not crntFromTo:
+                    retVal = thread.GetStopReturnValue().GetValue()
+                    self.event_sender({"message": f"We go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
+                    # 戻ってきた場所からnext_line_numberまででskipped_linesを取得する
+                    self.skipped_lines = [l for l in self.skipped_lines if fromTo[-1] < int(l) < self.next_line_number]
+                    self.step_conditionally()
+                    break
+                
+                while crntFromTo:
+                    # 何かしらの関数に遷移したとき
+                    if self.next_frame_num > self.frame_num:
+                        if line_number_track[-1] == self.next_line_number:
+                            func_num += 1
+                            self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
+                            event = self.event_reciever()
+                            # スキップする
+                            if event.get('skip', False):
+                                retVal = None
+                                back_line_number = self.line_number
+                                back_frame_num = self.frame_num
+                                skipped_func_name = self.func_crnt_name
+                                while 1:
+                                    self.step_conditionally()
+                                    if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
+                                        retVal = thread.GetStopReturnValue().GetValue()
+                                        self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
+                                        if len(funcWarp) == 1:
+                                            while True:
+                                                if (event := self.event_reciever()) is None:
+                                                    continue
+                                                if event.get('type', None) == 'return' and event['fromTo'][0] == self.next_line_number:
+                                                    self.event_sender({"message": "Congraturations !! Here is a goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
+                                                    raise ProgramFinished()
+                                                else:
+                                                    errorCnt += 1
+                                                    if errorCnt >= 3:
+                                                        self.event_sender({"message": f"HINT: Talk to a Return Character of line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}のreturnキャラに話しかけてください !!", "status": "ng"})
+                                                    else:
+                                                        self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください !!", "status": "ng"})
+                                    if back_line_number == self.line_number and back_frame_num == self.frame_num:
+                                        break
+                            # スキップしない
+                            else:
+                                items = {}
+                                func = funcWarp.pop(0)
+                                for argname, arg_info in func["args"].items():
+                                    items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
+                                self.event_sender({"message": f"skip is cancelled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
+                                back_line_number = self.line_number
+                                back_frame_num = self.frame_num
+
+                                self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
+                                self.step_conditionally()
+                                # 遷移先の関数に変数宣言がある場合のために変数確認する
+                                self.vars_checker()
+                                while 1:
+                                    if self.analyze_frame(fromTo[0]):
+                                        continue
+                                    if back_line_number == self.line_number and back_frame_num == self.frame_num:
+                                        break
+                            line_number_track.append(self.next_line_number)
+                        else:
+                            errorCnt += 1
+                            if errorCnt >=3:
+                                self.event_sender({"message": f"HINT: Check function {self.func_crnt_name} !!" if self.is_english else f"関数 {self.func_crnt_name} を確認してください !!", "status": "ng"})
+                            else:
+                                self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng"})
                         while True:
                             if (event := self.event_reciever()) is None:
                                 continue
                             if (fromTo := event.get('fromTo', None)) is None:
                                 errorCnt += 1
                                 if errorCnt >= 3:
-                                    self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                                    self.event_sender({"message": f"HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
                                 else:
-                                    self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
+                                    self.event_sender({"message": "You did a differenet action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                             elif (funcWarp := event.get('funcWarp', None)) is None:
                                 errorCnt += 1
                                 if errorCnt >= 3:
-                                    self.event_sender({"message": f"HINT: Check return statement of line {line_number_track[0]}!!" if self.is_english else f"ヒント: {line_number_track[0]}行のreturn文の条件を見ましょう!!", "status": "ng"})
+                                    self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng"})
                                 else:
-                                    self.event_sender({"message": "You did a different action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
+                                    self.event_sender({"message": "You did a differenet action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
                             else:
                                 break
-                        continue
-                    # 全ての行数が合致していたらif文の開始の正誤の分析を終了する
-                    # crntFromToが 空 => 行番が完全一致になる
-                    if not crntFromTo:
-                        retVal = thread.GetStopReturnValue().GetValue()
-                        self.event_sender({"message": f"We go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
-                        # 戻ってきた場所からnext_line_numberまででskipped_linesを取得する
-                        self.skipped_lines = [l for l in self.skipped_lines if fromTo[-1] < int(l) < self.next_line_number]
-                        self.step_conditionally()
                         break
-                    
-                    while crntFromTo:
-                        # 何かしらの関数に遷移したとき
-                        if self.next_frame_num > self.frame_num:
-                            if line_number_track[-1] == self.next_line_number:
-                                func_num += 1
-                                self.event_sender({"message": f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"関数 {self.func_crnt_name} の処理をスキップしますか?", "status": "ok", "skipReturn": True, "skippedFunc": skipped_func})
-                                event = self.event_reciever()
-                                # スキップする
-                                if event.get('skip', False):
-                                    retVal = None
-                                    back_line_number = self.line_number
-                                    back_frame_num = self.frame_num
-                                    skipped_func_name = self.func_crnt_name
-                                    while 1:
-                                        self.step_conditionally()
-                                        if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
-                                            retVal = thread.GetStopReturnValue().GetValue()
-                                            self.event_sender({"message": "skip is completed" if self.is_english else "スキップを完了しました", "status": "ok", "items": self.vars_tracker.getValueAll(), "func": self.func_crnt_name, "skippedFunc": skipped_func_name, "retVal": retVal})
-                                            if len(funcWarp) == 1:
-                                                while True:
-                                                    if (event := self.event_reciever()) is None:
-                                                        continue
-                                                    if event.get('type', None) == 'return' and event['fromTo'][0] == self.next_line_number:
-                                                        self.event_sender({"message": "Congraturations !! Here is a goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!", "status": "ok", "finished": True})
-                                                        raise ProgramFinished()
-                                                    else:
-                                                        errorCnt += 1
-                                                        if errorCnt >= 3:
-                                                            self.event_sender({"message": f"HINT: Talk to a Return Character of line {self.next_line_number} !!" if self.is_english else f"{self.next_line_number}のreturnキャラに話しかけてください !!", "status": "ng"})
-                                                        else:
-                                                            self.event_sender({"message": "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください !!", "status": "ng"})
-                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
-                                            break
-                                # スキップしない
-                                else:
-                                    items = {}
-                                    func = funcWarp.pop(0)
-                                    for argname, arg_info in func["args"].items():
-                                        items[argname] = {arg_info["line"]: {"value": self.vars_tracker.getValueByVar((argname, arg_info["line"])), "type": arg_info["type"]}}
-                                    self.event_sender({"message": f"skip is cancelled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", "status": "ok", "func": self.func_name, "fromLine": self.line_number, "skipTo": {"name": func["name"], "x": func["x"], "y": func["y"], "items": items}})
-                                    back_line_number = self.line_number
-                                    back_frame_num = self.frame_num
-
-                                    self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
-                                    self.step_conditionally()
-                                    # 遷移先の関数に変数宣言がある場合のために変数確認する
-                                    self.vars_checker()
-                                    while 1:
-                                        if self.analyze_frame(fromTo[0]):
-                                            continue
-                                        if back_line_number == self.line_number and back_frame_num == self.frame_num:
-                                            break
-                                line_number_track.append(self.next_line_number)
+                    else:
+                        # self.step_conditionally(var_check=False)
+                        self.step_conditionally()
+                        if crntFromTo[0] != self.next_line_number:
+                            errorCnt += 1
+                            if errorCnt >= 3:
+                                self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
                             else:
-                                errorCnt += 1
-                                if errorCnt >=3:
-                                    self.event_sender({"message": f"HINT: Check function {self.func_crnt_name} !!" if self.is_english else f"関数 {self.func_crnt_name} を確認してください !!", "status": "ng"})
-                                else:
-                                    self.event_sender({"message": "You cannot get over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng"})
+                                self.event_sender({"message": "You cannot over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
                             while True:
                                 if (event := self.event_reciever()) is None:
                                     continue
                                 if (fromTo := event.get('fromTo', None)) is None:
                                     errorCnt += 1
                                     if errorCnt >= 3:
-                                        self.event_sender({"message": f"HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
+                                        self.event_sender({"message": "HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
                                     else:
-                                        self.event_sender({"message": "You did a differenet action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
+                                        self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                                 elif (funcWarp := event.get('funcWarp', None)) is None:
                                     errorCnt += 1
                                     if errorCnt >= 3:
                                         self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng"})
                                     else:
-                                        self.event_sender({"message": "You did a differenet action !!" if self.is_english else f"異なる行動をしようとしています !!", "status": "ng"})
+                                        self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
                                 else:
                                     break
+                            line_number_track.append(self.next_line_number)
                             break
-                        else:
-                            # self.step_conditionally(var_check=False)
-                            self.step_conditionally()
-                            if crntFromTo[0] != self.next_line_number:
-                                errorCnt += 1
-                                if errorCnt >= 3:
-                                    self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng", "skippedFunc": skipped_func})
-                                else:
-                                    self.event_sender({"message": "You cannot over here !!" if self.is_english else "ここから先は進入できません !!", "status": "ng", "skippedFunc": skipped_func})
-                                while True:
-                                    if (event := self.event_reciever()) is None:
-                                        continue
-                                    if (fromTo := event.get('fromTo', None)) is None:
-                                        errorCnt += 1
-                                        if errorCnt >= 3:
-                                            self.event_sender({"message": "HINT: Check Return statement !!" if self.is_english else "return文を確認してください !!", "status": "ng"})
-                                        else:
-                                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
-                                    elif (funcWarp := event.get('funcWarp', None)) is None:
-                                        errorCnt += 1
-                                        if errorCnt >= 3:
-                                            self.event_sender({"message": f"HINT: Check Return statement of line {line_number_track[0]} !!" if self.is_english else f"{line_number_track[0]}行のreturn文を確認してください !!", "status": "ng"})
-                                        else:
-                                            self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています !!", "status": "ng"})
-                                    else:
-                                        break
-                                line_number_track.append(self.next_line_number)
-                                break
-                            line_number_track.append(crntFromTo.pop(0))
+                        line_number_track.append(crntFromTo.pop(0))
+
+        def analyze_frame(self, backToLine: int | None = None) -> int: # Literal[PROGRESS, CONTINUE]
 
             skipStart = None
             skipEnd = None
@@ -1268,7 +1276,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if fromTo[:2] == [self.line_number, self.next_line_number]:
                             if type in ['if', 'else', 'ifAllFalse', 'whileTrue', 'whileFalse', 'forTrue', 'forFalse', 'doWhileTrue', 'doWhileFalse', 'switchCase', 'exp']:
                                 funcWarp = event['funcWarp']
-                                check_condition(type, fromTo, funcWarp)
+                                self.check_condition(type, fromTo, funcWarp)
                                 if type in ['whileFalse', 'forFalse', 'doWhileFalse']:
                                     self.line_loop.pop(-1)
                                     if type == 'doWhileFalse':
@@ -1324,21 +1332,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             elif type == 'break':
                                 # self.event_sender({"message": "", "status": "ok"})
                                 funcWarp = event['funcWarp']
-                                check_condition(type, fromTo, funcWarp)
+                                self.check_condition(type, fromTo, funcWarp)
                                 self.line_loop.pop(-1)
                             elif type == 'return':
                                 funcWarp = event['funcWarp']
-                                check_return(fromTo, funcWarp)
+                                self.check_return(fromTo, funcWarp, backToLine)
                                 return PROGRESS
                             else:
-                                self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                                self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています) 1", "status": "ng"})
                                 return CONTINUE
                         # void関数の戻り
                         elif fromTo[0] == self.line_number and fromTo[0] in self.line_data[self.func_name]["voidreturn"]:
                             self.event_sender({"message": f"go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
                             self.skipped_lines = [l for l in self.skipped_lines if backToLine < int(l) < self.next_line_number]
                         else:
-                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています) 2", "status": "ng"})
                             return CONTINUE            
                     elif len(fromTo) == 1 and fromTo == [self.line_number]:
                         if type == 'whileIn':
@@ -1355,6 +1363,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             self.step_conditionally()
                                         self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
                                     else:
+
                                         self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "while"}, False)
                                 else:
                                     self.event_sender({"message": "", "status": "ok", "type": "while"})
@@ -1416,14 +1425,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         elif type == 'switchMiddleCase':
                             self.event_sender({"message": "", "status": "ok"}, False)
                         else:
-                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                            self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています) 3", "status": "ng"})
                         return CONTINUE
                     # 条件なしに入れるワープゾーンを見る
                     elif len(fromTo) == 0 and type == "":
                         self.event_sender({"message": "", "status": "ok", "line": self.line_number}, False)
                         return CONTINUE
                     else:
-                        self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています)", "status": "ng"})
+                        self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています) 4", "status": "ng"})
                         return CONTINUE
                 else:
                     self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる処理に対するアクションをしました!!", "status": "ng"})
@@ -1484,7 +1493,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 else:
                     return
             
+            # 正しいアクションを実行した時のみ送信するメッセージに情報を追加していく
             if msgJson["status"] == "ok" or msgJson["status"] == "rollbackTrue":
+                # 標準
                 msgJson["std"] = self.std_messages
                 msgJson["files"] = self.file_info_to_send
                 self.file_info_to_send = []
@@ -1504,6 +1515,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     # スコープから外れて除外された変数を取り除く
                     msgJson["removed"] = [{"name": var_removed[0], "line": var_removed[1]} for var_removed in self.vars_tracker.vars_removed]
                     self.vars_tracker.vars_removed = set()
+                if "skip" in msgJson and "skippedFunc" not in msgJson:
+                    msgJson["removed"] = [{"name": previous_value_key[0], "line": previous_value_key[1]} for previous_value_key in self.vars_tracker.previous_values[-1].keys() if previous_value_key not in self.vars_tracker.vars_declared[-1]]
             elif msgJson["status"] == "ng":
                 self.events_history.pop(-1)
 

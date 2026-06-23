@@ -1365,7 +1365,8 @@ class ASTtoFlowChart:
             falseEndNodeID = self.createNode("", 'terminator')
             # elseがない場合は仮ifとしてcondition_moveを取得する
             self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', line_track + [cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else line_track + [next_line[0]])
-            self.line_info_dict[self.scanning_func].setLine(end_line)
+            # print(end_line)
+            # self.line_info_dict[self.scanning_func].setLine(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
             nodeIDs = [trueEndNodeID, falseEndNodeID]
         
@@ -1512,15 +1513,15 @@ class ASTtoFlowChart:
         for cr in expr_cursors:
             self.check_cursor_error(cr)
             if cr.location.offset < semi_offset[0]:
+                # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する
                 if cr.kind == ci.CursorKind.DECL_STMT:
-                    var_list = list(cr.get_children())
-                    initNodeID = self.createNode(str(len(var_list)), 'invhouse')
+                    var_cr_list = list(cr.get_children())
+                    initNodeID = self.createNode(str(len(var_cr_list)), 'invhouse')
                     varNodeID = initNodeID
                     self.createRoomSizeEstimate(varNodeID)
-                    for vcr in var_list:
-                        self.check_cursor_error(vcr)
-                        varNodeID = self.parse_var_decl(vcr, varNodeID, "")
-                # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する
+                    for var_cr in var_cr_list:
+                        self.check_cursor_error(var_cr)
+                        varNodeID = self.parse_var_decl(var_cr, varNodeID, "")
                 else:
                     initNodeID = self.get_exp(cr, shape='invhouse')
                 self.createEdge(nodeID, initNodeID, edgeName)
