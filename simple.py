@@ -2644,7 +2644,9 @@ class Window:
 class ScrollableWindow(Window):
     STRING_COLOR = Color(255, 255, 255, 255)
     TITLE_COLOR = Color(100, 248, 248, 255)
+    SLIDER_KNOB_COLOR = Color(128,128,128,255)
     TITLE_FONT_SIZE = 20
+    KNOB_SIZE = 8
     
     def __init__(self, rect: pygame.Rect, font_size: int):
         Window.__init__(self, rect)
@@ -2665,7 +2667,7 @@ class ScrollableWindow(Window):
         self.local_bottom_edge_y = max(self.local_bottom_edge_y, y+rect.height+4)
     
     # スクロールウィンドウの共通部分を描画する
-    def draw_base(self, title: str):
+    def draw_base(self, title:str, maxHeight:int|None=None, maxWidth: int|None=None):
         # まずはタイトル
         self.font.size = self.TITLE_FONT_SIZE
         surf, _ = self.font.render(title, self.TITLE_COLOR)
@@ -2679,14 +2681,23 @@ class ScrollableWindow(Window):
         if self.offset_x < 10:
             surf, _ = self.font.render('◀', self.STRING_COLOR)
             self.surface.blit(surf, (10, self.height-16))
+        if self.rect[2] - self.local_right_edge_x < self.offset_x < 10:
+            pygame.draw.circle(self.surface, self.SLIDER_KNOB_COLOR,
+                            (self.font_size + (self.width-self.font_size*3) * (10 - self.offset_x) / -(self.width - (maxWidth or self.local_right_edge_x)), self.height-self.font_size), 
+                                self.KNOB_SIZE)
+
         if self.offset_y + self.local_bottom_edge_y > self.rect[3]:
             surf, _ = self.font.render('▼', self.STRING_COLOR)
             self.surface.blit(surf, (self.width-16, self.height-16))
         if self.offset_y < 10:
             surf, _ = self.font.render('▲', self.STRING_COLOR)
             self.surface.blit(surf, (self.width-16, 10))
+        if self.rect[3] - self.local_bottom_edge_y < self.offset_y < 10:
+            pygame.draw.circle(self.surface, self.SLIDER_KNOB_COLOR,
+                            (self.width-self.font_size, self.font_size + (self.height-self.font_size*3) * (10 - self.offset_y) / -(self.height - (maxHeight or self.local_bottom_edge_y))), 
+                                self.KNOB_SIZE)
 
-        return 10 + self.TITLE_FONT_SIZE + 4
+        
 
 #                                                                                                                      
 # 88888888ba,   88                  I8,        8        ,8I 88                      88                                 
@@ -3550,9 +3561,6 @@ class ItemWindow(ScrollableWindow):
         x = 0
         y = self.TITLE_FONT_SIZE + 4
 
-        # ウィンドウ名表示
-        self.draw_base("ITEM" if ISENGLISH else "アイテム")
-
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = True
@@ -3666,6 +3674,9 @@ class ItemWindow(ScrollableWindow):
 
         if self.is_inAction:
             self.is_inAction = False
+
+        # ウィンドウ名表示
+        self.draw_base("ITEM" if ISENGLISH else "アイテム")
 
         self.file_window.draw(screen)
         ScrollableWindow.blit(self, screen)
@@ -5200,7 +5211,6 @@ class ControllerGuideWindow(ScrollableWindow):
         ScrollableWindow.draw(self)
         x = 0
         y = self.TITLE_FONT_SIZE + 4
-        self.draw_base("INSTRUCTION" if ISENGLISH else "操作")
 
         if self.cmndwnd.is_visible:
             self.draw_string(x, y, "escape:")
@@ -5247,6 +5257,7 @@ class ControllerGuideWindow(ScrollableWindow):
             self.draw_string(x, y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを開く")
             y += self.FONT_SIZE + 4
         
+        self.draw_base("INSTRUCTION" if ISENGLISH else "操作")
         ScrollableWindow.blit(self, screen)
 
     def isCursorInWindow(self, pos : tuple[int, int]):
@@ -5284,8 +5295,6 @@ class LogWindow(ScrollableWindow):
         x = 0
         y = self.TITLE_FONT_SIZE + 4
 
-        self.draw_base("LOG" if ISENGLISH else "ログ")
-
         if isTutorial and PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict:
             self.draw_string(x, y, "MISSION" if ISENGLISH else "ミッション", self.MISSION_LABEL_COLOR)
             y += self.FONT_SIZE + 4
@@ -5307,6 +5316,7 @@ class LogWindow(ScrollableWindow):
                 y += self.FONT_SIZE + 4
             y += self.FONT_SIZE + 4
 
+        self.draw_base("LOG" if ISENGLISH else "ログ")
         ScrollableWindow.blit(self, screen)
 
     def isCursorInWindow(self, pos : tuple[int, int]):
@@ -5470,7 +5480,7 @@ class ProgramCodeWindow(ScrollableWindow):
         self.linenum = linenum
         # 行数が更新されたら、scrollYを更新する
         if self.is_auto_scroll:
-            self.scrollY = max(min(self.linenum, len(self.lines)-13)-12, 0) * (self.FONT_SIZE + 4)
+            self.update_displayed_area(self.linenum)
         
     def draw(self, screen):
         if not self.is_visible:
@@ -5483,8 +5493,6 @@ class ProgramCodeWindow(ScrollableWindow):
         # コード表示の左端の行数の桁揃えのために、最終行の桁数を取得する
         # 最終行が120の場合、一度'120'に変換して、その文字数をカウントすることで桁数である3を取得できる
         digit_line = len(str(len(self.lines)))
-        
-        self.draw_base("CODE" if ISENGLISH else "ソースコード")
 
         for i, line in enumerate(self.lines):
             if self.offset_y + y < 34:
@@ -5520,6 +5528,8 @@ class ProgramCodeWindow(ScrollableWindow):
             label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
             self.surface.blit(label_surf, label_rect)
         
+        self.draw_base("CODE" if ISENGLISH else "ソースコード", maxHeight=self.maxY)
+
         ScrollableWindow.blit(self, screen)
     
     def isCursorInWindow(self, pos : tuple[int, int]):
