@@ -1,2 +1,4 @@
-start,102_functions_condition,31, 59
-end, 102_functions_condition,36, 58
+start,101_variables_expression,6, 52
+itemget, 101_variables_expression,10, 55,day
+itemget, 101_variables_expression,5, 49,base_temp
+end, 101_variables_expression,5, 49

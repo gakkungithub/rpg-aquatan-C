@@ -295,7 +295,7 @@ def main():
         SMANAGER.stop_bgm()
         SMANAGER.play_se("stage_entry")
         # サーバを立てる
-        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor.py", "--name", programpath, "--lines", "", "--events", ""]
+        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath, "--lines", "", "--events", ""]
         if ISENGLISH:
             c_backdoor_code.append("--english")
         server = subprocess.Popen(c_backdoor_code, cwd="debugger-C", env=env)
@@ -529,7 +529,7 @@ def main():
             LIGHTWND.draw(offset)
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
-            CTRLGWND.draw(screen, MSGWND.selectMsgText is not None)
+            CTRLGWND.draw(screen, bool(MSGWND.selectMsgText))
             LOGWND.draw(screen, fieldmap.name in ("tutorial", "tutorial_en"))
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
@@ -808,7 +808,7 @@ def main():
                     PAUSEWND.show()
                 
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
-                    if MSGWND.selectMsgText is not None:
+                    if bool(MSGWND.selectMsgText):
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
 
                 if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
@@ -2014,7 +2014,7 @@ class Player(Character):
                     self.vx, self.vy = 0, -8
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
-            elif direction is None and MSGWND.selectMsgText is None:
+            elif direction is None and not MSGWND.selectMsgText:
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent) or isinstance(event, Treasure):
@@ -2305,13 +2305,13 @@ class Player(Character):
                                 item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
 
                                 # 変数の値を更新する
-                                for item_value_changed in charaExpressionResult["values"]:
-                                    varname = item_value_changed["item"]["name"]
-                                    line = item_value_changed["item"]["line"]
+                                for item_w_value_changed in charaExpressionResult["vars_w_value_changed"]:
+                                    varname = item_w_value_changed["item"]["name"]
+                                    line = item_w_value_changed["item"]["line"]
                                     if (varname, line) in item_info_dict:
-                                        item_info_dict[(varname, line)].append(item_value_changed["path"])
+                                        item_info_dict[(varname, line)].append(item_w_value_changed["path"])
                                     else:
-                                        item_info_dict[(varname, line)] = [item_value_changed["path"]]
+                                        item_info_dict[(varname, line)] = [item_w_value_changed["path"]]
 
                                 # 変数の値の更新に対するコメント(例: 「a++: aの値を1増やす」)があれば、アイテムウィンドウに白ハイライトと共に登録する
                                 for var_info in comment["vars"]:
@@ -2321,6 +2321,7 @@ class Player(Character):
                                         continue
                                     if (item := PLAYER.commonItembag.find(varname, line)) is None:
                                         item = PLAYER.itembag.find(varname, line)
+                                    # 値が更新された部分に対してコメントを追加する
                                     if item is not None:
                                         for path in path_list:
                                             item.set_comments(path, comment["comments"])
@@ -2332,6 +2333,12 @@ class Player(Character):
                                              if ISENGLISH else
                                              f"{chara.linenum}行目の計算式「{chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
+
+                                ''' 
+                                変数の値が更新されたかどうかのクイズを設定する。選択は共通して「はい」、「いいえ」のみなので、これだけ渡しておく。
+                                その上で、クイズを出す変数をMSGWNDに登録しておく。
+                                MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_change_quiz'))
+                                '''
 
                                 # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
                                 MSGWND.set(chara.message)         
@@ -2897,22 +2904,23 @@ class MessageWindow(Window):
         # max_lines_per_page # 1行の最大行数（4行目は▼用）
         self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
         self.max_chars_per_page = self.max_chars_per_line * self.max_lines_per_page  # 1ページの最大文字数
-        self.selectMsgText = None
-        self.select_type = None
+        self.selectMsgText: list[str] = []
+        self.select_type: str = ""
         self.selectingIndex = 0
-        self.new_std_messages = []
+        self.new_std_messages: list[str] = []
         self.file_message = ""
         self.memory_message = ""
-        self.str_messages = []
+        self.str_messages: list[str] = []
+        self.vars_for_questions: list = []
 
-    def set(self, base_message, selectMessages=None):
+    def set(self, base_message: str, selectMessages:tuple[list[str],str]|None=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
             SMANAGER.play_se("message_window")
             if selectMessages is not None:
                 PLAYER.codeElementWindow_list = []
                 self.selectMsgText, self.select_type = selectMessages
-            message_list = []
+            message_list: list[str] = []
             if len(self.new_std_messages):
                 message_list.append("\n".join(["Output:" if ISENGLISH else "コンソール出力:"] + self.new_std_messages))
                 self.new_std_messages = []
@@ -3233,6 +3241,8 @@ class MessageWindow(Window):
                     PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type == 'var_change_quiz':
+                pass
             elif self.select_type == 'rollback':
                 self.sender.programCodeWindow.scrollY = 0
                 self.sender.programCodeWindow.scrollX = 0
@@ -3319,8 +3329,8 @@ class MessageWindow(Window):
             elif self.select_type == 'finished':
                 PLAYER.game_status = "goaled"
             
-            self.selectMsgText = None
-            self.select_type = None
+            self.selectMsgText = []
+            self.select_type = ""
             self.selectingIndex = 0
             return
 
@@ -3566,6 +3576,7 @@ class ItemWindow(ScrollableWindow):
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = True
+            # 値が変化している変数に対しては白ハイライトをつける
             if item.itemvalue.declared_comments is not None:
                 self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
             elif item.index_comments is not None:
@@ -4681,9 +4692,9 @@ class Object:
 #
 
 class Item:
-    """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
+    """アイテム (配列や構造体、ポインタにも対応している)"""
     def __init__(self, name: str, line: int, data: dict, comments: dict, vartype: dict):
-        self.name = str(name)
+        self.name = name
         self.line = line
         self.index_comments = comments.get('indexes', None)
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
@@ -5669,14 +5680,16 @@ class EventSender:
                 if "removed" in msg:
                     for item in msg["removed"]:
                         PLAYER.itembag.remove(item["name"], item["line"])
-                if "values" in msg:
+                if "vars_w_value_changed" in msg:
                     PLAYER.remove_itemvalue()
-                    for itemvalues in msg["values"]:
+                    for itemvalues in msg["vars_w_value_changed"]:
                         item = PLAYER.commonItembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                         if item is None:
                             item = PLAYER.itembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                         if item:
                             item.set_value(itemvalues)
+                if "vars_w_value_unchanged" in msg:
+                    print(msg["vars_w_value_unchanged"])
                 if "str" in msg:
                     for str_info in msg["str"]:
                         if str_info['value'] is None or str_info['copyFrom'] == str_info['value']:
