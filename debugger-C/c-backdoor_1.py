@@ -230,7 +230,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     print(f"{indent}{full_name} = {value}")
                     self.vars_unchanged_count += 1
 
-                    if (name, line) in self.vars_declared[-1]:
+                    if (vars_path[0], line) in self.vars_declared[-1]:
                         item = ((vars_path[0], line), (*vars_path[1:], name))
 
                         if len(self.vars_unchanged) < 3:
@@ -778,7 +778,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         def get_vars_w_value_unchanged(self) -> list[dict]:
             value_unchanged_dict_list = []
             for value_unchanged in self.vars_tracker.vars_unchanged:
-                value_unchanged_dict_list.append({"item": {"name": value_unchanged[0][0], "line": value_unchanged[1]}, "path": value_unchanged[1]})
+                value_unchanged_dict_list.append({"item": {"name": value_unchanged[0][0], "line": value_unchanged[0][1]}, "path": value_unchanged[1]})
             return value_unchanged_dict_list
         
         def vars_checker(self, isForFalse: bool = False) -> None:
