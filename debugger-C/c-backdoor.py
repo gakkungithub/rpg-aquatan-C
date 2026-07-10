@@ -10,6 +10,7 @@ import json
 import tempfile
 from collections import Counter
 import re
+import random
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +44,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
             self.global_previous_values: dict[tuple[str, int], VarPreviousValue] = {}
             self.vars_changed: dict[tuple[str, int], list[tuple[str, ...]]] = {}
+            self.vars_unchanged: list[tuple[tuple[str, int], tuple[str, ...]]] = []
+            self.vars_unchanged_count = 0
             self.vars_declared: list[list[tuple[str, int]]] = []
             self.vars_removed: set[tuple[str, int]] = set()
             self.frames: list[str] = ['start']
@@ -73,6 +76,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 gvars.append(var)
 
             self.vars_changed = {}
+            self.vars_unchanged = []
+            self.vars_unchanged_count = 0
             self.track_var(gvars, self.global_previous_values, isLocal=False)
             self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
 
@@ -93,6 +98,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.vars_changed[(name,line)] = [()]
                 else:
                     print(f"{full_name} = {value}")
+                    self.vars_unchanged_count += 1
+
+                    if (name, line) in self.vars_declared[-1]:
+                        item = ((name, line), tuple())
+
+                        if len(self.vars_unchanged) < 3:
+                            self.vars_unchanged.append(item)
+                        else:
+                            r = random.randint(0, self.vars_unchanged_count - 1)
+
+                            if r < 3:
+                                self.vars_unchanged[r] = item
 
                 if isLocal:
                     crnt_vars.append((name, line))
@@ -211,6 +228,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.vars_changed[(vars_path[0], line)] = [(*vars_path[1:], name)]
                 else:
                     print(f"{indent}{full_name} = {value}")
+                    self.vars_unchanged_count += 1
+
+                    if (vars_path[0], line) in self.vars_declared[-1]:
+                        item = ((vars_path[0], line), (*vars_path[1:], name))
+
+                        if len(self.vars_unchanged) < 3:
+                            self.vars_unchanged.append(item)
+                        else:
+                            r = random.randint(0, self.vars_unchanged_count - 1)
+
+                            if r < 3:
+                                self.vars_unchanged[r] = item
 
                 if name in var_previous_values:
                     var_previous_values[name].update_value(value, address)
@@ -720,6 +749,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             
             frame_num = thread.GetNumFrames()
             
+            # これで取得できるのは、16進数アドレスを10進数に変換したもの
+            # print(frame.FindVariable("p").GetValueAsUnsigned())
+            
             print(f"{func_name} at {file_name}:{line_number}")
 
             return state, frame, file_name, line_number, func_name, frame_num
@@ -736,14 +768,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 err_chunk = "/".join(err_chunk.rstrip("\n").split("\n"))
                 self.std_messages.append(f". [stderr]: {err_chunk}")
 
-        def get_new_values(self, values_changed: list[tuple[str, int]]) -> list[dict]:
+        def get_vars_w_value_changed(self, values_changed: list[tuple[str, int]]) -> list[dict]:
             value_changed_dict_list = []
             for value_changed in values_changed:
                 for value_changed_tuple in self.vars_tracker.vars_changed[value_changed]:
                     value_path = [*value_changed_tuple]
                     value = self.vars_tracker.getValuePartly(value_changed, value_path.copy())
                     value_changed_dict_list.append({"item": {"name": value_changed[0], "line": value_changed[1]}, "path": value_path, "value": value})
+
             return value_changed_dict_list
+        
+        def get_vars_w_value_unchanged(self) -> list[dict]:
+            value_unchanged_dict_list = []
+            for value_unchanged in self.vars_tracker.vars_unchanged:
+                value_unchanged_dict_list.append({"item": {"name": value_unchanged[0][0], "line": value_unchanged[0][1]}, "path": value_unchanged[1]})
+            return value_unchanged_dict_list
         
         def vars_checker(self, isForFalse: bool = False) -> None:
             if self.isEnd:
@@ -822,8 +861,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     for varname in self.vars_tracker.vars_changed.keys():
                                         if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines:
                                             values_changed.append(varname)
-                                    # その後、varsChangedをキーとしてvars_changedの変更値を取得する
-                                    value_changed_dict = self.get_new_values(values_changed)
+                                    # # その後、varsChangedをキーとしてvars_changedの変更値を取得する
+                                    # value_changed_dict = self.get_vars_w_value_changed(values_changed)
                                     # 変数が初期化されない時、スキップされるので、それも読み取る
                                     vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
 
@@ -837,7 +876,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             if (var, int(line)) not in vars_declared
                                         }
                                     ]
-                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "values": value_changed_dict, "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
+                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "vars_w_value_changed": self.get_vars_w_value_changed(values_changed), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:
@@ -981,7 +1020,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             for line in self.varsDeclLines_list
                             if self.line_number < int(line) < self.next_line_number
                         ]
-                    self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                    self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
                     self.vars_tracker.trackStart(self.frame)
                     self.vars_checker(condition_type == 'forFalse')
                     if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
@@ -1387,13 +1426,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": "", "status": "ok", "type": "doWhile"}, False)
                                 # なお、ループの始まりの行を管理するself.line_loopへの登録はdo-while-initの時にやっているのでここでは行わない
                         elif type == 'forIn':
-                            values = self.get_new_values(self.vars_tracker.vars_changed.keys())
                             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
                                 skipStart = self.line_number
                                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
                                 if skipStart <= self.next_line_number <= skipEnd:
                                     # ここでスキップするかどうかを確認する
-                                    self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "values": values, "line": self.line_number}, False)
+                                    self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "line": self.line_number}, False)
                                     event = self.event_reciever()
                                     if event.get('skip', False):
                                         line_list: list[int] = [skipStart]
@@ -1412,14 +1450,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                                     self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng"}, False)
                                                 if fromTo == [*line_list[-2:], self.next_line_number]:
                                                     skipped_func = []
-                                                    self.event_sender({"message": "", "status": "ok", "type": "for", "skippedFunc": skipped_func, "values": self.get_new_values(list(self.vars_tracker.vars_changed.keys()))})
+                                                    self.event_sender({"message": "", "status": "ok", "type": "for", "skippedFunc": skipped_func, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
                                                     break
                                     else:
-                                        self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "for", "values": values}, False)
+                                        self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()}, False)
                                 else:
-                                    self.event_sender({"message": "", "status": "ok", "type": "for", "values": values})
+                                    self.event_sender({"message": "", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
                             else:
-                                self.event_sender({"message": "", "status": "ok", "type": "for", "values": values}, False)
+                                self.event_sender({"message": "", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()}, False)
                                 self.line_loop.append(self.line_number)
                         elif type == 'switchMiddleCase':
                             self.event_sender({"message": "", "status": "ok"}, False)

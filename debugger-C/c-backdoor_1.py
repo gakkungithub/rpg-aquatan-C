@@ -14,7 +14,7 @@ import random
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/mapdata'
+DATA_DIR = BASE_DIR + "/mapdata_for_test"
 CONTINUE = 1
 PROGRESS = 0
 
@@ -49,6 +49,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_declared: list[list[tuple[str, int]]] = []
             self.vars_removed: set[tuple[str, int]] = set()
             self.frames: list[str] = ['start']
+            self.var_exprs_by_line: dict[str, list[list[dict[str,any]]]] = {}
             self.track_var(gvars, self.global_previous_values, isLocal=False)
         
         def trackStart(self, frame: lldb.SBFrame):
@@ -78,6 +79,49 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_changed = {}
             self.vars_unchanged = []
             self.vars_unchanged_count = 0
+
+            # ここで次の計算式で参照される変数の値を取得する
+            line_entry: lldb.SBLineEntry = frame.GetLineEntry()
+            line_number = str(line_entry.GetLine())
+            if line_number in self.var_exprs_by_line:
+                expr_results_by_line: dict[str, list[dict[int, any]]] = {}
+                for expr_list in self.var_exprs_by_line[line_number]:
+                    # [ {"id": 1, "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]} ]
+                    expr_result_by_id: dict[int, any] = {}
+                    expr_str_to_show_by_id: dict[int, str] = {}
+                    for middle_expr in expr_list:
+                        # {"id": 1, "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                        print("")
+                        expr_str_for_evaluation: list[str] = []
+                        expr_str_to_show: list[str] = []
+                        expr_str_base: list[str] = []
+
+                        for expr_part in middle_expr["expr"]: # "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                            if "reference" in expr_part:
+                                expr_str_for_evaluation.append(expr_part["reference"])
+                                expr_str_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
+                                expr_str_base.append(expr_part["reference"])
+                            elif "text" in expr_part:
+                                expr_str_for_evaluation.append(expr_part["text"])
+                                expr_str_to_show.append(expr_part["text"])
+                                expr_str_base.append(expr_part["text"])
+                            else: # expr_idなら、計算式の結果を動的に代入する
+                                expr_str_for_evaluation.append(expr_result_by_id[expr_part["expr_id"]])
+                                expr_str_to_show.append(f"<{expr_str_to_show_by_id[expr_part["expr_id"]]}>(={expr_result_by_id[expr_part["expr_id"]]})")
+                                expr_str_base.append(expr_str_to_show_by_id[expr_part["expr_id"]])
+
+                        print("expression:", " ".join(expr_str_for_evaluation))
+                        print("expression_w_values:", " ".join(expr_str_to_show))
+                        expr_result_by_id[middle_expr["id"]] = frame.EvaluateExpression(" ".join(expr_str_for_evaluation)).GetValue()
+                        expr_str_to_show_by_id[middle_expr["id"]] = " ".join(expr_str_base)
+
+                    if line_number in expr_results_by_line:
+                        expr_results_by_line[line_number].append(expr_result_by_id)
+                    else:
+                        expr_results_by_line[line_number] = [expr_result_by_id]
+
+                print("results:", expr_results_by_line)
+                        
             self.track_var(gvars, self.global_previous_values, isLocal=False)
             self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
 
@@ -444,8 +488,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.get_std_outputs()
                     self.event_sender({"message": "The first step" if self.is_english else "最初の処理", "line": self.line_data[self.func_name]["start"], "items": self.vars_tracker.getGlobalValueAll(), "firstFunc": self.func_name, "status": "ok"}, False)
                     self.line_number: int = self.line_data[self.func_name]["start"] - 1
-                with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_varDeclLines.json", 'r') as f:
-                    self.varsDeclLines_list: dict[str, list[str]] = json.load(f)
+                with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_variables.json", 'r') as f:
+                    variables_info: dict[str, dict] = json.load(f)
+                    self.variable_dclarations_by_line: dict[str, list[str]] = variables_info["declaration"]
+                    self.vars_tracker.var_exprs_by_line = variables_info["expr"]
             else:
                 self.event_sender({"end": True, "status": "ok"}, False)
                 self.isEnd = True
@@ -545,7 +591,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             while len(self.skipped_lines):
                 line = self.skipped_lines.pop(0)
-                skipped_varDecls = list([(var, int(line)) for var in self.varsDeclLines_list[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
+                skipped_varDecls = list([(var, int(line)) for var in self.variable_dclarations_by_line[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
                 if len(skipped_varDecls) == 0:
                     continue
                 vars_event: list[tuple[str, int]] = []
@@ -573,6 +619,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.event_sender({"message": item_message, "status": "ng"})
                         else:
                             vars_event.append(itemname)
+
                             if Counter(vars_event) == Counter(skipped_varDecls):
                                 self.vars_tracker.setVarsDeclared(itemname)
                                 if self.is_english:
@@ -664,6 +711,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 self.func_name = self.func_crnt_name
                 self.frame_num = self.next_frame_num
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
+                
                 if var_check:
                     self.vars_tracker.trackStart(self.frame)
                 
@@ -683,6 +731,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 message += "\f" + incomplete_message
                         self.event_sender({"message": message, "status": "ok", "items": self.vars_tracker.getValueAll()}, False)
                 
+                # fopen, fclose
                 if str(self.line_number) in self.line_data[self.func_name]["file"] and (self.frame_num, self.line_number) not in self.file_check_num:
                     self.file_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["file"][str(self.line_number)], -1)
 
@@ -697,6 +746,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if len(self.file_check_num[(self.frame_num, self.line_number)][0]) == 0:
                             self.file_check_num.pop((self.frame_num, self.line_number))
 
+                # malloc, realloc, free
                 if str(self.line_number) in self.line_data[self.func_name]["memory"] and (self.frame_num, self.line_number) not in self.memory_check_num:
                     self.memory_check_num[(self.frame_num, self.line_number)] = (self.line_data[self.func_name]["memory"][str(self.line_number)], -1)
 
@@ -737,10 +787,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         def get_next_state(self) -> tuple[int, lldb.SBFrame, str, int, str, int] | None:
             state = self.process.GetState()
 
-            frame = thread.GetFrameAtIndex(0)
+            frame: lldb.SBFrame = thread.GetFrameAtIndex(0)
 
-            line_entry = frame.GetLineEntry()
-            file_name = line_entry.GetFileSpec().GetFilename()
+            line_entry: lldb.SBLineEntry = frame.GetLineEntry()
+            file_spec: lldb.SBFileSpec = line_entry.GetFileSpec()
+            file_name = file_spec.GetFilename()
             line_number = line_entry.GetLine()
             func_name = frame.GetFunctionName()
 
@@ -748,6 +799,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 return None
             
             frame_num = thread.GetNumFrames()
+            
+            # これで取得できるのは、16進数アドレスを10進数に変換したもの
+            # print(frame.FindVariable("p").GetValueAsUnsigned())
             
             print(f"{func_name} at {file_name}:{line_number}")
 
@@ -786,8 +840,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 return
             
             # これだとスコープ外の変数を拾ってしまうことがある
-            # for文の条件文内の宣言だとfalseの時にself.varsDeclLines_list.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
-            varsDeclLines = [] if isForFalse else [(var, self.line_number) for var in self.varsDeclLines_list.get(str(self.line_number), []) if (var, self.line_number) not in self.vars_tracker.vars_declared[-1]]
+            # for文の条件文内の宣言だとfalseの時にself.variable_dclarations_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
+            varsDeclLines = [] if isForFalse else [(var, self.line_number) for var in self.variable_dclarations_by_line.get(str(self.line_number), []) if (var, self.line_number) not in self.vars_tracker.vars_declared[-1]]
 
             varsDeclLines_copy = varsDeclLines[:]
 
@@ -865,11 +919,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                                     self.skipped_lines = [
                                         line
-                                        for line in self.varsDeclLines_list
+                                        for line in self.variable_dclarations_by_line
                                         if (self.line_number < int(line) < self.next_line_number)
                                         and {
                                             (var, int(line))
-                                            for var in self.varsDeclLines_list[line]
+                                            for var in self.variable_dclarations_by_line[line]
                                             if (var, int(line)) not in vars_declared
                                         }
                                     ]
@@ -904,8 +958,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             self.func_checked.append([self.func_crnt_name])
                                             back_line_number = self.line_number
                                             back_frame_num = self.frame_num
-                                            # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
-                                            self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
+                                            # self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
+                                            self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
                                             while 1:
                                                 if self.analyze_frame(back_line_number):
                                                     continue
@@ -955,11 +1009,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                         self.skipped_lines = [
                             line
-                            for line in self.varsDeclLines_list
+                            for line in self.variable_dclarations_by_line
                             if (self.line_number < int(line) < self.next_line_number)
                             and {
                                 (var, int(line))
-                                for var in self.varsDeclLines_list[line]
+                                for var in self.variable_dclarations_by_line[line]
                                 if (var, int(line)) not in vars_declared
                             }
                         ]
@@ -1014,7 +1068,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if condition_type in ("whileFalse", "doWhileFalse", "forFalse"):
                         self.skipped_lines = [
                             line
-                            for line in self.varsDeclLines_list
+                            for line in self.variable_dclarations_by_line
                             if self.line_number < int(line) < self.next_line_number
                         ]
                     self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
@@ -1066,15 +1120,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
                                 self.skipped_lines = [
                                     line
-                                    for line in self.varsDeclLines_list
+                                    for line in self.variable_dclarations_by_line
                                     if (int(line) < self.next_line_number)
                                     and {
                                         (var, int(line))
-                                        for var in self.varsDeclLines_list[line]
+                                        for var in self.variable_dclarations_by_line[line]
                                         if (var, int(line)) not in vars_declared
                                     }
                                 ]
-                                # self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
+                                # self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
                                 self.step_conditionally()
 
                                 # 遷移先の関数に変数宣言がある場合のために変数確認する
@@ -1231,7 +1285,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 back_line_number = self.line_number
                                 back_frame_num = self.frame_num
 
-                                self.skipped_lines = [line for line in self.varsDeclLines_list if int(line) < self.next_line_number]
+                                self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
                                 self.step_conditionally()
                                 # 遷移先の関数に変数宣言がある場合のために変数確認する
                                 self.vars_checker()
@@ -1564,16 +1618,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         try:
             # region lldbの初期設定
             lldb.SBDebugger.Initialize()
-            debugger = lldb.SBDebugger.Create()
+            debugger: lldb.SBDebugger = lldb.SBDebugger.Create()
             debugger.SetAsync(False)
 
-            target = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
+            target: lldb.SBTarget = debugger.CreateTargetWithFileAndArch(args.name, lldb.LLDB_ARCH_DEFAULT)
             if not target:
                 print("failed in build of target")
                 exit(-1)
 
             # breakpointを行で指定するならByLocation
-            breakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
+            breakpoint: lldb.SBBreakpoint = target.BreakpointCreateByName("main", target.GetExecutable().GetFilename())
 
             launch_info = lldb.SBLaunchInfo([])
             launch_info.SetWorkingDirectory(os.getcwd())
@@ -1586,7 +1640,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             launch_info.AddOpenFileAction(2, stderr_file.name, True, True)  # fd=2 → stderr
 
             error = lldb.SBError()
-            process = target.Launch(launch_info, error)
+            process: lldb.SBProcess = target.Launch(launch_info, error)
 
             # 読み取り用にlogファイルを常にopenしておく
             stdout_r = open(stdout_file.name, "r")
@@ -1596,7 +1650,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 print("failed in operation")
                 exit(-1)
 
-            thread = process.GetThreadAtIndex(0)
+            thread: lldb.SBThread = process.GetThreadAtIndex(0)
             if not thread.IsValid():
                 print("no valid thread found")
                 exit(-1)

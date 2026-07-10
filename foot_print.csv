@@ -1,9 +1,5 @@
-start,101_variables_expression,40, 56
-itemget, 101_variables_expression,39, 54,day
-itemget, 101_variables_expression,49, 50,base_temp
-itemget, 101_variables_expression,42, 45,humidity
-itemget, 101_variables_expression,34, 44,pressure
-itemget, 101_variables_expression,25, 38,weather_code
-itemget, 101_variables_expression,22, 31,temp_variation
-itemget, 101_variables_expression,9, 26,temperature
-end, 101_variables_expression,4, 18
+start,101_variables_expression,35, 15
+itemget, 101_variables_expression,36, 21,day
+itemget, 101_variables_expression,27, 10,gap
+itemget, 101_variables_expression,15, 9,weather_code
+end, 101_variables_expression,15, 9

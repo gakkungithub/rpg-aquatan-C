@@ -529,7 +529,7 @@ def main():
             LIGHTWND.draw(offset)
             MSGWND.draw(screen)
             STATUSWND.draw(screen)
-            CTRLGWND.draw(screen, MSGWND.selectMsgText is not None)
+            CTRLGWND.draw(screen, bool(MSGWND.selectMsgText))
             LOGWND.draw(screen, fieldmap.name in ("tutorial", "tutorial_en"))
             ITEMWND.draw(screen)
             BTNWND.draw(screen)
@@ -808,7 +808,7 @@ def main():
                     PAUSEWND.show()
                 
                 if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
-                    if MSGWND.selectMsgText is not None:
+                    if bool(MSGWND.selectMsgText):
                         MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
 
                 if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
@@ -1666,7 +1666,7 @@ class Character:
         self.movetype = movetype  # 移動タイプ
         self.message = message  # メッセージ
         self.moveto = []
-        self.damage = ""  # ダメージ
+        self.damage_label = ""  # ダメージラベル
         self.damage_color = (255, 0, 0, 255)
         self.lim_lu = (self.x - 2, self.y - 2)
         self.lim_rd = (self.x + 2, self.y + 2)
@@ -1773,7 +1773,7 @@ class Character:
         screen.blit(self.image, (px-offset_x, py-offset_y))
         screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
                     0], (px-offset_x, py-offset_y-18))
-        screen.blit(font.render(self.damage, self.damage_color)
+        screen.blit(font.render(self.damage_label, self.damage_color)
                     [0], (px-offset_x+32, py-offset_y))
 
     def set_pos(self, x, y, direction):
@@ -1926,7 +1926,7 @@ class Player(Character):
                         self.door = None
         elif self.damage_motion:
             if self.damage_motion[0] == 0:
-                PLAYER.damage = ""
+                PLAYER.damage_label = ""
             self.rect.move_ip(self.damage_motion.pop(0), 0)
         elif self.waitingMove is not None:
             dest_map = self.waitingMove.dest_map
@@ -2014,7 +2014,7 @@ class Player(Character):
                     self.vx, self.vy = 0, -8
                     self.moving = True
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
-            elif direction is None and MSGWND.selectMsgText is None:
+            elif direction is None and not MSGWND.selectMsgText:
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent) or isinstance(event, Treasure):
@@ -2289,7 +2289,7 @@ class Player(Character):
 
                     if (comment := chara.comments.get(str(chara.linenum), None)):
                         self.sender.send_event({"type": comment["type"], "fromTo": comment["fromTo"], "funcWarp": comment["funcWarp"]})
-                        charaExpressionResult = self.sender.receive_json()
+                        charaExpressionResult: dict | None = self.sender.receive_json()
                         if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                             for skippedFunc in charaExpressionResult["skippedFunc"]:
                                 self.checkedFuncs[(mymap.name, chara.func, comment["fromTo"][0])].append((skippedFunc, None, False))
@@ -2304,26 +2304,58 @@ class Player(Character):
                             else:
                                 item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
 
-                                # 変数の値を更新する
-                                for item_value_changed in charaExpressionResult["values"]:
-                                    varname = item_value_changed["item"]["name"]
-                                    line = item_value_changed["item"]["line"]
-                                    if (varname, line) in item_info_dict:
-                                        item_info_dict[(varname, line)].append(item_value_changed["path"])
-                                    else:
-                                        item_info_dict[(varname, line)] = [item_value_changed["path"]]
+                                vars_quiz_count = 0
+                                var_quiz_list: list[tuple[tuple[str,...], bool]] = []
+
+                                # for item_w_value_changed in charaExpressionResult["vars_w_value_changed"]:
+                                #     varname = item_w_value_changed["item"]["name"]
+                                #     line = item_w_value_changed["item"]["line"]
+                                #     if (varname, line) in item_info_dict:
+                                #         item_info_dict[(varname, line)].append(item_w_value_changed["path"])
+                                #     else:
+                                #         item_info_dict[(varname, line)] = [item_w_value_changed["path"]]
+                                # for var_info in comment["vars"]:
+                                #     varname = var_info["name"]
+                                #     line = var_info["line"]
+                                #     if (path_list := item_info_dict.get((varname, line), None)) is None:
+                                #         continue
+                                #     if (item := PLAYER.commonItembag.find(varname, line)) is None:
+                                #         item = PLAYER.itembag.find(varname, line)
+                                #     # 値が更新された部分に対してコメントを追加する
+                                #     if item is not None:
+                                #         for path in path_list:
+                                #             item.set_comments(path, comment["comments"])
+                                #             vars_quiz_count += 1
+
+                                #             var_path = (varname, *path)
+                                #             if len(var_quiz_list) < 3:
+                                #                 var_quiz_list.append((var_path, True))
+                                #             else:
+                                #                 r = random.randint(0, vars_quiz_count - 1)
+
+                                #                 if r < 3:
+                                #                     var_quiz_list[r] = (var_path, True)
 
                                 # 変数の値の更新に対するコメント(例: 「a++: aの値を1増やす」)があれば、アイテムウィンドウに白ハイライトと共に登録する
-                                for var_info in comment["vars"]:
-                                    varname = var_info["name"]
-                                    line = var_info["line"]
-                                    if (path_list := item_info_dict.get((varname, line), None)) is None:
-                                        continue
+                                for item_w_value_changed in charaExpressionResult["vars_w_value_changed"]:
+                                    varname = item_w_value_changed["item"]["name"]
+                                    line = item_w_value_changed["item"]["line"]
                                     if (item := PLAYER.commonItembag.find(varname, line)) is None:
                                         item = PLAYER.itembag.find(varname, line)
+
+                                    # 値が更新された部分に対してコメントを追加する
                                     if item is not None:
-                                        for path in path_list:
-                                            item.set_comments(path, comment["comments"])
+                                        path = item_w_value_changed["path"]
+                                        item.set_comments(path, comment["comments"])
+                                        vars_quiz_count += 1
+
+                                        var_path = (varname, *path)
+                                        if len(var_quiz_list) < 3:
+                                            var_quiz_list.append((var_path, True))
+                                        else:
+                                            r = random.randint(0, vars_quiz_count - 1)
+                                            if r < 3:
+                                                var_quiz_list[r] = (var_path, True)
 
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                                     self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
@@ -2333,8 +2365,19 @@ class Player(Character):
                                              f"{chara.linenum}行目の計算式「{chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
                                 chara.linenum = None
 
-                                # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
-                                MSGWND.set(chara.message)         
+                                if len(charaExpressionResult.get("vars_w_value_unchanged", [])):
+                                    for var_w_value_unchanged in charaExpressionResult["vars_w_value_unchanged"]:
+                                        var_quiz_list.append(((var_w_value_unchanged["item"]["name"], *var_w_value_unchanged["path"]), False))
+                                    ''' 
+                                    変数の値が更新されたかどうかのクイズを設定する。選択は共通して「はい」、「いいえ」のみなので、これだけ渡しておく。
+                                    その上で、クイズを出す変数をMSGWNDに登録しておく。
+                                    '''
+                                    MSGWND.var_quiz_list = random.sample(var_quiz_list, math.ceil(len(var_quiz_list)/2))
+                                    MSGWND.set("Variable QUIZ!!" if ISENGLISH else "変数クイズ !!", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
+                                    
+                                else:
+                                    # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
+                                    MSGWND.set(chara.message)         
                     else:
                         self.sender.send_event({"itemsetall": True})
                         itemsetAllResult = self.sender.receive_json()
@@ -2527,6 +2570,18 @@ class Player(Character):
         if type == "item":
             self.itemNameShow = not self.itemNameShow
 
+    def damage(self, amount: int = 10):
+        SMANAGER.play_se("incorrect_action")
+        self.status["HP"] -= amount
+        self.damage_label = f"-{amount}"
+        self.damage_motion = [2,2,2,-2,-2,-2,0]
+        # if "message" in msg:
+        #     msg["message"] += "\fPLAYER took {amount} damage !!" if ISENGLISH else "\fプレイヤーに{amount}ダメージ !!"
+        if self.status["HP"] == 30:
+            SMANAGER.play_se_loop("hp_warning")
+        elif self.status["HP"] == 0:
+            SMANAGER.stop_se("hp_warning")
+        
 #                                                                                                                                                   
 # 88b           d88                                                                  88888888888                         88                         
 # 888b         d888                                                                  88                                  ""                         
@@ -2897,22 +2952,21 @@ class MessageWindow(Window):
         # max_lines_per_page # 1行の最大行数（4行目は▼用）
         self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
         self.max_chars_per_page = self.max_chars_per_line * self.max_lines_per_page  # 1ページの最大文字数
-        self.selectMsgText = None
-        self.select_type = None
+        self.selectMsgText: list[str] = []
+        self.select_type: str = ""
         self.selectingIndex = 0
-        self.new_std_messages = []
+        self.new_std_messages: list[str] = []
         self.file_message = ""
         self.memory_message = ""
-        self.str_messages = []
+        self.str_messages: list[str] = []
+        self.var_quiz_list: list[tuple[tuple[str,...], bool]] = []
+        self.var_quiz_answer = True
 
-    def set(self, base_message, selectMessages=None):
+    def set(self, base_message: str, selectMessages: tuple[list[str],str]|None=None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
             SMANAGER.play_se("message_window")
-            if selectMessages is not None:
-                PLAYER.codeElementWindow_list = []
-                self.selectMsgText, self.select_type = selectMessages
-            message_list = []
+            message_list: list[str] = []
             if len(self.new_std_messages):
                 message_list.append("\n".join(["Output:" if ISENGLISH else "コンソール出力:"] + self.new_std_messages))
                 self.new_std_messages = []
@@ -2927,6 +2981,19 @@ class MessageWindow(Window):
             if len(self.memory_message):
                 message_list.append(self.memory_message)
                 self.memory_message = ""
+            if selectMessages is not None:
+                PLAYER.codeElementWindow_list = []
+                self.selectMsgText, self.select_type = selectMessages
+                if self.select_type == "var_quiz":
+                    var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
+                    varname = var_path[0]
+                    for var_path_element in var_path[1:]:
+                        if var_path_element[0] in ('[', '*'):
+                            varname += var_path_element
+                        else:
+                            varname += '.' + var_path_element
+                    message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
+
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -3233,6 +3300,32 @@ class MessageWindow(Window):
                     PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
                     fieldmap.add_chara(PLAYER)  # マップに再登録
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type == 'var_quiz':
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    # クイズの答えが「はい」(「Yes」)なら「正解」メッセージを出す
+                    if self.var_quiz_answer:
+                        message = "CORRECT !!\nIts value has changed !!" if ISENGLISH else "正解です!!\n値は変わってます !!"
+                    # クイズの答えが「いいえ」(「No」)なら「誤答」メッセージを出してプレイヤーにダメージを与える
+                    else:
+                        message = "INCORRECT...\nIts value has changed !!" if ISENGLISH else "不正解です...\n値は変わってません !!"
+                        PLAYER.damage()
+                else:
+                    # クイズの答えが「はい」なら「誤答」メッセージを出してプレイヤーにダメージを与える
+                    if self.var_quiz_answer:
+                        message = "INCORRECT...\nIts value has not changed !!" if ISENGLISH else "不正解です...\n値は変わってます !!"
+                        PLAYER.damage()
+                    # クイズの答えが「いいえ」なら「正解」メッセージを出す
+                    else:
+                        message = "CORRECT !!\nIts value has not changed !!" if ISENGLISH else "正解です!!\n値は変わってませせん !!"
+                # 次の問題があるならさらに追加する
+                if len(self.var_quiz_list):
+                    message += "\fNext Question !!" if ISENGLISH else "\f次の問題です !!"
+                    self.selectingIndex = 0
+                    self.set(message, (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
+                    return
+                else:
+                    self.set(message)
+
             elif self.select_type == 'rollback':
                 self.sender.programCodeWindow.scrollY = 0
                 self.sender.programCodeWindow.scrollX = 0
@@ -3319,8 +3412,8 @@ class MessageWindow(Window):
             elif self.select_type == 'finished':
                 PLAYER.game_status = "goaled"
             
-            self.selectMsgText = None
-            self.select_type = None
+            self.selectMsgText = []
+            self.select_type = ""
             self.selectingIndex = 0
             return
 
@@ -3566,6 +3659,7 @@ class ItemWindow(ScrollableWindow):
         # グローバル変数
         for item in PLAYER.commonItembag.items[-1]:
             is_item_changed = True
+            # 値が変化している変数に対しては白ハイライトをつける
             if item.itemvalue.declared_comments is not None:
                 self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
             elif item.index_comments is not None:
@@ -3586,7 +3680,6 @@ class ItemWindow(ScrollableWindow):
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
 
             if isinstance(icon, list):
-                # (4,4),(12,4),(8,12)の順で描画
                 self.draw_icon(icon[0], icon_x+8, y+4)
                 self.draw_icon(icon[1], icon_x+4, y+12)
                 self.draw_icon(icon[2], icon_x+12, y+12)
@@ -3635,7 +3728,6 @@ class ItemWindow(ScrollableWindow):
             # 型に応じたアイコンを blit（描画）
             icon, constLock = self.itemChips.getChip(item.vartype["type"])
             if isinstance(icon, list):
-                # (4,4),(12,4),(8,12)の順で描画
                 self.draw_icon(icon[0], icon_x+8, y+4)
                 self.draw_icon(icon[1], icon_x+4, y+12)
                 self.draw_icon(icon[2], icon_x+12, y+12)
@@ -3725,7 +3817,7 @@ class ItemWindow(ScrollableWindow):
             if constLock:
                 self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
-            varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename])
+            varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename]) if valuename[0] == '[' else ''.join([*var_path, ".", valuename])
             
             self.draw_string(text_x, y+4, f"{varname:<8}", color)
             offset_name = self.font.get_rect(varname).width + text_x
@@ -3739,7 +3831,7 @@ class ItemWindow(ScrollableWindow):
             y += 24
 
             if itemvalue.is_open:
-                y = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename], itemvalue.children, y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                y = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename] if valuename[0] == '[' else [*var_path, ".", valuename], itemvalue.children, y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
 
         return y
     
@@ -4681,9 +4773,9 @@ class Object:
 #
 
 class Item:
-    """アイテム (配列や構造体、ポインタにも対応できるようにする)"""
+    """アイテム (配列や構造体、ポインタにも対応している)"""
     def __init__(self, name: str, line: int, data: dict, comments: dict, vartype: dict):
-        self.name = str(name)
+        self.name = name
         self.line = line
         self.index_comments = comments.get('indexes', None)
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
@@ -5629,16 +5721,17 @@ class EventSender:
                     except json.JSONDecodeError:
                         continue  # JSONがまだ途中なら続けて読む
                 if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
-                    SMANAGER.play_se("incorrect_action")
-                    PLAYER.status["HP"] -= 10
-                    PLAYER.damage = "-10"
-                    PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
+                    PLAYER.damage()
+                    # SMANAGER.play_se("incorrect_action")
+                    # PLAYER.status["HP"] -= 10
+                    # PLAYER.damage = "-10"
+                    # PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
                     if "message" in msg:
                         msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
-                    if PLAYER.status["HP"] == 30:
-                        SMANAGER.play_se_loop("hp_warning")
-                    elif PLAYER.status["HP"] == 0:
-                        SMANAGER.stop_se("hp_warning")
+                    # if PLAYER.status["HP"] == 30:
+                    #     SMANAGER.play_se_loop("hp_warning")
+                    # elif PLAYER.status["HP"] == 0:
+                    #     SMANAGER.stop_se("hp_warning")
                     return msg
                 if msg["status"] == "rollback":
                     self.programCodeWindow.set_rollback_mode()
@@ -5669,14 +5762,28 @@ class EventSender:
                 if "removed" in msg:
                     for item in msg["removed"]:
                         PLAYER.itembag.remove(item["name"], item["line"])
-                if "values" in msg:
+                if "vars_w_value_changed" in msg:
                     PLAYER.remove_itemvalue()
-                    for itemvalues in msg["values"]:
+                    for itemvalues in msg["vars_w_value_changed"]:
                         item = PLAYER.commonItembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                         if item is None:
                             item = PLAYER.itembag.find(itemvalues["item"]["name"], itemvalues["item"]["line"])
                         if item:
                             item.set_value(itemvalues)
+                    print("changed: ", msg["vars_w_value_changed"])
+                # if "vars_w_value_unchanged" in msg:
+
+                #     for var_w_value_unchanged in msg["vars_w_value_unchanged"]:
+                #         varname = var_w_value_unchanged["item"]["name"]
+                #         for path_element in var_w_value_unchanged["path"]:
+                #             if path_element[0] in ('[', '*'):
+                #                 varname += path_element
+                #             else:
+                #                 varname += '.' + path_element
+
+                #     # MSGWND.vars_for_questions = 
+                #     print("unchanged: ", msg["vars_w_value_unchanged"])
+
                 if "str" in msg:
                     for str_info in msg["str"]:
                         if str_info['value'] is None or str_info['copyFrom'] == str_info['value']:

@@ -1,0 +1,11 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C-4/mapdata/13_modifiers/13_modifiers'
+relocations:
+  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _countUp, symObjAddr: 0x0, symBinAddr: 0x100003EE8, symSize: 0x18 }
+  - { offsetInCU: 0x33, offset: 0x33, size: 0x8, addend: 0x0, symName: _countUp, symObjAddr: 0x0, symBinAddr: 0x100003EE8, symSize: 0x18 }
+  - { offsetInCU: 0x58, offset: 0x58, size: 0x8, addend: 0x0, symName: _countUp.count, symObjAddr: 0x680, symBinAddr: 0x100004000, symSize: 0x0 }
+  - { offsetInCU: 0x75, offset: 0x75, size: 0x8, addend: 0x0, symName: _globalCounter, symObjAddr: 0x684, symBinAddr: 0x100004004, symSize: 0x0 }
+  - { offsetInCU: 0x7E, offset: 0x7E, size: 0x8, addend: 0x0, symName: _printConstValue, symObjAddr: 0x18, symBinAddr: 0x100003F00, symSize: 0x10 }
+  - { offsetInCU: 0xA2, offset: 0xA2, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x28, symBinAddr: 0x100003F10, symSize: 0x80 }
+...

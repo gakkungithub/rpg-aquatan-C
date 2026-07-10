@@ -31,12 +31,12 @@ import pygame.freetype
 from pygame.locals import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = BASE_DIR + '/mapdata'
+DATA_DIR = BASE_DIR + "/mapdata_for_test"
 
 #FONT_NAME = "Boku2-Regular.otf"
 #FONT_NAME = "logotypejp_mp_b_1.ttf"
 #FONT_NAME = "rounded-mgenplus-1cp-bold.ttf"
-FONT_DIR = './font/'
+FONT_DIR = "./font/"
 FONT_NAME = "PixelMplus12-Bold.ttf"
 
 # fpsはデフォルト
@@ -64,7 +64,7 @@ AUTOMOVE = 1
 
 BUTTON_WINDOW = None
 BUTTON_WIDTH = 50
-PATH = 'foot_print.csv'
+PATH = "foot_print.csv"
 
 cmd = "aquatan"
 # time [ms]
@@ -281,7 +281,7 @@ def main():
 
                 # cファイルを解析してマップデータを生成する
                 # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
-                cfcode = ["python3.13", "c-flowchart.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+                cfcode = ["python3.13", "c-flowchart_1.py", "-p", stage_name, "-c", ", ".join(cfiles)]
                 if SBWND.color_support:
                     cfcode.append("-u")
                 if ISENGLISH:
@@ -303,7 +303,7 @@ def main():
 
         # region マップの初期設定
         config = ConfigParser()
-        config.read(f"mapdata/{stage_name}/{stage_name}.ini")
+        config.read(f"mapdata_for_test/{stage_name}/{stage_name}.ini")
         SCR_WIDTH = int(config.get('screen', 'width'))
         SCR_HEIGHT = int(config.get('screen', 'height'))
 
@@ -1390,7 +1390,7 @@ class Map:
     def load_json(self):
         """json形式のマップ・イベントを読み込む"""
         # ここのファイル名は後々変える -----------------------------------------------------------
-        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", self.name.lower(), self.name.lower() + ".json")
+        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", self.name.lower(), self.name.lower() + ".json")
         with codecs.open(file, "r", "utf-8") as fp:
             json_data = json.load(fp)
         self.row = json_data["row"]
@@ -2090,7 +2090,7 @@ class Player(Character):
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
             if isinstance(event, Treasure):
                 ### 宝箱を開けることの情報を送信する
-                self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp})
+                self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp, "expression": event.comments["values"]})
                 itemResult = self.sender.receive_json()
                 if itemResult is None:
                     return False
@@ -2315,10 +2315,11 @@ class Player(Character):
                                         item_info_dict[(varname, line)].append(item_w_value_changed["path"])
                                     else:
                                         item_info_dict[(varname, line)] = [item_w_value_changed["path"]]
+                                # キャラの計算式で参照されている変数のみハイライトをつける
                                 for var_info in comment["vars"]:
                                     varname = var_info["name"]
                                     line = var_info["line"]
-                                    if (path_list := item_info_dict.get((varname, line), None)) is None:
+                                    if (path_list := item_info_dict.get((varname, line))) is None:
                                         continue
                                     if (item := PLAYER.commonItembag.find(varname, line)) is None:
                                         item = PLAYER.itembag.find(varname, line)
@@ -2352,8 +2353,8 @@ class Player(Character):
                                     変数の値が更新されたかどうかのクイズを設定する。選択は共通して「はい」、「いいえ」のみなので、これだけ渡しておく。
                                     その上で、クイズを出す変数をMSGWNDに登録しておく。
                                     '''
-                                    MSGWND.var_quiz_list = var_quiz_list
-                                    MSGWND.set("Variable QUIZ!!" if ISENGLISH else "変数クイズ!!", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
+                                    MSGWND.var_quiz_list = random.sample(var_quiz_list, math.ceil(len(var_quiz_list)/2))
+                                    MSGWND.set("Variable QUIZ!!" if ISENGLISH else "変数クイズ !!", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
                                     
                                 else:
                                     # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
@@ -3284,22 +3285,22 @@ class MessageWindow(Window):
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # クイズの答えが「はい」(「Yes」)なら「正解」メッセージを出す
                     if self.var_quiz_answer:
-                        message = "CORRECT !!\nIts value has changed !!" if ISENGLISH else "正解です!!\n値は変わってます!!"
+                        message = "CORRECT !!\nIts value has changed !!" if ISENGLISH else "正解です!!\n値は変わってます !!"
                     # クイズの答えが「いいえ」(「No」)なら「誤答」メッセージを出してプレイヤーにダメージを与える
                     else:
-                        message = "INCORRECT...\nIts value has changed !!" if ISENGLISH else "不正解です...\n値は変わってます!!"
+                        message = "INCORRECT...\nIts value has changed !!" if ISENGLISH else "不正解です...\n値は変わってません !!"
                         PLAYER.damage()
                 else:
                     # クイズの答えが「はい」なら「誤答」メッセージを出してプレイヤーにダメージを与える
                     if self.var_quiz_answer:
-                        message = "INCORRECT...\nIts value has not changed !!" if ISENGLISH else "不正解です...\n値は変わってません!!"
+                        message = "INCORRECT...\nIts value has not changed !!" if ISENGLISH else "不正解です...\n値は変わってます !!"
                         PLAYER.damage()
                     # クイズの答えが「いいえ」なら「正解」メッセージを出す
                     else:
-                        message = "CORRECT !!\nIts value has not changed !!" if ISENGLISH else "正解です!!\n値は変わってません!!"
+                        message = "CORRECT !!\nIts value has not changed !!" if ISENGLISH else "正解です!!\n値は変わってませせん !!"
                 # 次の問題があるならさらに追加する
                 if len(self.var_quiz_list):
-                    message += "\fNext Question !!" if ISENGLISH else "\f次の問題です!!"
+                    message += "\fNext Question !!" if ISENGLISH else "\f次の問題です !!"
                     self.selectingIndex = 0
                     self.set(message, (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
                     return
@@ -3690,6 +3691,10 @@ class ItemWindow(ScrollableWindow):
         for item in PLAYER.itembag.items[-1]:
             is_item_changed = True
             if item.itemvalue.declared_comments is not None:
+                for comment in item.itemvalue.declared_comments:
+                    if isinstance(comment, dict):
+                        print(comment)
+
                 self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_comments], y)
             elif item.index_comments is not None:
                 self.draw_itemValueChangedRect(item.index_comments, y)
@@ -4172,10 +4177,8 @@ class Detail:
         x, y = 50, 10
         # 各行（'+'区切り）を処理
 
-        for i, line in enumerate(detail["detail"].split('+')):
-            parts = line.split('?')
-
-            for j, text in enumerate(parts):
+        for i, comment_by_line in enumerate(detail["detail"]):
+            for j, text in enumerate(comment_by_line):
                 # 通常テキストを描画
                 base_surf, _ = font.render(text, self.CYAN)
                 base_rect = base_surf.get_rect(topleft=(x, y))
@@ -4183,7 +4186,7 @@ class Detail:
                 x = base_rect.right
 
                 # 条件リンクを描画（最後以外）
-                if j < len(parts) - 1:
+                if j < len(comment_by_line) - 1:
                     cond_surf, _ = font.render(("EXP ▷" if ISENGLISH else "計算式 ▷") if detail["type"] == "exps" or (detail["type"] == "cond-in-change" and i == 1) else ("Cond ▷" if ISENGLISH else "条件 ▷"), self.HOVER_TEXT_COLOR)
                     text_rect = cond_surf.get_rect(topleft=(x+6, y))
                     outer_rect = pygame.Rect(
@@ -4197,7 +4200,7 @@ class Detail:
 
             y = base_rect.bottom + 4
             # 最後の要素でなければ「かつ」を追加して改行
-            if i < len(detail["detail"].split('+')) - 1:
+            if i < len(detail["detail"]) - 1:
                 x = 50
                 if detail["type"] == "cond-in-change":
                     continue
@@ -4326,13 +4329,13 @@ class CodeElementWindow(Window):
             # ハイライトにはパディングをつける
             highlight_width = self.font.get_rect(text).width + 4
             # 引数に関数が含まれる場合は段落をつけて関係を描画する
+            # 引数内の関数の描画位置に基づいて、現在描画しようとしている関数の描画位置を決める
             x_pos_list = []
             y_pos_list = []
-            for children in func['children']:
-                for _ in children:
-                    func_pos = func_pos_list.pop(0)
-                    x_pos_list.append(func_pos[0])
-                    y_pos_list.append(func_pos[1])
+            for _ in range(func["children"]):
+                func_pos = func_pos_list.pop(0)
+                x_pos_list.append(func_pos[0])
+                y_pos_list.append(func_pos[1])
             x_pos = max(x_pos_list) + 60 if len(x_pos_list) else offset_x
             y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else offset_y
 
@@ -4760,7 +4763,7 @@ class Item:
         self.index_comments = comments.get('indexes', None)
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_inAction = True
-        self.itemvalue: ItemValue = ItemValue.from_dict(data, comments=comments.get("values", None))
+        self.itemvalue: ItemValue = ItemValue.from_dict(data, comments=comments.get("values"))
         self.vartype: dict = vartype
 
     def get_value(self):
@@ -5533,7 +5536,7 @@ class ProgramCodeWindow(ScrollableWindow):
     def __init__(self, rect, name):
         ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
         
-        self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata", name.lower(), name.lower() + ".c")
+        self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
         self.maxY = len(self.lines) * (self.font_size + 4) + self.TITLE_FONT_SIZE + 4
         self.linenum = 1
