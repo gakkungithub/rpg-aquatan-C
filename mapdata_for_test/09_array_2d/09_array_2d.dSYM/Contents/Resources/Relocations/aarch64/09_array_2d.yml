@@ -1,9 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/gakkungt/Desktop/Developing_apps/university/graduate_experiment/rpg-aquatan-C-4/mapdata/09_array_2d/09_array_2d'
-relocations:
-  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _add, symObjAddr: 0x0, symBinAddr: 0x100003D0C, symSize: 0x20 }
-  - { offsetInCU: 0x33, offset: 0x33, size: 0x8, addend: 0x0, symName: _add, symObjAddr: 0x0, symBinAddr: 0x100003D0C, symSize: 0x20 }
-  - { offsetInCU: 0x69, offset: 0x69, size: 0x8, addend: 0x0, symName: _sub, symObjAddr: 0x20, symBinAddr: 0x100003D2C, symSize: 0x20 }
-  - { offsetInCU: 0x9F, offset: 0x9F, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x40, symBinAddr: 0x100003D4C, symSize: 0x218 }
-...
