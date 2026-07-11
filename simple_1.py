@@ -295,7 +295,7 @@ def main():
         SMANAGER.stop_bgm()
         SMANAGER.play_se("stage_entry")
         # サーバを立てる
-        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_1.py", "--name", programpath, "--lines", "", "--events", ""]
+        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_2.py", "--name", programpath, "--lines", "", "--events", ""]
         if ISENGLISH:
             c_backdoor_code.append("--english")
         server = subprocess.Popen(c_backdoor_code, cwd="debugger-C", env=env)
@@ -2089,8 +2089,8 @@ class Player(Character):
         event = mymap.get_event(self.x, self.y)
         if isinstance(event, Treasure) or isinstance(event, MoveEvent):
             if isinstance(event, Treasure):
-                ### 宝箱を開けることの情報を送信する
-                self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp, "expression": event.comments["values"]})
+                # 宝箱を開けることの情報を送信する
+                self.sender.send_event({"item": {"name": event.item, "line": event.fromTo[0]}, "fromTo": event.fromTo, "funcWarp": event.funcWarp, "values_expr_id": event.comments["values"]["id"], "indexes_expr_id": event.comments.get("indexes", {}).get("id", None)})
                 itemResult = self.sender.receive_json()
                 if itemResult is None:
                     return False
@@ -2105,11 +2105,12 @@ class Player(Character):
                         # 初期化値なしの変数でコメントを初期化する
                         if 'values' not in itemResult:
                             PLAYER.remove_itemvalue()
-                        event.open(itemResult['item']['value'], itemResult['item']['line'], event.comments)
+                            
+                        event.open(itemResult['item']['value'], itemResult['item']['line'], itemResult["expr_descriptions"])
                         item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                         self.add_log(f"Item \"{event.item}\" of {event.fromTo[0]} line was acquired" if ISENGLISH else f"{event.fromTo[0]}行目のアイテム「{event.item}」を取得")
-                        if (indexes := event.comments.get("indexes", None)):
-                            item_get_message += "\f" + "\f".join(indexes)
+                        if (indexes_comments := itemResult["expr_descriptions"]["indexes"]):
+                            item_get_message += "\f" + "\f".join(indexes_comments)
                         if itemResult.get("undefined", False):
                             item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                         if (mymap.name, event.func, event.fromTo[0]) in self.checkedFuncs:
@@ -2471,8 +2472,8 @@ class Player(Character):
                     self.move5History.append({'mapname': mapname, 'x': self.x, 'y': self.y, 'cItems': self.commonItembag.items[-1], 'items': self.itembag.items[-1], 'return':True})
                     if len(self.move5History) > 5:
                         self.move5History.pop(0)
-                    move = self.moveHistory.pop()
-                    self.itembag.items.pop()
+                    move = self.moveHistory.pop(-1)
+                    self.itembag.items.pop(-1)
                     PLAYER.remove_itemvalue()
                     self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
                     for name, item_info in returnResult["items"].items():
@@ -3151,7 +3152,7 @@ class MessageWindow(Window):
                         arg_index = 0
                         for name, argInfo in skipResult["skipTo"]["items"].items():
                             for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], event.comments["values"][func_num_checked]["args"][arg_index], itemInfo["type"])
+                                item = Item(name, int(line), itemInfo["value"], event.comments["values"]["comments"][func_num_checked]["args"][arg_index], itemInfo["type"])
                                 newItems.append(item)
                                 arg_index += 1
                         PLAYER.itembag.items.append(newItems)
@@ -4760,7 +4761,7 @@ class Item:
     def __init__(self, name: str, line: int, data: dict, comments: dict, vartype: dict):
         self.name = name
         self.line = line
-        self.index_comments = comments.get('indexes', None)
+        self.index_comments = comments.get('indexes')
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_inAction = True
         self.itemvalue: ItemValue = ItemValue.from_dict(data, comments=comments.get("values"))
@@ -5785,7 +5786,7 @@ class EventSender:
                             MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
                             ITEMWND.file_window.filename = None
                             ITEMWND.file_window.is_visible = False
-                            fname = PLAYER.address_to_fname.pop(file_info["address"])
+                            fname = PLAYER.address_to_fname.pop(file_info["address"], "")
                             ITEMWND.file_buttons.pop(fname, None)
                 if "memory" in msg:
                     for memory_info in msg["memory"]:

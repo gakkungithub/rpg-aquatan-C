@@ -11,6 +11,8 @@ import_lib.ensure_package("graphviz")
 import clang.cindex as ci
 from graphviz import Digraph
 
+from typing import TypedDict
+
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = ROOT_DIR + '/mapdata_for_test'
 
@@ -40,6 +42,17 @@ def parseIndex(c_files):
         translation_units[c_file] = tu
 
     return translation_units
+
+class ExprDescriptionPart(TypedDict, total=False):
+    # この型は、以下のうちの一つのキーを持つ
+    expr_id: int
+    text: str
+    reference: str
+
+class ExprDescription(TypedDict):
+    id: int
+    description: list[ExprDescriptionPart]
+    expr: list[ExprDescriptionPart]
 
 class FuncInfo:
     def __init__(self, nodeID: str):
@@ -85,7 +98,7 @@ class ExprInfo:
     def __init__(self):
         self.var_references: set[tuple[str, int]] = set()
         self.func_references: list[str | dict[str, any]] = []
-        self.expr_descriptions: list[dict[str, any]] = []
+        self.expr_descriptions: list[ExprDescription] = []
         self.id = 0
         # 自作関数の依存関係を適切に描画するためにカウントする必要がある
         self.custom_func_count = 0
@@ -437,7 +450,7 @@ class ASTtoFlowChart:
                 self.createRoomSizeEstimate(nextNodeID)
             nodeID = nextNodeID
             edgeName = ""
-            self.nextLines.pop()
+            self.nextLines.pop(-1)
         return nodeID
 
     # self.condition_move用で、次の行が初期化なしまたは静的変数の変数宣言であるかどうかを確かめるための関数
@@ -796,7 +809,7 @@ class ASTtoFlowChart:
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
-                                self.expr_node_info[f'"{memberNodeID}"'] = ("?", [], [], ["this is an uninitialized part" if self.is_english else "初期化されていない要素です"], cursor.location.line)
+                                self.expr_node_info[f'"{memberNodeID}"'] = ("?", [], [], [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}], cursor.location.line)
                                 self.createEdge(nodeID, memberNodeID)
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
@@ -840,7 +853,7 @@ class ASTtoFlowChart:
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
-                self.expr_node_info[f'"{nodeID}"'] = ("?", [], [], ["this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"], cursor.location.line)
+                self.expr_node_info[f'"{nodeID}"'] = ("?", [], [], [{"id": 1, "description": [{"text": "this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"}], "expr": []}], cursor.location.line)
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
@@ -940,7 +953,12 @@ class ASTtoFlowChart:
                         arr_condition_move = [*arr_condition_move, *self.expr_node_info[f'"{contentNodeID}"'][2]]
                 else:
                     contentNodeID = self.createNode(arr_content["label"], "square")
-                    self.expr_node_info[f'"{contentNodeID}"'] = (str(len(arr_content_list)), [], [], ["random value is set here" if self.is_english else "ランダムな値が設定されてます"], line)
+                    # ExprDescription
+                    # id: int
+                    # description: list[ExprDescriptionPart]
+                    # expr: list[ExprDescriptionPart]
+                    # list[ExprDescription]
+                    self.expr_node_info[f'"{contentNodeID}"'] = (str(len(arr_content_list)), [], [], [{"id": 1, "description": [{"text": "random value is set here" if self.is_english else "ランダムな値が設定されてます"}], "expr": []}], line)
                 contentNodeID_list.append(contentNodeID)
             return contentNodeID_list
 
@@ -1001,7 +1019,7 @@ class ASTtoFlowChart:
                 array_children = [self.unwrap_unexposed(cr) for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
                 if len(array_children) != 2:
                     sys.exit(-9)
-                index_list.append(list(self.parse_expr(array_children[1], expr_info).values)[0])
+                index_list.append(list(self.parse_expr(array_children[1], expr_info).values())[0])
                 if array_children[0].kind in (ci.CursorKind.DECL_REF_EXPR, ci.CursorKind.MEMBER_REF_EXPR):
                     name_spell = array_children[0].spelling
                     break
@@ -1322,8 +1340,8 @@ class ASTtoFlowChart:
                     for i, item in enumerate(arg_expr_description_list):
                         arg_description_list.extend([item, {"text": f"for #{i+1} argument,"}])
                         arg_expr_list.extend([item, {"text": ","}])
-                    arg_description_list.pop()
-                    arg_expr_list.pop()
+                    arg_description_list.pop(-1)
+                    arg_expr_list.pop(-1)
                     description = [{"text": f"execute function {ref_spell} with"}, *arg_expr_description_list]
                 else:
                     description = [{"text": f"execute function {ref_spell} with no arguments"}]
@@ -1334,8 +1352,8 @@ class ASTtoFlowChart:
                     for i, item in enumerate(arg_expr_description_list):
                         arg_description_list.extend([item, {"text": f"を{i+1}個目の実引数,"}])
                         arg_expr_list.extend([item, {"text": ","}])
-                    arg_description_list.pop()
-                    arg_expr_list.pop()
+                    arg_description_list.pop(-1)
+                    arg_expr_list.pop(-1)
                     description = [*arg_expr_description_list, {"text": f"として関数{ref_spell}を実行します"}]
                 else:
                     description = [{"text": f"引数なしで、関数{ref_spell}を実行します"}]
@@ -1741,7 +1759,7 @@ class ASTtoFlowChart:
 
         #switchのcaseのbreakノードを追加する。
         def createSwitchBreakerEdge(endNodeID):
-            switchBreaker = self.switchBreaker_list.pop()
+            switchBreaker = self.switchBreaker_list.pop(-1)
             break_list = switchBreaker["break"]
             next_line = self.get_next_line()
             for breakNodeID, line in break_list:
@@ -1999,7 +2017,7 @@ class ASTtoFlowChart:
 
     # ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
     def createEdgeForLoop(self, breakToNodeID: str, continueToNodeID: str, break_line_track: list[int], continue_line_track: list[int]):
-        loopBreaker = self.loopBreaker_list.pop()
+        loopBreaker = self.loopBreaker_list.pop(-1)
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
         next_line = self.get_next_line()

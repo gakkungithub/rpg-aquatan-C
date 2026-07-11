@@ -19,8 +19,30 @@ DATA_DIR = BASE_DIR + "/mapdata_for_test"
 CONTINUE = 1
 PROGRESS = 0
 
+class ExprDescriptionPart(TypedDict, total=False):
+    # この型は、以下のうちの一つのキーを持つ
+    expr_id: int
+    text: str
+    reference: str
+
+class ExprDescription(TypedDict):
+    id: int
+    description: list[ExprDescriptionPart]
+    expr: list[ExprDescriptionPart]
+
+type SubObjectExprComment = dict[str, list[ExprDescription] | SubObjectExprComment]
+
+class ExprComment(TypedDict, total=False):
+    values: list[ExprDescription] | SubObjectExprComment
+    indexes: list[ExprDescription]
+    expr: list[ExprDescription]
+
+type DynamicSubObjectExprComment = dict[str, DynamicSubObjectExprComment | list[str]]
+
+
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
+    # エラーハンドリング
     class ProgramFinished(Exception):
         print("プログラムが終了しました")
 
@@ -40,7 +62,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             """LLDBのSBValueから最新値を更新"""
             self.value = value
             self.address = address
-
+                                                                                                                   
+    # 8b           d8                          888888888888                             88                              
+    # `8b         d8'                               88                                  88                              
+    #  `8b       d8'                                88                                  88                              
+    #   `8b     d8' ,adPPYYba, 8b,dPPYba, ,adPPYba, 88 8b,dPPYba, ,adPPYYba,  ,adPPYba, 88   ,d8  ,adPPYba, 8b,dPPYba,  
+    #    `8b   d8'  ""     `Y8 88P'   "Y8 I8[    "" 88 88P'   "Y8 ""     `Y8 a8"     "" 88 ,a8"  a8P_____88 88P'   "Y8  
+    #     `8b d8'   ,adPPPPP88 88          `"Y8ba,  88 88         ,adPPPPP88 8b         8888[    8PP""""""" 88          
+    #      `888'    88,    ,88 88         aa    ]8I 88 88         88,    ,88 "8a,   ,aa 88`"Yba, "8b,   ,aa 88          
+    #       `8'     `"8bbdP"Y8 88         `"YbbdP"' 88 88         `"8bbdP"Y8  `"Ybbd8"' 88   `Y8a `"Ybbd8"' 88          
+                                                                                                                  
     class VarsTracker:
         def __init__(self, gvars: list[lldb.SBValue]):
             self.previous_values: list[dict[tuple[str, int], VarPreviousValue]] = []
@@ -51,8 +82,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_declared: list[list[tuple[str, int]]] = []
             self.vars_removed: set[tuple[str, int]] = set()
             self.frames: list[str] = ['start']
-            self.var_exprs_by_line: dict[str, list[list[dict[str,any]]]] = {}
-            self.expr_descriptions_by_line: dict[str, list[list[dict[int, any]]]] = {}
+            self.var_exprs_by_line: dict[str, list[ExprComment]] = {}
+            self.expr_descriptions_by_line: dict[str, list[DynamicSubObjectExprComment | list[str]]] = {}
             self.track_var(gvars, self.global_previous_values, isLocal=False)
         
         def trackStart(self, frame: lldb.SBFrame):
@@ -83,72 +114,92 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_unchanged = []
             self.vars_unchanged_count = 0
 
+            self.analyze_expr_comments(frame)
+
+            self.track_var(gvars, self.global_previous_values, isLocal=False)
+            self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
+
+        def analyze_expr_comments(self, frame: lldb.SBFrame):
             # ここで次の計算式で参照される変数の値を取得する
             line_entry: lldb.SBLineEntry = frame.GetLineEntry()
             line_number = str(line_entry.GetLine())
             if line_number in self.var_exprs_by_line:
                 self.expr_descriptions_by_line.pop(line_number, None)
                 for expr_list in self.var_exprs_by_line[line_number]:
-                    # [ {"id": 1, "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]} ]
-                    
-                    # a + b (=9) のような、途中式(middle_expr)の結果を記録する
-                    expr_result_by_id: dict[int, any] = {}
-                    # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
-                    expr_str_to_show_by_id: dict[int, str] = {}
-                    # 「aとbをかけます」のような、説明文をidごとに記録する
-                    expr_description_to_show_by_id: list[dict[str, any]] = []
-
-                    for middle_expr in expr_list:
-                        '''{
-                        "id": 1, 
-                        "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], 
-                        "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]
-                        }
-                        '''
-                        # TASK: descriptionに動的解析結果を挿入して構築できるようにする
-                        print("")
-                        expr_str_for_evaluation: list[str] = []
-                        expr_str_to_show: list[str] = []
-                        expr_description_to_show: list[str] = []
-                        expr_str_base: list[str] = []
-
-                        for expr_part in middle_expr["expr"]: # "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]}
-                            if "reference" in expr_part:
-                                expr_str_for_evaluation.append(expr_part["reference"])
-                                expr_str_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
-                                expr_str_base.append(expr_part["reference"])
-                            elif "text" in expr_part:
-                                expr_str_for_evaluation.append(expr_part["text"])
-                                expr_str_to_show.append(expr_part["text"])
-                                expr_str_base.append(expr_part["text"])
-                            else: # expr_idなら、計算式の結果を動的に代入する
-                                expr_str_for_evaluation.append(expr_result_by_id[expr_part["expr_id"]])
-                                expr_str_to_show.append(f"<{expr_str_to_show_by_id[expr_part["expr_id"]]}>(={expr_result_by_id[expr_part["expr_id"]]})")
-                                expr_str_base.append(expr_str_to_show_by_id[expr_part["expr_id"]])
-
-                        for expr_part in middle_expr["description"]: # "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
-                            if "reference" in expr_part:
-                                expr_description_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
-                            elif "text" in expr_part:
-                                expr_description_to_show.append(expr_part["text"])
-                            else: # expr_id
-                                expr_description_to_show.append(expr_result_by_id[expr_part["expr_id"]])
-
-                        print("expression:", " ".join(expr_str_for_evaluation))
-                        print("expression_w_values:", " ".join(expr_str_to_show))
-                        expr_result_by_id[middle_expr["id"]] = frame.EvaluateExpression(" ".join(expr_str_for_evaluation)).GetValue()
-                        expr_str_to_show_by_id[middle_expr["id"]] = " ".join(expr_str_base)
-                        expr_description_to_show_by_id.append({"base": " ".join(expr_str_base), "description": " ".join(expr_description_to_show)})
+                    if "values" in expr_list:
+                        # 配列や構造体の値ならSubOjectExprCommentなのでコメントに辿り着くまで再帰的に要素を取得していく
+                        # それ以外ならlist[ExprDescription]なので、ここでコメントを取得する
+                        # print(type(expr_list["values"]) is SubObjectExprComment)
+                        expr_description_to_show_by_id = self.analyze_subObject_expr_comments(expr_list["values"], frame) if isinstance(expr_list["values"], dict) else self.get_expr_comments(expr_list["values"], frame)
+                    elif "indexes" in expr_list:
+                        expr_description_to_show_by_id = self.get_expr_comments(expr_list["indexes"], frame)
+                    else: # expr
+                        expr_description_to_show_by_id = self.get_expr_comments(expr_list["expr"], frame)
 
                     if line_number in self.expr_descriptions_by_line:
                         self.expr_descriptions_by_line[line_number].append(expr_description_to_show_by_id)
                     else:
                         self.expr_descriptions_by_line[line_number] = [expr_description_to_show_by_id]
-
                 print("results:", self.expr_descriptions_by_line)
-                        
-            self.track_var(gvars, self.global_previous_values, isLocal=False)
-            self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
+
+        def analyze_subObject_expr_comments(self, subObject_expr_comment: SubObjectExprComment, frame: lldb.SBFrame):
+            dynamic_subObject_expr_comment: DynamicSubObjectExprComment = {}
+            for index, value in subObject_expr_comment.items():
+                dynamic_subObject_expr_comment[index] = self.analyze_subObject_expr_comments(value, frame) if isinstance(value, dict) else self.get_expr_comments(value, frame)
+            return dynamic_subObject_expr_comment
+
+        def get_expr_comments(self, expr_descriptions: list[ExprDescription], frame: lldb.SBFrame):
+            # [ {"id": 1, "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]} ]
+            print(expr_descriptions)
+            # a + b (=9) のような、途中式(middle_expr)の結果を記録する
+            expr_result_by_id: dict[int, any] = {}
+            # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
+            expr_str_to_show_by_id: dict[int, str] = {}
+            # 「aとbをかけます」のような、説明文をidごとに記録する
+            expr_description_to_show_by_id: list[str] = []
+
+            for middle_expr in expr_descriptions:
+                '''{
+                "id": 1, 
+                "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], 
+                "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]
+                }
+                '''
+                # TASK: descriptionに動的解析結果を挿入して構築できるようにする
+                expr_str_for_evaluation: list[str] = []
+                expr_str_to_show: list[str] = []
+                expr_description_to_show: list[str] = []
+                expr_str_base: list[str] = []
+
+                for expr_part in middle_expr["expr"]: # "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                    if "reference" in expr_part:
+                        expr_str_for_evaluation.append(expr_part["reference"])
+                        expr_str_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
+                        expr_str_base.append(expr_part["reference"])
+                    elif "text" in expr_part:
+                        expr_str_for_evaluation.append(expr_part["text"])
+                        expr_str_to_show.append(expr_part["text"])
+                        expr_str_base.append(expr_part["text"])
+                    else: # expr_idなら、計算式の結果を動的に代入する
+                        expr_str_for_evaluation.append(expr_result_by_id[expr_part["expr_id"]])
+                        expr_str_to_show.append(f"<{expr_str_to_show_by_id[expr_part["expr_id"]]}>(={expr_result_by_id[expr_part["expr_id"]]})")
+                        expr_str_base.append(expr_str_to_show_by_id[expr_part["expr_id"]])
+
+                for expr_part in middle_expr["description"]: # "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
+                    if "reference" in expr_part:
+                        expr_description_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
+                    elif "text" in expr_part:
+                        expr_description_to_show.append(expr_part["text"])
+                    else: # expr_id
+                        expr_description_to_show.append(expr_result_by_id[expr_part["expr_id"]])
+
+                # print("expression:", " ".join(expr_str_for_evaluation))
+                # print("expression_w_values:", " ".join(expr_str_to_show))
+                expr_result_by_id[middle_expr["id"]] = frame.EvaluateExpression(" ".join(expr_str_for_evaluation)).GetValue()
+                expr_str_to_show_by_id[middle_expr["id"]] = " ".join(expr_str_base)
+                expr_description_to_show_by_id.append(f'{" ".join(expr_str_base)}: {" ".join(expr_description_to_show)}')
+
+            return expr_description_to_show_by_id
 
         def track_var(self, vars: list[lldb.SBValue] | lldb.SBValueList, var_previous_values: dict[tuple[str, int], VarPreviousValue], isLocal: bool = True):
             crnt_vars: list[tuple[str, int]] = []
@@ -928,11 +979,22 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.vars_tracker.setVarsDeclared(var)
                                 
                                 ######## ここで計算式のidを取得して、そのidに対応する計算式の説明文を取得する ###########
-                                expr_description = self.vars_tracker.expr_descriptions_by_line[str(var[1])][event["values_expr_id"]]
+                                if str(var[1]) in self.vars_tracker.expr_descriptions_by_line and len(self.vars_tracker.expr_descriptions_by_line[str(var[1])]) >= event["values_expr_id"] + 1:
+                                    values_expr_descriptions = self.vars_tracker.expr_descriptions_by_line[str(var[1])][event["values_expr_id"]]
+                                    if event["indexes_expr_id"] and len(self.vars_tracker.expr_descriptions_by_line[str(var[1])]) >= event["indexes_expr_id"] + 1:
+                                        indexes_expr_descriptions = self.vars_tracker.expr_descriptions_by_line[str(var[1])][event["indexes_expr_id"]]
+                                    else:
+                                        indexes_expr_descriptions = []
+                                else:
+                                    values_expr_descriptions = []
+                                    indexes_expr_descriptions = []
+
 
                                 # まだ全ての宣言が完了していない場合
                                 if len(varsDeclLines_copy):
-                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func}, False)
+                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
+                                                       "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "status": "ok", "skippedFunc": skipped_func, 
+                                                       "expr_descriptions": {"values": values_expr_descriptions, "indexes": indexes_expr_descriptions}}, False)
                                 # 全ての宣言が完了している場合
                                 else:
                                     # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
@@ -956,7 +1018,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             if (var, int(line)) not in vars_declared
                                         }
                                     ]
-                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, "vars_w_value_changed": self.get_vars_w_value_changed(values_changed), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "status": "ok", "skippedFunc": skipped_func}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
+                                    self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
+                                                       "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, 
+                                                       "vars_w_value_changed": self.get_vars_w_value_changed(values_changed), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "status": "ok", 
+                                                       "skippedFunc": skipped_func, "expr_descriptions": {"values": values_expr_descriptions, "indexes": indexes_expr_descriptions}}, str(self.line_number) not in self.line_data[self.func_name]["loops"])
                                 break
 
                             while crntFromTo:

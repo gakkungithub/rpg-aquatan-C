@@ -25,6 +25,7 @@ DATA_DIR = BASE_DIR + '/mapdata_for_test'
 # 辞書型の型定義
 type ExprNodeInfo = tuple[dict[str, any], set[tuple[str, int]], list[dict[str, any]], list[dict[str, any]], int]
 
+
 class RoomInfo(TypedDict):
     room_size: tuple[int, int, int, int]
     direction: str
@@ -37,6 +38,24 @@ class CommentWindowInfo(TypedDict):
 class GotoRoomInfo(TypedDict):
     toNodeID: str
     fromNodeID: str
+
+class ExprDescriptionPart(TypedDict, total=False):
+    # この型は、以下のうちの一つのキーを持つ
+    expr_id: int
+    text: str
+    reference: str
+
+class ExprDescription(TypedDict):
+    id: int
+    description: list[ExprDescriptionPart]
+    expr: list[ExprDescriptionPart]
+
+type SubObjectExprComment = dict[str, SubObjectExprComment | list[ExprDescription]]
+
+class ExprComment(TypedDict, total=False):
+    values: list[ExprDescription] | SubObjectExprComment
+    indexes: list[ExprDescription]
+    expr: list[ExprDescription]
 
 
 class ConditionLineTracker:
@@ -367,7 +386,7 @@ class MapInfo:
         events = []
         characters = []
         variable_declarations_by_line: dict[int, list[str]] = {}
-        expressions_by_line: dict[int, list[list[dict[str]]]] = {}
+        expressions_by_line: dict[int, list[ExprComment]] = {}
 
         # カラーユニバーサルデザインの色
         universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
@@ -379,18 +398,17 @@ class MapInfo:
                 variable_declarations_by_line[converted_fromTo[0]].append(treasure.name)
             else:
                 variable_declarations_by_line[converted_fromTo[0]] = [treasure.name]
-                
             comments = {}
             if "indexes" in treasure.comments:
                 if converted_fromTo[0] in expressions_by_line:
-                    expressions_by_line[converted_fromTo[0]].append(treasure.comments["indexes"])
+                    expressions_by_line[converted_fromTo[0]].append({"indexes": treasure.comments["indexes"]})
                 else:
-                    expressions_by_line[converted_fromTo[0]] = [treasure.comments["indexes"]]
+                    expressions_by_line[converted_fromTo[0]] = [{"indexes": treasure.comments["indexes"]}]
                 comments["indexes"] = {"id": len(expressions_by_line[converted_fromTo[0]])-1, "comments": treasure.comments["indexes"]}
             if converted_fromTo[0] in expressions_by_line:
-                expressions_by_line[converted_fromTo[0]].append(treasure.comments["values"])
+                expressions_by_line[converted_fromTo[0]].append({"values": treasure.comments["values"]})
             else:
-                expressions_by_line[converted_fromTo[0]] = [treasure.comments["values"]]
+                expressions_by_line[converted_fromTo[0]] = [{"values": treasure.comments["values"]}]
             comments["values"] = {"id": len(expressions_by_line[converted_fromTo[0]])-1, "comments": treasure.comments["values"]}
             
             events.append({"type": "TREASURE", "x": int(treasure.local_pos[1]+self.offset["x"]), "y": int(treasure.local_pos[0]+self.offset["y"]), "item": treasure.name, "comments": comments, "vartype": treasure.type, "fromTo": converted_fromTo, "funcWarp": func_warp, "func": treasure.func_name})
@@ -404,9 +422,9 @@ class MapInfo:
                         "comments": move_event.comments, "detail": move_event.comment_window_info})
             if len(converted_fromTo):
                 if converted_fromTo[0] in expressions_by_line:
-                    expressions_by_line[converted_fromTo[0]].append(move_event.comments)
+                    expressions_by_line[converted_fromTo[0]].append({"expr": move_event.comments})
                 else:
-                    expressions_by_line[converted_fromTo[0]] = [move_event.comments]
+                    expressions_by_line[converted_fromTo[0]] = [{"expr": move_event.comments}]
 
         # # 経路の一方通行情報
         # for auto_event in self.auto_events:
@@ -425,9 +443,9 @@ class MapInfo:
             else:
                 characters.append({"type": "CHARARETURN", "name": "15084", "x": int(local_pos[1]+self.offset['x']), "y": int(local_pos[0]+self.offset["y"]), "dir": 0, "movetype": 1, "message": f"This is the end of function {func_name} !!" if self.is_english else f"ここが {func_name} の終了地点です!!", "dest_map": program_name, "fromTo": converted_fromTo, "func": func_name, "funcWarp": func_warp, "comments": chara_return.comments})
             if converted_fromTo[0] in expressions_by_line:
-                expressions_by_line[converted_fromTo[0]].append(chara_return.comments)
+                expressions_by_line[converted_fromTo[0]].append({"expr": chara_return.comments})
             else:
-                expressions_by_line[converted_fromTo[0]] = [chara_return.comments]
+                expressions_by_line[converted_fromTo[0]] = [{"expr": chara_return.comments}]
 
         # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
@@ -452,9 +470,9 @@ class MapInfo:
                                "movetype": 1, "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", "condType": chara_checkCondition.type, "fromTo": converted_fromTo, "func": chara_checkCondition.func, 
                                "funcWarp": func_warp, "comments": chara_checkCondition.comments, "func_argcomments": self.condition_comments.get(converted_fromTo[0], []), "detail": chara_checkCondition.comment_window_info})
             if converted_fromTo[0] in expressions_by_line:
-                expressions_by_line[converted_fromTo[0]].append(chara_checkCondition.comments)
+                expressions_by_line[converted_fromTo[0]].append({"expr": chara_checkCondition.comments})
             else:
-                expressions_by_line[converted_fromTo[0]] = [chara_checkCondition.comments]
+                expressions_by_line[converted_fromTo[0]] = [{"expr": chara_checkCondition.comments}]
 
         for chara_expression in self.chara_expressions.values():
             comments_by_line = {}
@@ -462,9 +480,9 @@ class MapInfo:
                 func_warp, converted_fromTo = self.line_track_transformer(comments["line_track"], chara_expression.func)
                 comments_by_line[firstLine] = {"type": comments["type"], "fromTo": converted_fromTo, "exps": comments["exps"], "comments": comments["comments"], "funcWarp": func_warp, "vars": comments["vars"]}
                 if converted_fromTo[0] in expressions_by_line:
-                    expressions_by_line[converted_fromTo[0]].append(comments["comments"])
+                    expressions_by_line[converted_fromTo[0]].append({"expr": comments["comments"]})
                 else:
-                    expressions_by_line[converted_fromTo[0]] = [comments["comments"]]
+                    expressions_by_line[converted_fromTo[0]] = [{"expr": comments["comments"]}]
 
             characters.append({"type": "CHARAEXPRESSION", "name": "15165", "x": int(chara_expression.local_pos[1]+self.offset["x"]), "y": int(chara_expression.local_pos[0]+self.offset["y"]), "dir": 0,
                                "movetype": 1, "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", "func": chara_expression.func, "comments": comments_by_line})
@@ -986,10 +1004,14 @@ class GenBitMap:
                         self.createRoom(toNodeID, crntRoomID)
 
                         if len(case_expr_node_info_list):
-                            warp_comment_window_info = create_comment_window_info([["case", f"of line {expr_node_info[4]} is true"]] if self.is_english else [[f"{expr_node_info[4]}行目の{self.getNodeLabel(nodeID)}文のcase", "が真"]], 
-                                                                            [[switch_expr_node_info[0], {"text": ' OR '.join(case_expr_node_info_list)}] if self.is_english else [switch_expr_node_info[0], {"text": ' または '.join(case_expr_node_info_list)}]], 
-                                                                            "cond-check"
-                                                                            )
+                            condition_hover_list = [switch_expr_node_info[0]]
+                            for _, item in enumerate(case_expr_node_info_list):
+                                condition_hover_list.extend([item, {"text": "OR"} if self.is_english else {"text": "または"}])
+                            condition_hover_list.pop(-1)
+                            warp_comment_window_info = create_comment_window_info(
+                                [["case", f"of line {expr_node_info[4]} is true"]] if self.is_english else [[f"{expr_node_info[4]}行目の{self.getNodeLabel(nodeID)}文のcase", "が真"]], 
+                                [condition_hover_list], "cond-check"
+                                )
                         else:
                             if self.getNodeLabel(toNodeID) == 'default':
                                 warp_comment_window_info = create_comment_window_info([["switch", f"of line {switch_expr_node_info[4]} is not true for any cases (default)"]] if self.is_english else [[f"{switch_expr_node_info[4]}行目のswitch文の", "がいずれのcaseにも該当しない(default)"]], 
@@ -1039,7 +1061,7 @@ class GenBitMap:
                         print("unknown node appeared")
             for toNodeID_info in nodeID_list:
                 if isinstance(toNodeID_info, tuple):
-                    self.trackAST(crntRoomID, toNodeID_info[0], loopBackID, comment_window_info=toNodeID_info[1])
+                    self.trackAST(crntRoomID, toNodeID_info[0], loopBackID, condition_comment_window_info=toNodeID_info[1])
                 else:
                     self.trackAST(toNodeID_info, toNodeID_info, loopBackID)
             return
@@ -1083,8 +1105,12 @@ class GenBitMap:
 
                 # while or forの領域に入る (whileIn or forIn)
                 self.createPath(crntRoomID, nodeID, 
-                                create_comment_window_info([
-                                    [f"if next is check of {self.getNodeLabel(nodeID)}", f"in line {expr_node_info[4]}"]] if self.is_english else [[f"次が{expr_node_info[4]}行目の{self.getNodeLabel(nodeID)}文の", "の真偽の確認処理なら"]], 
+                                create_comment_window_info(
+                                    [
+                                        [f"if next is check of {self.getNodeLabel(nodeID)}", f"in line {expr_node_info[4]}"]
+                                        if self.is_english else 
+                                        [f"次が{expr_node_info[4]}行目の{self.getNodeLabel(nodeID)}文の", "の真偽の確認処理なら"]
+                                    ], 
                                     [[expr_node_info[0]]], "cond-in")
                                 )
                 # true
@@ -1104,14 +1130,18 @@ class GenBitMap:
 
             if (change_expr_node_info := self.getExprNodeInfo(nodeID)):
                 warp_comment_window_info = create_comment_window_info(
-                                            [[f"if next is check of {self.getNodeLabel(loopBackID)}", f"in line {loopBack_expr_node_info[4]}"], ["execute", f"of line {change_expr_node_info[4]}"]
-                                            if self.is_english else [f"次が{loopBack_expr_node_info[4]}行目の{self.getNodeLabel(loopBackID)}文の", "の真偽の確認処理なら"], [f"{change_expr_node_info[4]}行目の", "を実行して"]], 
+                                            [[f"if next is check of {self.getNodeLabel(loopBackID)}", f"in line {loopBack_expr_node_info[4]}"], ["execute", f"of line {change_expr_node_info[4]}"]]
+                                            if self.is_english else 
+                                            [[f"次が{loopBack_expr_node_info[4]}行目の{self.getNodeLabel(loopBackID)}文の", "の真偽の確認処理なら"], [f"{change_expr_node_info[4]}行目の", "を実行して"]], 
                                             [[loopBack_expr_node_info[0]], [change_expr_node_info[0]]], "cond-in-change"
                                             )
             else:
                 warp_comment_window_info = create_comment_window_info(
-                                            [[f"if next is check of {self.getNodeLabel(loopBackID)}", f"in line {loopBack_expr_node_info[4]}"]
-                                            if self.is_english else [f"次が{loopBack_expr_node_info[4]}行目の{self.getNodeLabel(loopBackID)}文の", "の真偽の確認処理なら"]], 
+                                            [
+                                            [f"if next is check of {self.getNodeLabel(loopBackID)}", f"in line {loopBack_expr_node_info[4]}"]
+                                            if self.is_english else 
+                                            [f"次が{loopBack_expr_node_info[4]}行目の{self.getNodeLabel(loopBackID)}文の", "の真偽の確認処理なら"]
+                                            ], 
                                             [[loopBack_expr_node_info[0]]], "cond-in-change"
                                             )
                 
@@ -1712,6 +1742,8 @@ def create_comment_window_info(detail: list[list[str]], hover: list[list[dict[st
     else:
         comment_window_info = CommentWindowInfo(detail=detail, hover=hover, type=info_type)
 
+    print("detail:", comment_window_info["detail"])
+    print("hover:", comment_window_info["hover"])
     # デバッグ用に要素の中身が正しいか確認する
     if any(len(c) == 0 for c in comment_window_info["detail"]):
         sys.exit("each list in detail must have one or more elements")
