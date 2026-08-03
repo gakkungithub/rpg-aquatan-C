@@ -1,3 +1,4 @@
+from __future__ import annotations
 import faulthandler
 faulthandler.enable()
 import lldb
@@ -11,7 +12,7 @@ import tempfile
 from collections import Counter
 import re
 import random
-from typing import TypedDict
+from typing import TypedDict, Literal
 
 # break pointを打ってスキップすることも考えられる
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,11 +20,33 @@ DATA_DIR = BASE_DIR + "/mapdata_for_test"
 CONTINUE = 1
 PROGRESS = 0
 
-class ExprDescriptionPart(TypedDict, total=False):
-    # この型は、以下のうちの一つのキーを持つ
+type ExprDescriptionPart = (
+    ExprIdPart
+    | TextPart
+    | ScalarReference
+    | StructReference
+    | ArrayReference
+)
+
+class ExprIdPart(TypedDict):
     expr_id: int
+
+class TextPart(TypedDict):
     text: str
+
+class ScalarReference(TypedDict):
     reference: str
+    type: Literal["scalar"]
+
+class StructReference(TypedDict):
+    reference: ScalarReference | ArrayReference
+    type: Literal["struct"]
+    members: list[str]
+
+class ArrayReference(TypedDict):
+    reference: ScalarReference | StructReference
+    type: Literal["array"]
+    indexes: list[ExprDescriptionPart]
 
 class ExprDescription(TypedDict):
     id: int
@@ -114,15 +137,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_unchanged = []
             self.vars_unchanged_count = 0
 
-            self.analyze_expr_comments(frame)
+            line_entry: lldb.SBLineEntry = frame.GetLineEntry()
+            line_number = str(line_entry.GetLine())
+            self.analyze_expr_comments(line_number, frame)
 
             self.track_var(gvars, self.global_previous_values, isLocal=False)
             self.track_var(frame.GetVariables(True, True, True, True), self.previous_values[-1])
 
-        def analyze_expr_comments(self, frame: lldb.SBFrame):
+        def analyze_expr_comments(self, line_number: str, frame: lldb.SBFrame):
             # ここで次の計算式で参照される変数の値を取得する
-            line_entry: lldb.SBLineEntry = frame.GetLineEntry()
-            line_number = str(line_entry.GetLine())
             if line_number in self.var_exprs_by_line:
                 self.expr_descriptions_by_line.pop(line_number, None)
                 for expr_list in self.var_exprs_by_line[line_number]:
@@ -140,7 +163,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.expr_descriptions_by_line[line_number].append(expr_description_to_show_by_id)
                     else:
                         self.expr_descriptions_by_line[line_number] = [expr_description_to_show_by_id]
-                print("results:", self.expr_descriptions_by_line)
+                # print("results:", self.expr_descriptions_by_line)
 
         def analyze_subObject_expr_comments(self, subObject_expr_comment: SubObjectExprComment, frame: lldb.SBFrame):
             dynamic_subObject_expr_comment: DynamicSubObjectExprComment = {}
@@ -148,9 +171,43 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 dynamic_subObject_expr_comment[index] = self.analyze_subObject_expr_comments(value, frame) if isinstance(value, dict) else self.get_expr_comments(value, frame)
             return dynamic_subObject_expr_comment
 
+        def get_reference_expr_comments(self, expr_part: ScalarReference | StructReference | ArrayReference, expr_result_by_id: dict[int, any], expr_str_to_show_by_id: dict[int, str], frame: lldb.SBFrame):
+            if expr_part["type"] == "scalar":
+                # scalar variableの結果自体は取得する必要がない
+                reference = expr_part["reference"]
+                reference_w_result = reference
+            elif expr_part["type"] == "struct":
+                # struct variableの結果自体は取得する必要がない。
+                struct_base, struct_base_w_result = self.get_reference_expr_comments(expr_part["reference"], expr_result_by_id, expr_str_to_show_by_id, frame)
+                reference = '.'.join([struct_base, *expr_part["members"]])
+                reference_w_result = '.'.join([struct_base_w_result, *expr_part["members"]])
+            else:
+                reference_str_to_show: list[str] = []
+                # 計算結果を含めていない、計算式の文字列
+                reference_str_base: list[str] = []
+                # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
+                for index_part in expr_part["indexes"]:
+                    if "expr_id" in index_part:
+                        # expr_id
+                        reference_str_to_show.append(f"[<{expr_str_to_show_by_id[index_part["expr_id"]]}>(={expr_result_by_id[index_part["expr_id"]]})]")
+                        reference_str_base.append(f"[{expr_str_to_show_by_id[index_part["expr_id"]]}]")
+                    elif "text" in index_part:
+                        # text
+                        reference_str_to_show.append(f"[{index_part["text"]}]")
+                        reference_str_base.append(f"[{index_part["text"]}]")
+                    else:
+                        # reference
+                        reference_expr_comments = self.get_reference_expr_comments(index_part, expr_result_by_id, expr_str_to_show_by_id, frame)
+                        reference_str_to_show.append(f"<{reference_expr_comments}>(=[{frame.EvaluateExpression(reference_expr_comments).GetValue()}])")
+                        reference_str_base.append(f"[{reference_expr_comments}]")
+                reference_name = self.get_reference_expr_comments(expr_part["reference"], expr_result_by_id, expr_str_to_show_by_id, frame)
+                reference = ''.join([reference_name, *reference_str_base])
+                reference_w_result = ''.join([reference_name, *reference_str_to_show])
+            return reference, reference_w_result
+
         def get_expr_comments(self, expr_descriptions: list[ExprDescription], frame: lldb.SBFrame):
             # [ {"id": 1, "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]} ]
-            print(expr_descriptions)
+            # print(expr_descriptions)
             # a + b (=9) のような、途中式(middle_expr)の結果を記録する
             expr_result_by_id: dict[int, any] = {}
             # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
@@ -173,9 +230,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 for expr_part in middle_expr["expr"]: # "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]}
                     if "reference" in expr_part:
-                        expr_str_for_evaluation.append(expr_part["reference"])
-                        expr_str_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
-                        expr_str_base.append(expr_part["reference"])
+                        reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, expr_result_by_id, expr_str_to_show_by_id, frame)
+                        expr_str_for_evaluation.append(reference_str_base)
+                        expr_str_to_show.append(f"<{reference_str_to_show}>(={frame.EvaluateExpression(reference_str_base).GetValue()})")
+                        expr_str_base.append(reference_str_base)
                     elif "text" in expr_part:
                         expr_str_for_evaluation.append(expr_part["text"])
                         expr_str_to_show.append(expr_part["text"])
@@ -187,7 +245,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 for expr_part in middle_expr["description"]: # "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
                     if "reference" in expr_part:
-                        expr_description_to_show.append(f"{expr_part["reference"]}(={frame.EvaluateExpression(expr_part["reference"]).GetValue()})")
+                        reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, expr_result_by_id, expr_str_to_show_by_id, frame)
+                        expr_description_to_show.append(f"{reference_description_to_show}(={frame.EvaluateExpression(reference_description_base).GetValue()})")
                     elif "text" in expr_part:
                         expr_description_to_show.append(expr_part["text"])
                     else: # expr_id
@@ -536,7 +595,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.memory_info_to_send = []
             self.str_check_num = {}
             self.str_info_to_send = []
-            self.skipped_lines = []
+            self.skipped_var_declaration_lines: list[str] = []
             self.events_history: list[dict] = []
             self.is_english = args.english
 
@@ -566,7 +625,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.line_number: int = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_variables.json", 'r') as f:
                     variables_info: dict[str, dict] = json.load(f)
-                    self.variable_dclarations_by_line: dict[str, list[str]] = variables_info["declaration"]
+                    self.variable_declarations_by_line: dict[str, list[str]] = variables_info["declaration"]
                     self.vars_tracker.var_exprs_by_line = variables_info["expr"]
             else:
                 self.event_sender({"end": True, "status": "ok"}, False)
@@ -665,9 +724,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             # 変数が合致していればstepinを実行して次に進む
 
-            while len(self.skipped_lines):
-                line = self.skipped_lines.pop(0)
-                skipped_varDecls = list([(var, int(line)) for var in self.variable_dclarations_by_line[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
+            while len(self.skipped_var_declaration_lines):
+                line = self.skipped_var_declaration_lines.pop(0)
+                
+                skipped_varDecls = list([(var, int(line)) for var in self.variable_declarations_by_line[line]] & self.vars_tracker.previous_values[self.next_frame_num-2].keys())
                 if len(skipped_varDecls) == 0:
                     continue
                 vars_event: list[tuple[str, int]] = []
@@ -676,49 +736,46 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if (event := self.event_reciever()) is None:
                         continue
                     if (item := event.get('item', None)) is not None:
-                        itemname = (item["name"], item["line"])
-                        if not itemname in skipped_varDecls or itemname[1] != int(line):
+                        var_to_get = (item["name"], item["line"])
+                        if not var_to_get in skipped_varDecls or var_to_get[1] != int(line):
                             errorCnt += 1
                             # 複数回入力を間違えたらヒントをあげる
                             if errorCnt >= 3:
                                 items = list(set(skipped_varDecls) - set(vars_event))
-                                if self.is_english:
-                                    item_message = f"HINT: Get item {', '.join([item_lacked[0] for item_lacked in items])} !!"
-                                else:
-                                    item_message = f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
+                                item_message = f"HINT: Get item {', '.join([item_lacked[0] for item_lacked in items])} !!" if self.is_english else f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
                                 self.event_sender({"message": item_message, "status": "ng"})
                             else:
-                                if self.is_english:
-                                    item_message = f"You are trying to get different item {itemname[0]} !!"
-                                else:
-                                    item_message = f"異なるアイテム {itemname[0]} を取得しようとしています!!"
+                                item_message = f"You are trying to get different item {var_to_get[0]} !!" if self.is_english else f"異なるアイテム {var_to_get[0]} を取得しようとしています!!"
                                 self.event_sender({"message": item_message, "status": "ng"})
                         else:
-                            vars_event.append(itemname)
+                            vars_event.append(var_to_get)
 
-                            if Counter(vars_event) == Counter(skipped_varDecls):
-                                self.vars_tracker.setVarsDeclared(itemname)
-                                if self.is_english:
-                                    item_message = f"You got item {itemname[0]} !!"
+                            if str(var_to_get[1]) in self.vars_tracker.expr_descriptions_by_line and len(self.vars_tracker.expr_descriptions_by_line[str(var_to_get[1])]) >= event["values_expr_id"] + 1:
+                                values_expr_descriptions = self.vars_tracker.expr_descriptions_by_line[str(var_to_get[1])][event["values_expr_id"]]
+                                if event["indexes_expr_id"] and len(self.vars_tracker.expr_descriptions_by_line[str(var_to_get[1])]) >= event["indexes_expr_id"] + 1:
+                                    indexes_expr_descriptions = self.vars_tracker.expr_descriptions_by_line[str(var_to_get[1])][event["indexes_expr_id"]]
                                 else:
-                                    item_message = f"アイテム {itemname[0]} を正確に取得できました!!"
-                                self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"})
-                                break
-                            self.vars_tracker.setVarsDeclared(itemname)
-                            if self.is_english:
-                                item_message = f"You got item {itemname[0]} !!"
+                                    indexes_expr_descriptions = []
                             else:
-                                item_message = f"アイテム {itemname[0]} を正確に取得できました!!"
-                            self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(itemname), "line": itemname[1]}, "status": "ok"}, False)
+                                values_expr_descriptions = []
+                                indexes_expr_descriptions = []
+                            if Counter(vars_event) == Counter(skipped_varDecls):
+                                self.vars_tracker.setVarsDeclared(var_to_get)
+                                item_message = f"You got item {var_to_get[0]} !!" if self.is_english else f"アイテム {var_to_get[0]} を正確に取得できました!!"
+                                self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(var_to_get), "line": var_to_get[1]}, 
+                                                   "expr_descriptions": {"values": values_expr_descriptions, "indexes": indexes_expr_descriptions}, "status": "ok"})
+                                print("here", values_expr_descriptions)
+                                break
+                            self.vars_tracker.setVarsDeclared(var_to_get)
+                            item_message = f"You got item {var_to_get[0]} !!" if self.is_english else f"アイテム {var_to_get[0]} を正確に取得できました!!"
+                            self.event_sender({"message": item_message, "undefined": True, "item": {"value": self.vars_tracker.getValueByVar(var_to_get), "line": var_to_get[1]}, 
+                                               "expr_descriptions": {"values": values_expr_descriptions, "indexes": indexes_expr_descriptions}, "status": "ok"}, False)
                     else:
                         errorCnt += 1
                         # 複数回入力を間違えたらヒントをあげる
                         if errorCnt >= 3:
                             items = list(set(skipped_varDecls) - set(vars_event))
-                            if self.is_english:
-                                item_message = f"HINT: Get items {', '.join([item_lacked[0] for item_lacked in items])} !!"
-                            else:
-                                item_message = f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
+                            item_message = f"HINT: Get items {', '.join([item_lacked[0] for item_lacked in items])} !!" if self.is_english else f"ヒント: アイテム {', '.join([item_lacked[0] for item_lacked in items])} を取得してください!!"
                             self.event_sender({"message": item_message, "status": "ng"})
                         else:
                             self.event_sender({"message": "Get an item !!" if self.is_english else "何らかのアイテムを取得してください!!", "status": "ng"})
@@ -911,13 +968,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 value_unchanged_dict_list.append({"item": {"name": value_unchanged[0][0], "line": value_unchanged[0][1]}, "path": value_unchanged[1]})
             return value_unchanged_dict_list
         
+        def set_skipped_var_declaration(self, new_lines: list[str]):
+            self.skipped_var_declaration_lines = new_lines
+            for line in new_lines:
+                self.vars_tracker.analyze_expr_comments(line, self.frame)
+
+
         def vars_checker(self, isForFalse: bool = False) -> None:
             if self.isEnd:
                 return
             
             # これだとスコープ外の変数を拾ってしまうことがある
-            # for文の条件文内の宣言だとfalseの時にself.variable_dclarations_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
-            varsDeclLines = [] if isForFalse else [(var, self.line_number) for var in self.variable_dclarations_by_line.get(str(self.line_number), []) if (var, self.line_number) not in self.vars_tracker.vars_declared[-1]]
+            # for文の条件文内の宣言だとfalseの時にself.variable_declarations_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
+            varsDeclLines = [] if isForFalse else [(var, self.line_number) for var in self.variable_declarations_by_line.get(str(self.line_number), []) if (var, self.line_number) not in self.vars_tracker.vars_declared[-1]]
 
             varsDeclLines_copy = varsDeclLines[:]
 
@@ -934,14 +997,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if (event := self.event_reciever()) is None:
                             continue
                         if (item := event.get('item', None)) is not None:
-                            itemname = (item["name"], item["line"])
-                            if itemname != var:
+                            var_to_get = (item["name"], item["line"])
+                            if var_to_get != var:
                                 errorCnt += 1
                                 # 複数回入力を間違えたらヒントをあげる
                                 if errorCnt >= 3:
                                     self.event_sender({"message": f"HINT: Get item {var[0]} !!" if self.is_english else f"ヒント: アイテム {var[0]} を取得してください!!", "status": "ng"})
                                 else:
-                                    self.event_sender({"message": f"You are trying to get a different item {itemname[0]} !!" if self.is_english else f"異なるアイテム {itemname[0]} を取得しようとしています!!", "status": "ng"})
+                                    self.event_sender({"message": f"You are trying to get a different item {var_to_get[0]} !!" if self.is_english else f"異なるアイテム {var_to_get[0]} を取得しようとしています!!", "status": "ng"})
                                 continue
 
                             fromTo: list[int] = event['fromTo']
@@ -1008,16 +1071,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     # 変数が初期化されない時、スキップされるので、それも読み取る
                                     vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
 
-                                    self.skipped_lines = [
-                                        line
-                                        for line in self.variable_dclarations_by_line
+                                    self.set_skipped_var_declaration([
+                                        line for line in self.variable_declarations_by_line
                                         if (self.line_number < int(line) < self.next_line_number)
-                                        and {
+                                        and 
+                                        {
                                             (var, int(line))
-                                            for var in self.variable_dclarations_by_line[line]
+                                            for var in self.variable_declarations_by_line[line]
                                             if (var, int(line)) not in vars_declared
                                         }
-                                    ]
+                                    ])
                                     self.event_sender({"message": f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
                                                        "item": {"value": self.vars_tracker.getValueByVar(var), "line": var[1]}, 
                                                        "vars_w_value_changed": self.get_vars_w_value_changed(values_changed), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "status": "ok", 
@@ -1052,8 +1115,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             self.func_checked.append([self.func_crnt_name])
                                             back_line_number = self.line_number
                                             back_frame_num = self.frame_num
-                                            # self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
-                                            self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
+                                            # self.skipped_var_declaration_lines = [line for line in self.variable_declarations_by_line if int(line) < self.next_line_number]
+                                            self.set_skipped_var_declaration([line for line in self.variable_declarations_by_line if int(line) < self.next_line_number])
                                             while 1:
                                                 if self.analyze_frame(back_line_number):
                                                     continue
@@ -1101,16 +1164,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         # 変数が初期化されない時、スキップされるので、それも読み取る
                         vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
 
-                        self.skipped_lines = [
-                            line
-                            for line in self.variable_dclarations_by_line
+                        self.set_skipped_var_declaration([
+                            line for line in self.variable_declarations_by_line
                             if (self.line_number < int(line) < self.next_line_number)
-                            and {
+                            and 
+                            {
                                 (var, int(line))
-                                for var in self.variable_dclarations_by_line[line]
+                                for var in self.variable_declarations_by_line[line]
                                 if (var, int(line)) not in vars_declared
                             }
-                        ]
+                        ])
 
         def check_condition(self, condition_type: str, fromTo: list[int], funcWarp: list[dict]) -> None:
             errorCnt = 0
@@ -1160,16 +1223,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 if not crntFromTo:
                     # 条件文での値の変化はここで一括で取得する
                     if condition_type in ("whileFalse", "doWhileFalse", "forFalse"):
-                        self.skipped_lines = [
-                            line
-                            for line in self.variable_dclarations_by_line
+                        self.set_skipped_var_declaration([
+                            line for line in self.variable_declarations_by_line
                             if self.line_number < int(line) < self.next_line_number
-                        ]
+                        ])
                     self.event_sender({"message": "", "status": "ok", "skippedFunc": skipped_func, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
                     self.vars_tracker.trackStart(self.frame)
                     self.vars_checker(condition_type == 'forFalse')
                     if condition_type == "exp" and self.line_number in self.line_data[self.func_name]["voidreturn"]:
-                        self.skipped_lines = [l for l in self.skipped_lines if fromTo[0] < int(l) < self.next_line_number]
+                        self.set_skipped_var_declaration([l for l in self.skipped_var_declaration_lines if fromTo[0] < int(l) < self.next_line_number])
                     break
 
                 while crntFromTo:
@@ -1212,17 +1274,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 back_frame_num = self.frame_num
                                 # 変数が初期化されない時、スキップされるので、それも読み取る
                                 vars_declared = self.vars_tracker.vars_declared[self.next_frame_num - 2]
-                                self.skipped_lines = [
-                                    line
-                                    for line in self.variable_dclarations_by_line
+                                self.set_skipped_var_declaration([
+                                    line for line in self.variable_declarations_by_line
                                     if (int(line) < self.next_line_number)
-                                    and {
+                                    and 
+                                    {
                                         (var, int(line))
-                                        for var in self.variable_dclarations_by_line[line]
+                                        for var in self.variable_declarations_by_line[line]
                                         if (var, int(line)) not in vars_declared
                                     }
-                                ]
-                                # self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
+                                ])
+                                # self.skipped_var_declaration_lines = [line for line in self.variable_declarations_by_line if int(line) < self.next_line_number]
                                 self.step_conditionally()
 
                                 # 遷移先の関数に変数宣言がある場合のために変数確認する
@@ -1332,7 +1394,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     retVal = thread.GetStopReturnValue().GetValue()
                     self.event_sender({"message": f"We go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": retVal, "skippedFunc": skipped_func})
                     # 戻ってきた場所からnext_line_numberまででskipped_linesを取得する
-                    self.skipped_lines = [l for l in self.skipped_lines if fromTo[-1] < int(l) < self.next_line_number]
+                    self.set_skipped_var_declaration([l for l in self.skipped_var_declaration_lines if fromTo[-1] < int(l) < self.next_line_number])
                     self.step_conditionally()
                     break
                 
@@ -1379,7 +1441,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 back_line_number = self.line_number
                                 back_frame_num = self.frame_num
 
-                                self.skipped_lines = [line for line in self.variable_dclarations_by_line if int(line) < self.next_line_number]
+                                self.set_skipped_var_declaration([line for line in self.variable_declarations_by_line if int(line) < self.next_line_number])
                                 self.step_conditionally()
                                 # 遷移先の関数に変数宣言がある場合のために変数確認する
                                 self.vars_checker()
@@ -1466,7 +1528,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         line_list = list(range(self.line_data[self.func_name]["loops"][str(self.line_number)], self.line_number+1))
                                     else:
                                         line_list = list(range(self.line_number, self.line_data[self.func_name]["loops"][str(self.line_number)]+1))
-                                    self.skipped_lines = [line for line in self.skipped_lines if int(line) not in line_list]
+                                    self.set_skipped_var_declaration([line for line in self.skipped_var_declaration_lines if int(line) not in line_list])
                             elif type == 'doWhileInit':
                                 # 最初なので確定でline_loopに追加する
                                 self.line_loop.append(self.next_line_number)
@@ -1527,7 +1589,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         # void関数の戻り
                         elif fromTo[0] == self.line_number and fromTo[0] in self.line_data[self.func_name]["voidreturn"]:
                             self.event_sender({"message": f"go back to function {self.func_crnt_name}" if self.is_english else f"関数 {self.func_crnt_name} に戻ります!!", "status": "ok", "items": self.vars_tracker.getValueAll(), "backToFunc": self.func_crnt_name, "backToLine": backToLine, "retVal": None})
-                            self.skipped_lines = [l for l in self.skipped_lines if backToLine < int(l) < self.next_line_number]
+                            self.set_skipped_var_declaration([l for l in self.skipped_var_declaration_lines if backToLine < int(l) < self.next_line_number])
                         else:
                             self.event_sender({"message": "You cannot get over here !!\n(You tried to do an action of a different line)" if self.is_english else "ここから先は進入できません!!\n(現在の行と異なる処理を実行しようとしています) 2", "status": "ng"})
                             return CONTINUE            
@@ -1656,7 +1718,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.memory_info_to_send = []
                     self.str_check_num = {}
                     self.str_info_to_send = []
-                    self.skipped_lines = []
+                    self.skipped_var_declaration_lines = []
                     self.events_history[:] = self.events_history[:event["index"]]
                     raise RollBack()
                 else:
@@ -1686,9 +1748,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 msgJson["str"] = self.str_info_to_send
                 self.str_info_to_send = []
                 if getLine:
-                    if len(self.skipped_lines):
+                    if len(self.skipped_var_declaration_lines):
                         # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
-                        msgJson["line"] = int(self.skipped_lines[0])
+                        msgJson["line"] = int(self.skipped_var_declaration_lines[0])
                     else:
                         if self.line_loop and self.line_data[self.func_name]["loops"].get(str(self.line_loop[-1])) == self.next_line_number:
                             msgJson["line"] = self.line_loop[-1]

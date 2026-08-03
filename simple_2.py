@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """RPGあくあたん"""
+from __future__ import annotations
 import codecs
 import os
 import subprocess
@@ -19,6 +20,7 @@ import copy
 import time
 import import_lib
 import unicodedata
+from typing import TypedDict, Literal
 
 # --- 外部モジュールを自動チェック ---
 import_lib.ensure_package("ephem")
@@ -73,6 +75,44 @@ mouse_down = False
 last_action_time = 0
 
 LONGPRESS_EVENT = pygame.USEREVENT + 1
+
+type ExprDescriptionPart = (
+    ExprIdPart
+    | TextPart
+    | ScalarReference
+    | StructReference
+    | ArrayReference
+)
+
+class ExprIdPart(TypedDict):
+    expr_id: int
+
+class TextPart(TypedDict):
+    text: str
+
+class ScalarReference(TypedDict):
+    reference: str
+    type: Literal["scalar"]
+
+class StructReference(TypedDict):
+    reference: ScalarReference | ArrayReference
+    type: Literal["struct"]
+    members: list[str]
+
+class ArrayReference(TypedDict):
+    reference: ScalarReference | StructReference
+    type: Literal["array"]
+    indexes: list[ExprDescriptionPart]
+
+class ExprDescription(TypedDict):
+    id: int
+    description: list[ExprDescriptionPart]
+    expr: list[ExprDescriptionPart]
+
+class CommentWindowInfo(TypedDict):
+    detail: list[list[str]]
+    hover: list[list[dict[str,any]]]
+    type: str
 
 # 長押し処理をするためのメソッド (200m秒後に長押しイベントをキューに追加する = キューの中の複数の処理が順に実行されていく)
 def start_timer():
@@ -204,6 +244,7 @@ def main():
                             elif button_name == "se slider":
                                 SMANAGER.set_all_se_volume((SBWND.sm_window.se_knob_x - SBWND.sm_window.knob_min_x) / (SBWND.sm_window.knob_max_x - SBWND.sm_window.knob_min_x))            
                             # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
+                            # button_nameがNoneなら何も実行しない (0の場合があるので、button_name is not Noneと明確にする必要がある)
                             elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
                                 if SBWND.is_stage_selecting:
                                     stage_index = button_name + 1
@@ -283,7 +324,7 @@ def main():
 
                 # cファイルを解析してマップデータを生成する
                 # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
-                cfcode = ["python3.13", "c-flowchart_1.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+                cfcode = ["python3.13", "c-flowchart_2.py", "-p", stage_name, "-c", ", ".join(cfiles)]
                 if SBWND.color_support:
                     cfcode.append("-u")
                 if ISENGLISH:
@@ -1565,10 +1606,10 @@ class Map:
         fromTo = data["fromTo"]
         func = data["func"]
         funcWarp = data["funcWarp"]
-        func_argcomments = data["func_argcomments"]
+        # func_argcomments = data["func_argcomments"]
         detail = data["detail"]
         
-        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, func_argcomments, detail, avoiding, self.name.lower())
+        chara = CharaCheckCondition(name, (x, y), direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, self.name.lower())
         #print(chara)
         self.charas.append(chara)
 
@@ -1596,10 +1637,10 @@ class Map:
         func = data["func"]
         comments = data["comments"]
         funcWarp = data["funcWarp"]
-        func_argcomments = data["func_argcomments"]
+        # func_argcomments = data["func_argcomments"]
         detail = data["detail"]
         # print(funcWarp)
-        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, comments, funcWarp, func_argcomments, detail, self.name.lower())
+        move = MoveEvent((x, y), mapchip, dest_map, type, fromTo, (dest_x, dest_y), func, comments, funcWarp, detail, self.name.lower())
         self.events.append(move)
 
     def create_plpath_j(self, data):
@@ -3222,7 +3263,9 @@ class MessageWindow(Window):
                         arg_index = 0
                         for name, argInfo in skipResult["skipTo"]["items"].items():
                             for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                # event.func_argcomments[func_num_checked]["args"][arg_index] = detail[expr_id][] if ISENGLISH else detail[expr_id]
+                                # item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
                                 newItems.append(item)
                                 arg_index += 1
                         PLAYER.itembag.items.append(newItems)
@@ -3249,7 +3292,8 @@ class MessageWindow(Window):
                         arg_index = 0
                         for name, argInfo in skipResult["skipTo"]["items"].items():
                             for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], chara.func_argcomments[func_num_checked]["args"][arg_index] if isinstance(chara, CharaCheckCondition) else chara.comments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                # item = Item(name, int(line), itemInfo["value"], chara.func_argcomments[func_num_checked]["args"][arg_index] if isinstance(chara, CharaCheckCondition) else chara.comments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
                                 newItems.append(item)
                                 arg_index += 1
                         PLAYER.itembag.items.append(newItems)
@@ -3997,7 +4041,7 @@ class CharaReturn(Character):
                                                                                                                                                                                                                                                                                                                                                                                                            
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, func_argcomments, detail, avoiding, mapname):
+    def __init__(self, name, pos, direction, move_direction, movetype, message, type, fromTo, func, funcWarp, detail, avoiding, mapname):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction = direction
         self.move_direction = move_direction
@@ -4006,7 +4050,7 @@ class CharaCheckCondition(Character):
         self.fromTo = fromTo
         self.func = func
         self.funcWarp = funcWarp
-        self.func_argcomments = func_argcomments
+        # self.func_argcomments = func_argcomments
         self.avoiding = avoiding
         self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0]), detail)
 
@@ -4126,7 +4170,7 @@ class CharaExpression(Character):
 
 class MoveEvent():
     """移動イベント"""
-    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, comments, funcWarp, func_argcomments, detail, mapname):
+    def __init__(self, pos, mapchip, dest_map, type, fromTo, dest_pos, func, comments, funcWarp, detail, mapname):
         self.x, self.y = pos[0], pos[1]  # イベント座標
         self.mapchip = mapchip  # マップチップ
         self.dest_map = dest_map  # 移動先マップ名
@@ -4136,7 +4180,7 @@ class MoveEvent():
         self.func = func
         self.comments = comments
         self.funcWarp = funcWarp
-        self.func_argcomments = func_argcomments
+        # self.func_argcomments = func_argcomments
         self.image = Map.images[self.mapchip]
         self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
         self.codeElementWindow = CodeElementWindow(self.funcWarp, (mapname, self.func, fromTo[0] if len(fromTo) else 0), detail)
@@ -4173,11 +4217,10 @@ class Detail:
     HOVER_BG_COLOR = Color(255, 0, 0, 255)
     WHITE = Color(255, 255, 255, 255)
 
-    def __init__(self, detail: dict, font: pygame.freetype.Font):
+    def __init__(self, detail: CommentWindowInfo, font: pygame.freetype.Font):
         self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect, pygame.Rect]] = []
         self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
-        self.hoverComment_list = detail["hover"]
-        print(self.hoverComment_list)
+        self.hoverComment_list = [self.get_hover_comment(h) for h in detail["hover"]]
 
         x, y = 50, 10
         # 各行（'+'区切り）を処理
@@ -4233,7 +4276,57 @@ class Detail:
                 y = end_rect.bottom + 4
 
         self.bottom_y = y
-        
+
+    def get_reference_hover_comment(self, expr_part: ScalarReference | StructReference | ArrayReference, expr_str_to_show_by_id: dict[int, str]):
+        if expr_part["type"] == "scalar":
+            reference = expr_part["reference"]
+        elif expr_part["type"] == "struct":
+            reference = ".".join([*self.get_reference_hover_comment(expr_part["reference"], expr_str_to_show_by_id), *expr_part["members"]])
+        else:
+            # 計算結果を含めていない、計算式の文字列
+            reference_str_base: list[str] = []
+            # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
+            for index_part in expr_part["indexes"]:
+                if "expr_id" in index_part:
+                    # expr_id
+                    reference_str_base.append(f"[{expr_str_to_show_by_id[index_part["expr_id"]]}]")
+                elif "text" in index_part:
+                    # text
+                    reference_str_base.append(f"[{index_part["text"]}]")
+                else:
+                    # reference
+                    reference_str_base.append(f"[{self.get_reference_hover_comment(index_part, expr_str_to_show_by_id)}]")
+            reference = ''.join([self.get_reference_hover_comment(expr_part["reference"], expr_str_to_show_by_id), *reference_str_base])
+
+        return reference
+
+    def get_hover_comment(self, expr_descriptions: list[ExprDescription]) -> str:
+        # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
+        expr_str_base_by_id: dict[int, str] = {}
+        expr_description_str_to_show: list[str] = []
+        for middle_expr in expr_descriptions:
+            expr_str_base: list[str] = []
+            expr_description: list[str] = []
+            for expr_part in middle_expr["expr"]:
+                if "reference" in expr_part:
+                    expr_str_base.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
+                elif "text" in expr_part:
+                    expr_str_base.append(expr_part["text"])
+                else: # expr_idなら、計算式の結果を動的に代入する
+                    expr_str_base.append(expr_str_base_by_id[expr_part["expr_id"]])
+
+            for expr_part in middle_expr["description"]: # "description": [{"reference": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
+                if "reference" in expr_part:
+                    expr_description.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
+                elif "text" in expr_part:
+                    expr_description.append(expr_part["text"])
+                else: # expr_id
+                    expr_description.append(expr_str_base_by_id[expr_part["expr_id"]])
+
+            expr_str_base_by_id[middle_expr["id"]] = " ".join(expr_str_base)
+            expr_description_str_to_show.append(f"{' '.join(expr_str_base)} : {' '.join(expr_description)}")
+        return '\f'.join(expr_description_str_to_show)
+
     def draw(self, surface: pygame.Surface):
         for baseComment_info in self.baseComment_info_list:
             surface.blit(baseComment_info[0], baseComment_info[1])
@@ -4396,6 +4489,7 @@ class CodeElementWindow(Window):
         elif self.detail:
             for i, hoverLink_info in enumerate(self.detail.hoverLink_info_list):
                 if hoverLink_info[1].collidepoint(local_pos):
+                    print(self.detail.hoverComment_list[i])
                     MSGWND.set(self.detail.hoverComment_list[i])
                     return None
             if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:

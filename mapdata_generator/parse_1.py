@@ -602,8 +602,8 @@ class ASTtoFlowChart:
         elif cr.kind == ci.CursorKind.CALL_EXPR:
             expr_info = ExprInfo()
             expr_description = self.parse_call_expr(cr, expr_info)
-            expNodeID = self.createNode("")
-            self.createEdge(nodeID, expNodeID)
+            exprNodeID = self.createNode("")
+            self.createEdge(nodeID, exprNodeID)
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
@@ -611,22 +611,23 @@ class ASTtoFlowChart:
             # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.expr_node_info[f'"{expNodeID}"'] = (expr_description, expr_info.var_references, expr_info.func_references, expr_info.expr_descriptions, cr.location.line)
+            # expr_node_infoはparse_call_exprでは登録されていなのでここで登録しておく
+            self.expr_node_info[f'"{exprNodeID}"'] = (expr_description, expr_info.var_references, expr_info.func_references, expr_info.expr_descriptions, cr.location.line)
             next_line = self.get_next_line()
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{expNodeID}"'][2], next_line[0]] if len(self.expr_node_info[f'"{expNodeID}"'][2]) else [cr.location.line, next_line[0]])
-            nodeID = expNodeID
+            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"'][2], next_line[0]] if len(self.expr_node_info[f'"{exprNodeID}"'][2]) else [cr.location.line, next_line[0]])
+            nodeID = exprNodeID
         else:
             # 最初行番を変更 
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # ここの計算式は計算式キャラクターに登録する
-            expNodeID = self.get_expr(cr, shape='rect')
+            exprNodeID = self.get_expr(cr, shape='rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             next_line = self.get_next_line()
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{expNodeID}"'][2], next_line[0]])
-            self.createEdge(nodeID, expNodeID, edgeName)
-            nodeID = expNodeID
+            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"'][2], next_line[0]])
+            self.createEdge(nodeID, exprNodeID, edgeName)
+            nodeID = exprNodeID
         return nodeID
 
     # 変数の型を取得
@@ -964,11 +965,11 @@ class ASTtoFlowChart:
 
     #式(一つのノードexpNodeに内容をまとめる)
     def get_expr(self, cursor, shape='square', label="", var: dict | None = None) -> str:
-        expNodeID = self.createNode(label, shape)
+        exprNodeID = self.createNode(label, shape)
         expr_info = ExprInfo()
         expr_description = self.parse_expr(cursor, expr_info, var=var)
-        self.expr_node_info[f'"{expNodeID}"'] = (expr_description, expr_info.var_references, expr_info.func_references, expr_info.expr_descriptions, cursor.location.line)
-        return expNodeID
+        self.expr_node_info[f'"{exprNodeID}"'] = (expr_description, expr_info.var_references, expr_info.func_references, expr_info.expr_descriptions, cursor.location.line)
+        return exprNodeID
 
     def unwrap_unexposed(self, cursor: ci.Cursor) -> ci.Cursor:
         self.check_cursor_error(cursor)
@@ -1258,6 +1259,7 @@ class ASTtoFlowChart:
             arg_expr_description_list.append(arg_expr_description)
             
             expr_info.var_references.update(arg_expr_info.var_references)
+            # ここでfunc_referencesの差分を取るべき?
             expr_info.func_references.extend(arg_expr_info.func_references)
             expr_info.expr_descriptions.extend(arg_expr_info.expr_descriptions)
             expr_info.id = arg_expr_info.id

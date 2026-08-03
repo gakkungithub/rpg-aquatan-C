@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys
 import os
 import uuid
@@ -11,8 +12,10 @@ import_lib.ensure_package("graphviz")
 import clang.cindex as ci
 from graphviz import Digraph
 
+from typing import TypedDict, Literal
+
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = ROOT_DIR + '/mapdata'
+DATA_DIR = ROOT_DIR + '/mapdata_for_test'
 
 def parseIndex(c_files):
     index = ci.Index.create()
@@ -41,6 +44,39 @@ def parseIndex(c_files):
 
     return translation_units
 
+type ExprDescriptionPart = (
+    ExprIdPart
+    | TextPart
+    | ScalarReference
+    | StructReference
+    | ArrayReference
+)
+
+class ExprIdPart(TypedDict):
+    expr_id: int
+
+class TextPart(TypedDict):
+    text: str
+
+class ScalarReference(TypedDict):
+    reference: str
+    type: Literal["scalar"]
+
+class StructReference(TypedDict):
+    reference: ScalarReference | ArrayReference
+    type: Literal["struct"]
+    members: list[str]
+
+class ArrayReference(TypedDict):
+    reference: ScalarReference | StructReference
+    type: Literal["array"]
+    indexes: list[ExprDescriptionPart]
+
+class ExprDescription(TypedDict):
+    id: int
+    description: list[ExprDescriptionPart]
+    expr: list[ExprDescriptionPart]
+
 class FuncInfo:
     def __init__(self, nodeID: str):
         self.start_nodeID: str = f'"{nodeID}"'
@@ -59,7 +95,7 @@ class LineInfo:
     def __init__(self):
         self.lines = set()
         self.loops = {}
-        self.returns = {}
+        self.returns: dict[int, list[str | dict[str, any]]] = {}
         self.void_returns = []
         self.start = 0
 
@@ -69,7 +105,7 @@ class LineInfo:
     def setLoop(self, key: int, value: int):
         self.loops[key] = value
 
-    def setReturn(self, line: int, funcs: list[str]):
+    def setReturn(self, line: int, funcs: list[str | dict[str, any]]):
         self.returns[line] = funcs
 
     def setVoidReturn(self, line: int):
@@ -79,6 +115,202 @@ class LineInfo:
         if self.start or not_to_set:
             return
         self.start = line
+
+class ExprNodeInfo(TypedDict):
+    vars: set[tuple[str, int]]
+    funcs: list[tuple[str, int] | dict[str, any]]
+    comments: list[ExprDescription]
+    line: int
+
+# 計算式の情報(var_references, func_references, expr_descriptions)を格納する
+class ExprInfo:
+    def __init__(self):
+        self.var_references: set[tuple[str, int]] = set()
+        self.func_references: list[tuple[str, int] | dict[str, any]] = []
+        self.expr_descriptions: list[ExprDescription] = []
+        self.id = 0
+        # 自作関数の依存関係を適切に描画するためにカウントする必要がある
+        self.custom_func_count = 0
+    
+    def add_var_reference(self, var_path: str, line: int):
+        self.var_references.add((var_path, line))
+
+    # 標準ライブラリ関数は辞書型
+    def append_standard_func_reference(self, func_name: str, **kwargs):
+        self.func_references.append({"name": func_name, **kwargs})
+
+    # 自作関数は文字列で登録する
+    def append_custom_func_reference(self, func_info: tuple[str, int]):
+        self.func_references.append(func_info)
+
+    def append_expr_description(self, description: list, expr: list[dict[str, any]]):
+        '''
+        descriptionは計算式の説明の文字列
+        exprは計算式の文字列を構成する辞書
+        この辞書のキーは、"text"、"expr_id"、"reference"-"type"、"func"-"args"がある
+        "text"は埋め込み文字列、"expr_id"はlldbによる動的解析中に値が決まる途中式のid、
+        "reference"-"type"は変数の参照である("reference"は変数名、"type"は変数の型の種類。"type"によっては"indexes"や"members"キーも存在する)
+        "func"-"args"は関数である("func"は関数名、"args"は引数の情報)
+        '''
+
+        self.id += 1
+        self.expr_descriptions.append({"id": self.id, "description": description, "expr": expr})
+        return {"expr_id": self.id}
+    
+    def get_sizeof_operator_description(self, type_name: str, en: bool) -> dict[str, any]:
+        tokens = type_name.strip().split()
+        non_size_modifiers = {'const', 'volatile', 'extern', 'static', 'register', 'inline'}
+
+        size_tokens = [token for token in tokens if token not in non_size_modifiers]
+
+        base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
+
+        base_type = None
+        for t in tokens:
+            if t in base_types:
+                base_type = t
+                break
+        
+        if base_type is not None:
+            size_tokens.remove(base_type)
+        else:
+            base_type = 'int'
+
+        size = self.sizeof_operator_size.get(base_type, {}).get(frozenset(size_tokens), None)
+        if size:
+            return [{"text": f"get size of {type_name} ({size})" if en else f"{type_name}のサイズ({size})を取得します"}]
+        else:
+            return [{"text": f"get size of {type_name}" if en else f"{type_name}のサイズを取得します"}]
+
+    unary_front_operator_description = {
+        '++': lambda expr: [expr, {"text": "を１増やしてから"}, expr, {"text": "の値を使います"}],
+        '--': lambda expr: [expr, {"text": "を１減らしてから"}, expr, {"text": "の値を使います"}],
+        '+': lambda expr: [expr, {"text": "の元の値を使います"}],
+        '-': lambda expr: [expr, {"text": "の符号を反転した値を使います"}],
+        '!': lambda expr: [expr, {"text": "が真なら偽、偽なら真です"}],
+        '~': lambda expr: [expr, {"text": "を２進数で表し、各ビットを反転します"}],
+        '&': lambda expr: [expr, {"text": "を格納しているアドレスを取得します"}],
+        '*': lambda expr: [{"text": "アドレス"}, expr, {"text": "を格納しているアドレスを取得します"}],
+    }
+
+    unary_front_operator_description_en = {
+        '++': lambda expr: [{"text": "add 1 to"}, expr, {"text": ", then use value of"}, expr],
+        '--': lambda expr: [{"text": "subtract 1 from"}, expr, {"text": ", then use value of"}, expr],
+        '+': lambda expr: [{"text": "use value of"}, expr],
+        '-': lambda expr: [{"text": "use negative value of"}, expr],
+        '!': lambda expr: [{"false if"}, expr, {"text": "is correct, otherwise true"}],
+        '~': lambda expr: [{"text": "flip all the bits in binary of"}, expr],
+        '&': lambda expr: [{"text": "get address of variable"}, expr],
+        '*': lambda expr: [{"text": "scan value of addres"}, expr],
+    }
+
+    unary_back_operator_description = {
+        '++': lambda expr: [expr, {"text": "の値を使います。その後、"}, expr, {"text": "を１増やします"}],
+        '--': lambda expr: [expr, {"text": "の値を使います。その後、"}, expr, {"text": "を１減らします"}],
+    }
+
+    unary_back_operator_description_en = {
+        '++': lambda expr: [{"text": "use value of"}, expr, {"text": "then add 1 to"}, expr],
+        '--': lambda expr: [{"text": "use value of"}, expr, {"text": "then subtract 1 from"}, expr],
+    }
+
+        # 環境依存は後で考える (環境を考えないならctypes.sizeofでOK)
+    
+    sizeof_operator_size = {
+        'int' : {
+            frozenset() : 4,
+            frozenset(['long']) : 4,
+            frozenset(['long', 'long']) : 8,
+            frozenset(['short']) : 2,
+            frozenset(['unsigned']) : 4,
+            frozenset(['unsigned', 'long']) : 4,
+            frozenset(['unsigned', 'long', 'long']) : 8,
+            frozenset(['unsigned', 'short']) : 2,
+        },
+        'char' : {
+            frozenset() : 1,
+        },
+        'float' : {
+            frozenset() : 4,
+        },
+        'double' : {
+            frozenset() : 8,
+            frozenset(['long']) : 16,
+        },
+        'other' : {
+            frozenset() : None
+        }
+    }
+
+    binary_operator_descriptions = {
+        '+': lambda left, right: [left, {"text": "と"}, *right, {"text": "の値を足します"}],
+        '-': lambda left, right: [left, {"text": "から"}, *right, {"text": "を引きます"}],
+        '*': lambda left, right: [left, {"text": "と"}, *right, {"text": "を掛けます"}],
+        '/': lambda left, right: [left, {"text": "を"}, *right, {"text": "で割ります"}],
+        '%': lambda left, right: [left, {"text": "を"}, *right, {"text": "で割った余りを求めます"}],
+        '=': lambda left, right: [left, {"text": "に"}, *right, {"text": "を代入します"}],
+        '==': lambda left, right: [left, {"text": "と"}, *right, {"text": "が等しいかどうかを比較します"}],
+        '!=': lambda left, right: [left, {"text": "と"}, *right, {"text": "が異なるかを比較します"}],
+        '<': lambda left, right: [left, {"text": "が"}, *right, {"text": "より小さいかを調べます"}],
+        '<=': lambda left, right: [left, {"text": "が"}, *right, {"text": "以下かを調べます"}],
+        '>': lambda left, right: [left, {"text": "が"}, *right, {"text": "より大きいかを調べます"}],
+        '>=': lambda left, right: [left, {"text": "が"}, *right, {"text": "以上かを調べます"}],
+        '&&': lambda left, right: [left, {"text": "と"}, *right, {"text": "の両方が真かを調べます"}],
+        '||': lambda left, right: [left, {"text": "または"}, *right, {"text": "のいずれかが真かを調べます"}],
+        '&': lambda left, right: [left, {"text": "と"}, *right, {"text": "を 2進数で表し、それぞれのビットが両方とも 1 のときに 1 になります"}],
+        '|': lambda left, right: [left, {"text": "と"}, *right, {"text": "を 2進数で表し、どちらかのビットが 1 であれば 1 になります"}],
+        '^': lambda left, right: [left, {"text": "と"}, *right, {"text": "を 2進数で表し、ビットが異なるときに１になります"}],
+        '<<': lambda left, right: [left, {"text": "を左に"}, *right, {"text": "ビット分シフトします。2進数で見ると桁が左にずれて、2の"}, *right, {"text": "乗倍になります"}],
+        '>>': lambda left, right: [left, {"text": "を右に"}, *right, {"text": "ビット分シフトします。2進数で見ると桁が右にずれて、2の"}, *right, {"text": "乗で割ったのと同じになります"}],
+    }
+    
+    binary_operator_descriptions_en = {
+        '+': lambda left, right: [{"text": "add"}, left, {"text": "and"}, *right],
+        '-': lambda left, right: [{"text": "subtract"}, *right, {"text": "from"}, left],
+        '*': lambda left, right: [{"text": "multiply"}, left, {"text": "by"}, *right],
+        '/': lambda left, right: [{"text": "divide"}, left, {"text": "by"}, *right],
+        '+': lambda left, right: [{"text": "get remainder dividing"}, left, {"text": "by"}, *right],
+        '=': lambda left, right: [{"text": "assign"}, *right, {"text": "to"}, left],
+        '==': lambda left, right: [{"text": "true if"}, left, {"text": "and"}, *right, {"text": "are same, otherwise false"}],
+        '!=': lambda left, right: [{"text": "true if"}, left, {"text": "and"}, *right, {"text": "are different, otherwise false"}],
+        '<': lambda left, right: [{"text": "true if"}, left, {"text": "is smaller than"}, *right, {"text": ", otherwise false"}],
+        '<=': lambda left, right: [{"text": "true if"}, left, {"text": "is smaller or equal to"}, *right, {"text": ", otherwise false"}],
+        '>': lambda left, right: [{"text": "true if"}, left, {"text": "is bigger than"}, *right, {"text": ", otherwise false"}],
+        '>=': lambda left, right: [{"text": "true if"}, left, {"text": "is bigger or equal to"}, *right, {"text": ", otherwise false"}],
+        '&&': lambda left, right: [{"text": "true if both"}, left, {"text": "and"}, *right, {"text": "are correct, otherwise false"}],
+        '||': lambda left, right: [{"text": "true if either"}, left, {"text": "or"}, *right, {"text": "are correct, otherwise false"}],
+        '&': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, *right, {"text": ", then produce a number where each bit is 1 if both bits are 1, otherwise 0"}],
+        '|': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, *right, {"text": ", then produce a number where each bit is 1 if either bits are 1, otherwise 0"}],
+        '^': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, *right, {"text": ", then produce a number where each bit is 1 if both bits are different, otherwise 0"}],
+        '<<': lambda left, right: [{"text": "shift"}, left, {"text": "left by"}, *right, {"text": "bits. The value becomes"}, left, {"text": "multiplied by 2 to the power of"}, *right],
+        '>>': lambda left, right: [{"text": "shift"}, left, {"text": "right by"}, *right, {"text": "bits. The value becomes"}, left, {"text": "divided by 2 to the power of"}, *right],
+    }
+    
+    compound_assignment_operator_descriptions = {
+        '+=': lambda left, right: [left, {"text": "に"}, right, {"text": "の値を足した結果を"}, left, {"text": "に代入します"}],
+        '-=': lambda left, right: [left, {"text": "から"}, right, {"text": "の値を引いた結果を"}, left, {"text": "に代入します"}],
+        '*=': lambda left, right: [left, {"text": "に"}, right, {"text": "の値を掛けた結果を"}, left, {"text": "に代入します"}],
+        '/=': lambda left, right: [left, {"text": "を"}, right, {"text": "の値で割った結果を"}, left, {"text": "に代入します"}],
+        '%=': lambda left, right: [left, {"text": "を"}, right, {"text": "で割った剰余を"}, left, {"text": "に代入します"}],
+        '<<=': lambda left, right: [left, {"text": "を"}, right, {"text": "分左シフトした結果を"}, left, {"text": "に代入します"}],
+        '>>=': lambda left, right: [left, {"text": "を"}, right, {"text": "分右シフトした結果を"}, left, {"text": "に代入します"}],
+        '&=': lambda left, right: [left, {"text": "と"}, right, {"text": "のビットANDを"}, left, {"text": "に代入します"}],
+        '|=': lambda left, right: [left, {"text": "と"}, right, {"text": "のビットORを"}, left, {"text": "に代入します"}],
+        '^=': lambda left, right: [left, {"text": "と"}, right, {"text": "のビットXORを"}, left, {"text": "に代入します"}],
+    }
+
+    compound_assignment_operator_descriptions_en = {
+        '+=': lambda left, right: [{"text": "add"}, right, {"text": "to"}, left, {"text": "then assign the result to"}, left],
+        '-=': lambda left, right: [{"text": "subtract"}, right, {"text": "from"}, left, {"text": "then assign the result to"}, left],
+        '*=': lambda left, right: [{"text": "multiply"}, left, {"text": "by"}, right, {"text": "then assign the result to"}, left],
+        '/=': lambda left, right: [{"text": "divide"}, left, {"text": "by"}, right, {"text": "then assign the result to"}, left],
+        '%=': lambda left, right: [{"text": "get remainder dividing"}, left, {"text": "by"}, right, {"text": "then assign the result to"}, left],
+        '<<=': lambda left, right: [{"text": "shift"}, left, {"text": "left by"}, right, {"text": "bits, then assign the result to"}, left],
+        '>>=': lambda left, right: [{"text": "shift"}, left, {"text": "right by"}, right, {"text": "bits, then assign the result to"}, left],
+        '&=': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, right, {"text": ", and produce a number where each bit is 1 if both bits are 1, otherwise 0, then assign the result to"}, left],
+        '|=': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, right, {"text": ", and produce a number where each bit is 1 if either bits are 1, otherwise 0, then assign the result to"}, left],
+        '^=': lambda left, right: [{"text": "compare each bit of"}, left, {"text": "and"}, right, {"text": ", and produce a number where each bit is 1 if both bits are different, otherwise 0, then assign the result to"}, left],
+    }
 
 class ASTtoFlowChart:
     def __init__(self, is_english):
@@ -97,8 +329,8 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
         self.roomSize_info = {}
         self.varNode_info: dict[str, dict] = {}
-        self.expNode_info: dict[str, tuple[str, set[tuple[list[str], int]], list[str], list[str], int]] = {}
-        self.condition_move : dict[str, tuple[str, list[int | str | None]]] = {}
+        self.expr_node_info: dict[str, ExprNodeInfo] = {}
+        self.condition_move : dict[str, tuple[str, list[int | dict[str, any]]]] = {}
         self.line_info_dict: dict[str, LineInfo] = {}
         self.macro_pos = {}
 
@@ -119,7 +351,7 @@ class ASTtoFlowChart:
             self.diag_list.append(diag)
             print(f"{diag.spelling}, {diag.location.offset}")
             if any(x in diag.spelling for x in ["expected '}'", "expected ';'"]):
-                sys.exit(-1)
+                sys.exit("error in a given C program")
 
     def check_cursor_error(self, cursor):
         # カーソルがファイルに属していないならスキップ
@@ -132,7 +364,7 @@ class ASTtoFlowChart:
                 cursor.location.file.name == diag.location.file.name and
                 cursor.location.offset >= diag.location.offset - 1): 
                 print(f"{diag.spelling}")
-                sys.exit(-2)
+                sys.exit("error in a given C program")
         return True
 
     def write_ast(self, tu: ci.TranslationUnit, programname):
@@ -248,7 +480,7 @@ class ASTtoFlowChart:
                 self.createRoomSizeEstimate(nextNodeID)
             nodeID = nextNodeID
             edgeName = ""
-            self.nextLines.pop()
+            self.nextLines.pop(-1)
         return nodeID
 
     # self.condition_move用で、次の行が初期化なしまたは静的変数の変数宣言であるかどうかを確かめるための関数
@@ -317,11 +549,11 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.get_exp(value_cursor, shape='lpromoter', label=f"{cr.location.line}")
+            returnNodeID = self.get_expr(value_cursor, shape='lpromoter', label=f"{cr.location.line}")
             # returnによる行確認は個別に行う (step in, step outを残り関数の違いによって区別するため) 関数の遷移履歴、現在のframe_num、現在の行数で確認
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expNode_info[f'"{returnNodeID}"'][2])
-            self.condition_move[f'"{returnNodeID}"'] = ('return', self.expNode_info[f'"{returnNodeID}"'][2])
+            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expr_node_info[f'"{returnNodeID}"']["funcs"])
+            self.condition_move[f'"{returnNodeID}"'] = ('return', self.expr_node_info[f'"{returnNodeID}"']["funcs"])
             self.createEdge(nodeID, returnNodeID, edgeName)
             return None
         elif cr.kind == ci.CursorKind.IF_STMT:
@@ -398,12 +630,10 @@ class ASTtoFlowChart:
                 self.gotoLabel_list[cr.spelling] = {"toNodeID": f'"{self.roomSizeEstimate[0]}"', "fromNodeID": []}
             nodeID = self.parse_stmt(exec_cr, toNodeID)
         elif cr.kind == ci.CursorKind.CALL_EXPR:
-            var_references: set[tuple[str, int]] = set()
-            func_references = []
-            calc_order_comments = []
-            exp_terms = self.parse_call_expr(cr, var_references, func_references, calc_order_comments)
-            expNodeID = self.createNode("")
-            self.createEdge(nodeID, expNodeID)
+            expr_info = ExprInfo()
+            expr_description = self.parse_call_expr(cr, expr_info)
+            exprNodeID = self.createNode("")
+            self.createEdge(nodeID, exprNodeID)
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
@@ -411,22 +641,23 @@ class ASTtoFlowChart:
             # 関数が単独で出た場合は、計算式キャラクターに登録する (長方形ノードが現れたら作る)
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cr.location.line)
+            # expr_node_infoはparse_call_exprでは登録されていなのでここで登録しておく
+            self.expr_node_info[f'"{exprNodeID}"'] = {"vars": expr_info.var_references, "funcs": expr_info.func_references, "comments": expr_info.expr_descriptions, "line": cr.location.line}
             next_line = self.get_next_line()
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]] if len(self.expNode_info[f'"{expNodeID}"'][2]) else [cr.location.line, next_line[0]])
-            nodeID = expNodeID
+            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"']["funcs"], next_line[0]] if len(self.expr_node_info[f'"{exprNodeID}"']["funcs"]) else [cr.location.line, next_line[0]])
+            nodeID = exprNodeID
         else:
             # 最初行番を変更 
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # ここの計算式は計算式キャラクターに登録する
-            expNodeID = self.get_exp(cr, shape='rect')
+            exprNodeID = self.get_expr(cr, shape='rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             next_line = self.get_next_line()
-            self.condition_move[f'"{expNodeID}"'] = ('exp', [cr.location.line, *self.expNode_info[f'"{expNodeID}"'][2], next_line[0]])
-            self.createEdge(nodeID, expNodeID, edgeName)
-            nodeID = expNodeID
+            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"']["funcs"], next_line[0]])
+            self.createEdge(nodeID, exprNodeID, edgeName)
+            nodeID = exprNodeID
         return nodeID
 
     # 変数の型を取得
@@ -483,25 +714,39 @@ class ASTtoFlowChart:
                 elif cr.kind == ci.CursorKind.STRING_LITERAL:
                     # 文字列を格納する配列の場合
                     indexNodeID = self.createNode(cr.spelling, 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (
-                        str(len(cr.spelling)-2), [], [],
-                        [
-                            f"store each character of {cr.spelling} into the array in increasing index order",
-                            f"array size is automatically set to {len(cr.spelling)-2}"
-                        ] if self.is_english else
-                        [
-                            f"文字列 {cr.spelling} の各文字が添字の小さい順に配列へ格納されます",
-                            f"配列サイズは {len(cr.spelling)-2} に自動的に設定されます"
+                    self.expr_node_info[f'"{indexNodeID}"'] = {
+                        "vars": [], "funcs": [],
+                        "comments": [
+                            {
+                                "id": 1, 
+                                "description": [
+                                    {
+                                        "text": f"store each character of {cr.spelling} into the array in increasing index order, array size is automatically set to {len(cr.spelling)-2}"
+                                    }
+                                ],
+                                "expr": []
+                            } 
+                            if self.is_english else 
+                            {
+                                "id": 1,
+                                "description": [
+                                    {
+                                        "text": f"文字列 {cr.spelling} の各文字が添字の小さい順に配列へ格納されます。配列サイズは {len(cr.spelling)-2} に自動的に設定されます。"
+                                    }
+                                ],
+                                "expr": []
+                            }
                         ],
-                        cursor.location.line
-                    )
+                        "line": cursor.location.line
+                    }
                     self.createEdge(arrTopNodeID, indexNodeID, "strCont")
                 else:
                     cr_index_list.append(cr)
 
-            arrCont_condition_move = []
-            # 初期化する場合 (一番上の添字ノードはこのメソッドで作りくっつける)
+            arrCont_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
+            # 初期化する場合
             if cr_init_members is not None:
+                # 一番上の添字ノードはこのメソッドで作りくっつける
                 arr_contents_list = self.get_arr_contents(cr_init_members, cr_index_list)
                 arrContNodeID_list = self.parse_arr_contents(arr_contents_list, [cursor.spelling], arrCont_condition_move, cursor.location.line)
                 for arrContNodeID in arrContNodeID_list:
@@ -511,30 +756,44 @@ class ASTtoFlowChart:
                     cr_index_list.append(len(arrContNodeID_list))
 
             nodeID = arrTopNodeID
-            index_condition_move = []
-            # Mcircleノードに添字の計算式または推定値を取得する
+            index_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
 
+            # Mcircleノードに添字の計算式または推定値を取得する
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
                     indexNodeID = self.createNode("", 'Mcircle')
-                    self.expNode_info[f'"{indexNodeID}"'] = (
-                        str(cr_index), [], [], 
-                        [f"array size is automatically set to {cr_index}" if self.is_english else f"添字は {cr_index} が自動的に設定されます"], 
-                        cursor.location.line
-                        )
+                    self.expr_node_info[f'"{indexNodeID}"'] = {
+                        "vars": [],
+                        "funcs": [],
+                        "comments": [
+                            {
+                                "id": 1, 
+                                "description": [{"text": f"array size is automatically set to {cr_index}"}],
+                                "expr": []
+                            } 
+                            if self.is_english else 
+                            {
+                                "id": 1,
+                                "description": [{"text": f"添字は {cr_index} が自動的に設定されます"}],
+                                "expr": []
+                            }
+                        ],
+                        "line": cursor.location.line
+                    }
                 else:
-                    indexNodeID = self.get_exp(cr_index, shape="Mcircle")
-                    index_condition_move += self.expNode_info[f'"{indexNodeID}"'][2]
-                for func in self.expNode_info[f'"{indexNodeID}"'][2]:
-                    if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
-                        sys.exit(-3)
+                    indexNodeID = self.get_expr(cr_index, shape="Mcircle")
+                    index_condition_move += self.expr_node_info[f'"{indexNodeID}"']["funcs"]
+                for func in self.expr_node_info[f'"{indexNodeID}"']["funcs"]:
+                    # dictは標準関数
+                    if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                        sys.exit("array index cannot include a specific standard function")
                 self.createEdge(nodeID, indexNodeID)
                 nodeID = indexNodeID
 
             # self.line_infoの最初行番が0である場合、このcondition_moveを記録すると同時にself.line_infoを更新する
             # indexのcondition_moveがあるなら最初の添字の行数を取得する 
             if len(index_condition_move) != 0:
-                array_condition_move = [*index_condition_move, *arrCont_condition_move]
+                array_condition_move: list[int | tuple[str,int] | dict[str, any]] = [*index_condition_move, *arrCont_condition_move]
                 self.condition_move[f'"{arrTopNodeID}"'] = ('item', array_condition_move)
             # 中身のcondition_moveがあるなら中身の最初の行数を取得する
             elif len(arrCont_condition_move) != 0:
@@ -575,12 +834,12 @@ class ASTtoFlowChart:
                         members = list((f.spelling, f.type.spelling) for f in cursor.type.get_fields())
                         member_crs = list(cr.get_children())
                         memberNum = len(member_crs)
-                        member_condition_move = []
+                        member_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
                         isFunc = False
                         for i, member in enumerate(members):
                             if i < memberNum:
                                 self.check_cursor_error(member_crs[i])
-                                # varnameとvartype(メンバーの)をget_expの引数に設定する
+                                # varnameとvartype(メンバーの)をget_exprの引数に設定する
                                 call_exp_cursor_list = None
                                 value_cr = self.unwrap_unexposed(member_crs[i])
                                 if value_cr.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
@@ -589,27 +848,59 @@ class ASTtoFlowChart:
                                     if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
                                         call_exp_cursor_list = list(casted_exp_cursor.get_children())
                                         if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                            memberNodeID = self.get_exp(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
-                                            self.expNode_info[f'"{memberNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expNode_info[f'"{memberNodeID}"'][0], *self.expNode_info[f'"{memberNodeID}"'][1:5])
+                                            memberNodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # memberNodeID = self.get_expr(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # self.expr_node_info[f'"{memberNodeID}"'] = {
+                                            #     "vars": self.expr_node_info[f'"{memberNodeID}"']["vars"],
+                                            #     "funcs": self.expr_node_info[f'"{memberNodeID}"']["funcs"],
+                                            #     "comments": [
+                                            #         *self.expr_node_info[f'"{memberNodeID}"']["comments"],
+                                            #         {
+                                            #             "id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"] + 1,
+                                            #             "description": 
+                                            #             [
+                                            #                 {"text": "cast type of"}, 
+                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]}, 
+                                            #                 {"text": f"to {value_cr.type.spelling}"},
+                                            #             ] if self.is_english else
+                                            #             [
+                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]},
+                                            #                 {"text": f"の型を {value_cr.type.spelling} に変換します"}
+                                            #             ],
+                                            #             "expr": 
+                                            #             [
+                                            #                 {"text": f"({value_cr.type.spelling})"},
+                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]}
+                                            #             ]
+                                            #         }
+                                            #     ],
+                                            #     "line": self.expr_node_info[f'"{memberNodeID}"']["line"]
+                                            # }
+                                            # self.expr_node_info[f'"{memberNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{memberNodeID}"'][0], *self.expr_node_info[f'"{memberNodeID}"'][1:5])
                                 elif value_cr.kind == ci.CursorKind.CALL_EXPR:
                                     call_exp_cursor_list = list(value_cr.get_children())
                                     if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                        memberNodeID = self.get_exp(value_cr, var={"vartype": member[1]})
+                                        memberNodeID = self.get_expr(value_cr, var={"vartype": member[1]})
                                     elif call_exp_cursor_list[0].spelling == "fopen":
-                                        sys.exit(-4)
+                                        sys.exit("struct member cannot include fopen")
                                 if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
-                                    memberNodeID = self.get_exp(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
+                                    memberNodeID = self.get_expr(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
                                 self.createEdge(nodeID, memberNodeID)
 
-                                if len(self.expNode_info[f'"{memberNodeID}"'][2]) != 0:
-                                    for func in self.expNode_info[f'"{memberNodeID}"'][2]:
-                                        if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
-                                            sys.exit(-5)
-                                    member_condition_move += self.expNode_info[f'"{memberNodeID}"'][2]
+                                if len(self.expr_node_info[f'"{memberNodeID}"']["funcs"]) != 0:
+                                    for func in self.expr_node_info[f'"{memberNodeID}"']["funcs"]:
+                                        if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                                            sys.exit("struct member cannot include some standard functions")
+                                    member_condition_move += self.expr_node_info[f'"{memberNodeID}"']["funcs"]
                                     isFunc = True
                             else:
                                 memberNodeID = self.createNode(member[0], 'square')
-                                self.expNode_info[f'"{memberNodeID}"'] = ("?", [], [], ["this is an uninitialized part" if self.is_english else "初期化されていない要素です"], cursor.location.line)
+                                self.expr_node_info[f'"{memberNodeID}"'] = {
+                                    "vars": [],
+                                    "funcs": [],
+                                    "comments": [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}],
+                                    "line": cursor.location.line
+                                }
                                 self.createEdge(nodeID, memberNodeID)
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
@@ -631,21 +922,21 @@ class ASTtoFlowChart:
                             if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
                                 call_exp_cursor_list = list(casted_exp_cursor.get_children())
                                 if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                    nodeID = self.get_exp(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
-                                    self.expNode_info[f'"{nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expNode_info[f'"{nodeID}"'][0], *self.expNode_info[f'"{nodeID}"'][1:5])
+                                    nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                    # self.expr_node_info[f'"{nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{nodeID}"'][0], *self.expr_node_info[f'"{nodeID}"'][1:5])
                         elif value_cr.kind == ci.CursorKind.CALL_EXPR:
                             call_exp_cursor_list = list(value_cr.get_children())
                             if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                nodeID = self.get_exp(value_cr, var={"vartype": cursor.type.spelling[:-1]})
+                                nodeID = self.get_expr(value_cr, var={"vartype": cursor.type.spelling[:-1]})
                             elif call_exp_cursor_list[0].spelling == "fopen":
-                                nodeID = self.get_exp(value_cr, var={"varname": cursor.spelling})
+                                nodeID = self.get_expr(value_cr, var={"varname": cursor.spelling})
                         if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc", "fopen"]:
-                            nodeID = self.get_exp(cr)
+                            nodeID = self.get_expr(cr)
 
                         # 今は一行だが、複数行になる場合、関数の遷移前の行番を取得する必要がある。(関数がない場合は変数名の行数になる)
-                        # -> expNodeInfo[2]には関数だけでなくその行番も含めて追加する必要がある
+                        # -> expr_node_info[2]には関数だけでなくその行番も含めて追加する必要がある
                         # ここでもstaticでなければself.line_infoの最初行番を変更する
-                        var_condition_move = [cr.location.line, *self.expNode_info[f'"{nodeID}"'][2]] if len(self.expNode_info[f'"{nodeID}"'][2]) else [cursor.location.line]
+                        var_condition_move: list[int | tuple[str,int] | dict[str, any]] = [cr.location.line, *self.expr_node_info[f'"{nodeID}"']["funcs"]] if len(self.expr_node_info[f'"{nodeID}"']["funcs"]) else [cursor.location.line]
                         self.condition_move[f'"{nodeID}"'] = ('item', var_condition_move)
                         self.line_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
                         self.func_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
@@ -653,7 +944,11 @@ class ASTtoFlowChart:
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
-                self.expNode_info[f'"{nodeID}"'] = ("?", [], [], ["this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"], cursor.location.line)
+                self.expr_node_info[f'"{nodeID}"'] = {
+                    "vars": [], "funcs": [], 
+                    "comments": [{"id": 1, "description": [{"text": "this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"}], "expr": []}],
+                    "line": cursor.location.line
+                }
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
@@ -705,9 +1000,10 @@ class ASTtoFlowChart:
             return fixed_arr_contents_list
 
     # 配列(多次元も含む)の要素を取得する
-    def parse_arr_contents(self, arr_content_list: list[list] | list[dict], index_list: list[str], arr_condition_move: list[int | str | None], line: int):
+    def parse_arr_contents(self, arr_content_list: list[list] | list[dict], index_list: list[str], arr_condition_move: list[int | tuple[str,int] | dict[str, any]], line: int):
+        # ここに来るということは「配列の初期化要素がある = arr_content_listの要素数が0ではない」はずなので、0であるならエラーとなる
         if len(arr_content_list) == 0:
-            sys.exit(-6)
+            sys.exit("here you come, zero array content is impossible")
         
         if isinstance(arr_content_list[0], list):
             indexNodeID_list = []
@@ -722,9 +1018,9 @@ class ASTtoFlowChart:
             contentNodeID_list = []
             for arr_content in arr_content_list:
                 if "cursor" in arr_content:
-                    # varnameとvartypeをget_expの引数に設定する
+                    # varnameとvartypeをget_exprの引数に設定する
                     # [*index_list, arr_content["label"]]
-                    # varnameとvartype(メンバーの)をget_expの引数に設定する
+                    # varnameとvartype(メンバーの)をget_exprの引数に設定する
                     call_exp_cursor_list = None
                     value_cr = self.unwrap_unexposed(arr_content["cursor"])
                     if value_cr.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
@@ -733,39 +1029,54 @@ class ASTtoFlowChart:
                         if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
                             call_exp_cursor_list = list(casted_exp_cursor.get_children())
                             if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                contentNodeID = self.get_exp(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
-                                self.expNode_info[f'"{contentNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expNode_info[f'"{contentNodeID}"'][0], *self.expNode_info[f'"{contentNodeID}"'][1:5])
+                                contentNodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                # self.expr_node_info[f'"{contentNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{contentNodeID}"'][0], *self.expr_node_info[f'"{contentNodeID}"'][1:5])
                     elif value_cr.kind == ci.CursorKind.CALL_EXPR:
                         call_exp_cursor_list = list(value_cr.get_children())
                         if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                            contentNodeID = self.get_exp(value_cr, var={"vartype": arr_content["cursor"].type.spelling})
+                            contentNodeID = self.get_expr(value_cr, var={"vartype": arr_content["cursor"].type.spelling})
                         elif call_exp_cursor_list[0].spelling == "fopen":
-                            sys.exit(-7)
+                            sys.exit("array content cannot include fopen")
                     if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
-                        contentNodeID = self.get_exp(arr_content["cursor"], shape="square", label=arr_content["label"], var={"vartype": arr_content["cursor"].type.spelling, "varname": index_list[0]})
+                        contentNodeID = self.get_expr(arr_content["cursor"], shape="square", label=arr_content["label"], var={"vartype": arr_content["cursor"].type.spelling, "varname": index_list[0]})
                     
-                    for func in self.expNode_info[f'"{contentNodeID}"'][2]:
-                        if isinstance(func, dict) and func["type"] in ["malloc", "realloc", "fopen"]:
-                            sys.exit(-8)
-                    if line != arr_content["cursor"].location.line:
-                        arr_condition_move = [*arr_condition_move, arr_content["cursor"].location.line, *self.expNode_info[f'"{contentNodeID}"'][2]]
-                    else:
-                        arr_condition_move = [*arr_condition_move, *self.expNode_info[f'"{contentNodeID}"'][2]]
+                    for func in self.expr_node_info[f'"{contentNodeID}"']["funcs"]:
+                        if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                            sys.exit("array content cannot include some standard functions")
+                    
+                    arr_condition_move = ([*arr_condition_move, *self.expr_node_info[f'"{contentNodeID}"']["funcs"]] 
+                                          if line == arr_content["cursor"].location.line else 
+                                          [*arr_condition_move, arr_content["cursor"].location.line, *self.expr_node_info[f'"{contentNodeID}"']["funcs"]])
+
                 else:
                     contentNodeID = self.createNode(arr_content["label"], "square")
-                    self.expNode_info[f'"{contentNodeID}"'] = (str(len(arr_content_list)), [], [], ["random value is set here" if self.is_english else "ランダムな値が設定されてます"], line)
+                    # ExprDescription
+                    # id: int
+                    # description: list[ExprDescriptionPart]
+                    # expr: list[ExprDescriptionPart]
+                    # list[ExprDescription]
+                    self.expr_node_info[f'"{contentNodeID}"'] = {
+                        "vars": [],
+                        "funcs": [],
+                        "comments": [{"id": 1, "description": [{"text": "random value is set here" if self.is_english else "ランダムな値が設定されてます"}], "expr": []}],
+                        "line": line
+                    }
                 contentNodeID_list.append(contentNodeID)
             return contentNodeID_list
 
     #式(一つのノードexpNodeに内容をまとめる)
-    def get_exp(self, cursor, shape='square', label="", var: dict | None = None) -> str:
-        expNodeID = self.createNode(label, shape)
-        var_references: set[tuple[str, int]] = set()
-        func_references = []
-        calc_order_comments = []
-        exp_terms = self.parse_exp_term(cursor, var_references, func_references, calc_order_comments, var=var)
-        self.expNode_info[f'"{expNodeID}"'] = (exp_terms, var_references, func_references, calc_order_comments, cursor.location.line)
-        return expNodeID
+    def get_expr(self, cursor, shape='square', label="", var: dict | None = None) -> str:
+        exprNodeID = self.createNode(label, shape)
+        expr_info = ExprInfo()
+        # ここのexpr_descriptionを変える必要がある(そのままだとexpr_idを含む辞書になってしまう)
+        expr_description = self.parse_expr(cursor, expr_info, var=var)
+        self.expr_node_info[f'"{exprNodeID}"'] = {
+            "vars": expr_info.var_references,
+            "funcs": expr_info.func_references,
+            "comments": expr_info.expr_descriptions,
+            "line": cursor.location.line
+        }
+        return exprNodeID
 
     def unwrap_unexposed(self, cursor: ci.Cursor) -> ci.Cursor:
         self.check_cursor_error(cursor)
@@ -776,295 +1087,156 @@ class ASTtoFlowChart:
 
     # 式の項を一つずつ解析
     # malloc, realloc, fopenが計算式に含まれる場合は特別な条件の下で解析を行う
-    def parse_exp_term(self, cursor: ci.Cursor, var_references: set[tuple[str, int]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict], var: dict | None = None) -> str:
-        unary_front_operator_comments = {
-            '++': "{expr} を 1 増やしてから {expr} の値を使います",
-            '--': "{expr} を 1 減らしてから {expr} の値を使います",
-            '+': "{expr} の元の値を使います",
-            '-': "{expr} の符号を反転した値を使います",
-            '!': "{expr} が真なら偽、偽なら真です",
-            '~': "{expr} を 2進数で表し、各ビットを反転します",
-            '&': "変数 {expr} を格納しているアドレスを取得します",
-            '*': "アドレス {expr} が指す値を読み取ります",
-        }
-
-        unary_front_operator_comments_en = {
-            '++': "add 1 to {expr}, then use value of {expr}",
-            '--': "subtract 1 from {expr}, then use value of {expr}",
-            '+': "use value of {expr}",
-            '-': "use negative value of {expr}",
-            '!': "false if {expr} is correct, otherwise true",
-            '~': "flip all the bits in binary of {expr}",
-            '&': "get address of variable {expr}",
-            '*': "scan value of address {expr}",
-        }
-
-        unary_back_operator_comments = {
-            '++': "{expr} の値を使います。その後、{expr} を 1 増やします",
-            '--': "{expr} の値を使います。その後、{expr} を 1 減らします",
-        }
-
-        unary_back_operator_comments_en = {
-            '++': "use value of {expr}, then add 1 to {expr}",
-            '--': "use value of {expr}, then subtract 1 from {expr}",
-        }
-
-        # 環境依存は後で考える (環境を考えないならctypes.sizeofでOK)
-        sizeof_operator_size = {
-            'int' : {
-                frozenset() : 4,
-                frozenset(['long']) : 4,
-                frozenset(['long', 'long']) : 8,
-                frozenset(['short']) : 2,
-                frozenset(['unsigned']) : 4,
-                frozenset(['unsigned', 'long']) : 4,
-                frozenset(['unsigned', 'long', 'long']) : 8,
-                frozenset(['unsigned', 'short']) : 2,
-            },
-            'char' : {
-                frozenset() : 1,
-            },
-            'float' : {
-                frozenset() : 4,
-            },
-            'double' : {
-                frozenset() : 8,
-                frozenset(['long']) : 16,
-            },
-            'other' : {
-                frozenset() : None
-            }
-        }
-
-        def get_sizeof_operator_comments(type_name, en: bool):
-            tokens = type_name.strip().split()
-            non_size_modifiers = {'const', 'volatile', 'extern', 'static', 'register', 'inline'}
-
-            size_tokens = [token for token in tokens if token not in non_size_modifiers]
-    
-            base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
-
-            base_type = None
-            for t in tokens:
-                if t in base_types:
-                    base_type = t
-                    break
-            
-            if base_type is not None:
-                size_tokens.remove(base_type)
-            else:
-                base_type = 'int'
-
-            size = sizeof_operator_size.get(base_type, sizeof_operator_size['other']).get(frozenset(size_tokens), None)
-            if size:
-                return f"get size {size} of {type_name}" if en else f"{type_name}のサイズ{size}を取得します" 
-            else:
-                return f"get size of {type_name}" if en else f"{type_name}のサイズを取得します"
-
-        binary_operator_comments = {
-            '+': "{left} と {right} の値を足します",
-            '-': "{left} から {right} を引きます",
-            '*': "{left} と {right} を掛けます",
-            '/': "{left} を {right} で割ります",
-            '%': "{left} を {right} で割った余りを求めます",
-            '=': "{left} に {right} を代入します",
-            '==': "{left} と {right} が等しいかどうかを比較します",
-            '!=': "{left} と {right} が異なるかを比較します",
-            '<': "{left} が {right} より小さいかを調べます",
-            '<=': "{left} が {right} 以下かを調べます",
-            '>': "{left} が {right} より大きいかを調べます",
-            '>=': "{left} が {right} 以上かを調べます",
-            '&&': "{left} と {right} の両方が真かを調べます",
-            '||': "{left} または {right} のいずれかが真かを調べます",
-            '&': "{left} と {right} を 2進数で表し、それぞれのビットが両方とも 1 のときに 1 になります",
-            '|': "{left} と {right} を 2進数で表し、どちらかのビットが 1 であれば 1 になります",
-            '^': "{left} と {right} を 2進数で表し、ビットが異なるときに 1 になります",
-            '<<': "{left} を左に {right} ビット分シフトします。2進数で見ると桁が左にずれて、2の {right} 乗倍になります",
-            '>>': "{left} を右に {right} ビット分シフトします。2進数で見ると桁が右にずれて、2の {right} 乗で割ったのと同じになります",
-        }
-        
-        binary_operator_comments_en = {
-            '+': "add {left} and {right}",
-            '-': "subtract {right} from {left}",
-            '*': "multiply {left} by {right}",
-            '/': "divide {left} by {right}",
-            '%': "get remainder after dividing {left} by {right}",
-            '=': "assign {right} to {left}",
-            '==': "true if {left} and {right} are same, otherwise false",
-            '!=': "true if {left} and {right} are different, otherwise false",
-            '<': "true if {left} is smaller than {right}, otherwise false",
-            '<=': "true if {left} is smaller than or equal to {right}, otherwise false",
-            '>': "true if {left} is bigger than {right}, otherwise false",
-            '>=': "true if {left} is bigger than or equal to {right}, otherwise false",
-            '&&': "true if {left} and {right} are correct, otherwise false",
-            '||': "true if either {left} or {right} correct, otherwise false",
-            '&': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if both bits are 1, otherwise 0",
-            '|': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if either bits are 1, otherwise 0",
-            '^': "compare each bit of {left} and {right}, and produce a number where each bit is 1 if both bits are different, otherwise 0",
-            '<<': "shift {left} left by {right} bits. The value becomes {left} multiplied by 2 to the power of {right}.",
-            '>>': "shift {left} right by {right} bits. The value becomes {left} multiplied by 2 to the power of {right}.",
-        }
-        
-        compound_assignment_operator_comments = {
-            '+=': "{left} に {right} の値を足した結果を {left} に代入します",
-            '-=': "{left} から {right} の値を引いた結果を {left} に代入します",
-            '*=': "{left} に {right} の値を掛けた結果を {left} に代入します",
-            '/=': "{left} を {right} の値で割った結果を {left} に代入します",
-            '%=': "{left} の {right} で割った剰余を {left} に代入します",
-            '<<=': "{left} を {right} 分左シフトした結果を {left} に代入します",
-            '>>=': "{left} を {right} 分右シフトした結果を {left} に代入します",
-            '&=': "{left} と {right} のビットANDを {left} に代入します",
-            '|=': "{left} と {right} のビットORを {left} に代入します",
-            '^=': "{left} と {right} のビットXORを {left} に代入します",
-        }
-
-        compound_assignment_operator_comments_en = {
-            '+=': "add {right} to {left}, and assign the result to {left}",
-            '-=': "subtract {right} from {left}, and assign the result to {left}",
-            '*=': "multiply {left} by {right}, and assign the result to {left}",
-            '/=': "divide {left} by {right}, and assign the result to {left}",
-            '%=': "get remainder after dividing {left} by {right}, and assign the result to {left}",
-            '<<=': "shift {left} left by {right} bits, and assign the result to {left}",
-            '>>=': "shift {left} right by {right} bits, and assign the result to {left}",
-            '&=': "compare each bit of {left} and {right}, then produce a number where each bit is 1 if both bits are 1, otherwise 0, and assign the result to {left}",
-            '|=': "compare each bit of {left} and {right}, then produce a number where either bit is 1 if either bits are 1, otherwise 0, and assign the result to {left}",
-            '^=': "compare each bit of {left} and {right}, then produce a number where each bit is 1 if both bits are different, otherwise 0, and assign the result to {left}",
-        }
-
+    def parse_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, var: dict | None = None) -> dict[str, any]:
         cursor = self.unwrap_unexposed(cursor)
         # 現在の計算式がマクロならその情報を返す
         if (cursor.location.file.name, cursor.location.line, cursor.location.column) in self.macro_pos:
-            return self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]
-        exp_terms = ""
+            return {"text": self.macro_pos[(cursor.location.file.name, cursor.location.line, cursor.location.column)]}
+        expr_description: dict[str, any] = {"text": ""}
 
         # ()で囲まれている場合
         if cursor.kind == ci.CursorKind.PAREN_EXPR:
             cr = next(cursor.get_children())
-            inside_exp_terms = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
-            exp_comment = "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します"
-            calc_order_comments.append(f"({inside_exp_terms}) : {exp_comment}")
-            exp_terms = ''.join(["(", inside_exp_terms, ")"])
+            inside_expr_description = self.parse_expr(cr, expr_info)
+            expr_description = expr_info.append_expr_description(
+                description=[{"text": "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します"}], 
+                expr=[{"text": "("}, inside_expr_description, {"text": ")"}]
+            )
         # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
-            exp_terms = next(cursor.get_tokens()).spelling
+            expr_description = {"text": next(cursor.get_tokens()).spelling}
         elif cursor.kind == ci.CursorKind.FLOATING_LITERAL:
-            exp_terms = next(cursor.get_tokens()).spelling
+            expr_description = {"text": next(cursor.get_tokens()).spelling}
         elif cursor.kind == ci.CursorKind.STRING_LITERAL:
-            exp_terms = next(cursor.get_tokens()).spelling
+            expr_description = {"text": next(cursor.get_tokens()).spelling}
         elif cursor.kind == ci.CursorKind.CHARACTER_LITERAL:
-            exp_terms = next(cursor.get_tokens()).spelling
-        # 変数の呼び出し
+            expr_description = {"text": next(cursor.get_tokens()).spelling}
+        # スカラー変数の呼び出し
         elif cursor.kind == ci.CursorKind.DECL_REF_EXPR:
             ref_expr_tokens = list(cursor.get_tokens())
+            # マクロなど以外の変数なら、基本的にこのトークンリストの長さは1以上になる
             if len(ref_expr_tokens):
-                exp_terms = ref_expr_tokens[0].spelling
+                expr_description = {"reference": ref_expr_tokens[0].spelling, "type": "scalar"}
                 # グローバル変数ならグローバル変数のリファレンスを登録する
-                if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
+                if (gvar_cursor := self.gvar_candidate_crs.pop(expr_description["reference"], None)):
                     self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
             else:
-                exp_terms = cursor.spelling
-            var_references.add((exp_terms, cursor.referenced.location.line))
+                expr_description = {"reference": cursor.spelling, "type": "scalar"}
+            expr_info.add_var_reference(expr_description["reference"], cursor.referenced.location.line)
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
-            index_exp_terms_list = []
+            index_list: list[dict[str, any]] = []
             # 配列の参照は、添字→添字→・・・→配列名の順で取得する
-            while 1:
-                array_children = [self.unwrap_unexposed(cr) for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-                if len(array_children) != 2:
-                    sys.exit(-9)
-                index_exp_terms_list.append(f"[{self.parse_exp_term(array_children[1], var_references, func_references, calc_order_comments)}]")
-                print(index_exp_terms_list)
-                if array_children[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
-                    name_spell = self.parse_exp_term(array_children[0], var_references, func_references, calc_order_comments)
+            while True:
+                array_children_cursors = [self.unwrap_unexposed(cr) for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
+                # 子カーソルは、(次の添字または変数名カーソル, 配列の添字カーソル)となる。これを判別する
+                if len(array_children_cursors) != 2:
+                    sys.exit("length of children cursors of array has to be 2")
+                index_list.append(self.parse_expr(array_children_cursors[1], expr_info))
+                if array_children_cursors[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
                     break
-                # if array_children[0].kind in (ci.CursorKind.DECL_REF_EXPR, ci.CursorKind.MEMBER_REF_EXPR):
-                #     name_spell = array_children[0].spelling
-                #     print(name_spell)
-                #     children_cursor = [self.unwrap_unexposed(c) for c in array_children[0].get_children()]
-                #     print(children_cursor[0].kind)
-                #     print([self.unwrap_unexposed(c).kind for c in children_cursor[0].get_children()])
-                #     print([self.unwrap_unexposed(c).spelling for c in children_cursor[0].get_children()])
+                # if array_children_cursors[0].kind in (ci.CursorKind.DECL_REF_EXPR, ci.CursorKind.MEMBER_REF_EXPR):
+                #     # spellingではなく、parse_exprする必要がある
+                #     name_spell = array_children_cursors[0].spelling
                 #     break
-                # if array_children[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
-                #     sys.exit(-10)
-                cursor = array_children[0]
-            var_path = [name_spell, *list(reversed(index_exp_terms_list))]
-            exp_terms = ''.join(var_path)
-            print(exp_terms)
-            var_references.add((var_path[0], array_children[0].referenced.location.line))
+                # if array_children_cursors[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
+                #     sys.exit("if the AST tracker has not reached the bottom of array (array content) yet, the next cursor has to be ArraySubscriptExpr")
+                cursor = array_children_cursors[0]
+            # 配列の添字は静的に決まるものしか設定できない
+            # index_path = "[" + "][".join(list(reversed(index_list))) + "]"
+            # index_path = "[" + index_path[:-1]
+
+            # expr_info.add_var_reference(name_spell, array_children_cursors[0].referenced.location.line)
+            expr_description = {"reference": self.parse_expr(array_children_cursors[0], expr_info), "indexes": list(reversed(index_list)), "type": "array"}
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
-            member_chain = []
+            member_chain: list[str] = []
             member_cursor = cursor
             while member_cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
                 member_chain.append(member_cursor.spelling)
                 children = list(member_cursor.get_children())
                 if children:
-                    # print("here", member_cursor.kind, member_cursor.spelling, cursor.spelling)
                     member_cursor = children[0]
                 else:
                     break
             member_cursor = self.unwrap_unexposed(member_cursor)
-            member_chain.append(self.parse_exp_term(member_cursor, var_references, func_references, calc_order_comments))
-            exp_terms = ".".join(list(reversed(member_chain)))
-            print(exp_terms)
+            # referenceはstudents[i].scores[0]のstudents[i]のようにカーソルのspellingだけでは取得できないものがある。それにも対応できるようにparse_exprメソッドを呼び出す。
+            expr_description = {"reference": self.parse_expr(member_cursor, expr_info), "members": list(reversed(member_chain)), "type": "struct"}
             # if member_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
-            #     member_chain.append(member_cursor.spelling)
-            #     var_references.add((member_cursor.spelling, member_cursor.referenced.location.line))
-            #     exp_terms = ".".join(list(reversed(member_chain)))
+            #     # member_chain.append(member_cursor.spelling)
+            #     expr_info.add_var_reference(member_cursor.spelling, member_cursor.referenced.location.line)
+            #     expr_description = {"reference": member_cursor.spelling, "members": list(reversed(member_chain)), "type": "struct"}
+            # else:
+            #     # sys.exit("") ?
+            #     pass
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
-            exp_terms = self.parse_call_expr(cursor, var_references, func_references, calc_order_comments, var=var)
+            expr_description = self.parse_call_expr(cursor, expr_info, var=var)
+        
         # 一項式
         elif cursor.kind == ci.CursorKind.UNARY_OPERATOR:
             # ++aでいうaのカーソル
             operand_cursor = next(cursor.get_children())
             # ++といった演算子
             operator = next(cursor.get_tokens())
-            operand_term = self.parse_exp_term(operand_cursor, var_references, func_references, calc_order_comments)
+
+            operand_expr = self.parse_expr(operand_cursor, expr_info)
             # 前置(++a)
             if operator.location.offset < operand_cursor.location.offset:
-                exp_terms = ''.join([operator.spelling, operand_term])
+                expr = [{"text": operator.spelling}, operand_expr]
                 if self.is_english:
-                    comment = unary_front_operator_comments_en.get(operator.spelling, "unresolved operator")
+                    if operator.spelling in ExprInfo.unary_front_operator_description_en:
+                        description = ExprInfo.unary_front_operator_description_en[operator.spelling](operand_expr)
+                    else:
+                        description = [{"text": "unresolved operator"}]
                 else:
-                    comment = unary_front_operator_comments.get(operator.spelling, "不明な演算子です")
+                    if operator.spelling in ExprInfo.unary_front_operator_description:
+                        description = ExprInfo.unary_front_operator_description[operator.spelling](operand_expr)
+                    else:
+                        description = [{"text": "不明な演算子です"}]
             # 後置(a++)
             else:
                 operator = next(reversed(list(cursor.get_tokens())))
-                exp_terms = ''.join([operand_term, operator.spelling])
+                expr = [operand_expr, {"text": operator.spelling}]
                 if self.is_english:
-                    comment = unary_back_operator_comments_en.get(operator.spelling, "unresolved operator")
+                    if operator.spelling in ExprInfo.unary_back_operator_description_en:
+                        description = ExprInfo.unary_back_operator_description_en[operator.spelling](operand_expr)
+                    else:
+                        description = [{"text": "unresolved operator"}]
                 else:
-                    comment = unary_back_operator_comments.get(operator.spelling, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(expr=operand_term)}")
+                    if operator.spelling in ExprInfo.unary_back_operator_description:
+                        description = ExprInfo.unary_back_operator_description[operator.spelling](operand_expr)
+                    else:
+                        description = [{"text": "不明な演算子です"}]
+            expr_description = expr_info.append_expr_description(description, expr)
+        
         # c言語特有の一項条件式 (現在はsizeofのみに対応)
         elif cursor.kind == ci.CursorKind.CXX_UNARY_EXPR:
-            exp_terms = ' '.join([t.spelling for t in list(cursor.get_tokens())])
-            if 'sizeof' in exp_terms:
+            expr_spell = ' '.join([t.spelling for t in list(cursor.get_tokens())])
+            if 'sizeof' in expr_spell:
                 child_cursor_list = list(cursor.get_children())
-                # sizeof内の計算式を示すカーソルがあるならそのカーソルからsizeofの型を取得する
                 if child_cursor_list:
                     type_str = self.unwrap_unexposed(child_cursor_list[0]).type.spelling
                 else:
-                    type_str = exp_terms.removeprefix("sizeof(").removesuffix(")")
-                calc_order_comments.append(f"{exp_terms} : {get_sizeof_operator_comments(type_str, self.is_english)}")
+                    type_str = expr_spell.removeprefix("sizeof(").removesuffix(")")
+                expr_description = expr_info.append_expr_description(description=ExprInfo.get_sizeof_operator_description(type_str, self.is_english), expr={"text": expr_spell})
+
         # 二項条件式(a + b)
         elif cursor.kind == ci.CursorKind.BINARY_OPERATOR:
-            exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            front_exp_terms_end = exps[0].extent.end.offset
-            operator_spell = ""
+            expr_crs = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
+            left_expr_end_offset = expr_crs[0].extent.end.offset
+            operator_spell: str = ""
             for token in cursor.get_tokens():
-                # 前項の位置を最初に超えたtokenが演算子になる
-                if front_exp_terms_end <= token.location.offset:
+                # 前項の位置を最初に超えたtokenが演算子(+や-など)になる
+                if left_expr_end_offset <= token.location.offset:
                     operator_spell = token.spelling
                     break
-            left_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            right_exp_terms = None
+            left_expr = self.parse_expr(expr_crs[0], expr_info)
+            right_expr_list: list[dict[str, any]] = []
             # malloc, realloc, fopenについては、特殊な場合として解析する
             if operator_spell == "=":
-                left_cursor = self.unwrap_unexposed(exps[0])
-                right_cursor = self.unwrap_unexposed(exps[1])
+                left_cursor = self.unwrap_unexposed(expr_crs[0])
+                right_cursor = self.unwrap_unexposed(expr_crs[1])
                 if right_cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
                     casted_exp_cursor = next(right_cursor.get_children())
                     casted_exp_cursor = self.unwrap_unexposed(casted_exp_cursor)
@@ -1073,15 +1245,14 @@ class ASTtoFlowChart:
                         func_cursor = self.unwrap_unexposed(call_exp_cursor_list[0])
                         self.check_cursor_error(func_cursor)
                         if func_cursor.spelling in ["malloc", "realloc"]:
-                            right_exp_terms = self.parse_call_expr(var_references, func_references, calc_order_comments, var={"vartype": right_cursor.type.spelling[:-1]})
-                            right_exp_terms = ''.join(["(", right_cursor.type.spelling, ") ", right_exp_terms])
+                            right_expr_list = [{"text": f"({right_cursor.type.spelling})"}, self.parse_call_expr(casted_exp_cursor, expr_info, var={"vartype": right_cursor.type.spelling[:-1]})]
                 elif left_cursor.kind in [ci.CursorKind.ARRAY_SUBSCRIPT_EXPR, ci.CursorKind.MEMBER_REF_EXPR, ci.CursorKind.DECL_REF_EXPR]:
                     if right_cursor.kind == ci.CursorKind.CALL_EXPR:
                         call_exp_cursor_list = list(right_cursor.get_children())
                         func_cursor = self.unwrap_unexposed(call_exp_cursor_list[0])
                         self.check_cursor_error(func_cursor)
                         if func_cursor.spelling in ["malloc", "realloc"]:
-                            right_exp_terms = self.parse_call_expr(var_references, func_references, calc_order_comments, var={"vartype": left_cursor.type.spelling[:-1]})
+                            right_expr_list = [self.parse_call_expr(right_cursor, expr_info, var={"vartype": left_cursor.type.spelling[:-1]})]
                     if left_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
                         if right_cursor.kind == ci.CursorKind.CALL_EXPR:
                             call_exp_cursor_list = list(right_cursor.get_children())
@@ -1090,143 +1261,233 @@ class ASTtoFlowChart:
                             if call_exp_cursor_list[0].spelling == "fopen":
                                 ref_expr_tokens = list(left_cursor.get_tokens())
                                 if len(ref_expr_tokens):
-                                    exp_terms = ref_expr_tokens[0].spelling
+                                    expr_description = ref_expr_tokens[0].spelling
                                     # グローバル変数ならグローバル変数のリファレンスを登録する
-                                    if (gvar_cursor := self.gvar_candidate_crs.pop(exp_terms, None)):
+                                    if (gvar_cursor := self.gvar_candidate_crs.pop(expr_description, None)):
                                         self.gvar_info.append(f'"{self.parse_var_decl(gvar_cursor, None)}"')
-                                    right_exp_terms = self.parse_call_expr(right_cursor, var_references, func_references, calc_order_comments, var={"varname": ref_expr_tokens[0].spelling})
+                                    right_expr_list = [self.parse_call_expr(right_cursor, expr_info, var={"varname": ref_expr_tokens[0].spelling})]
                                 else:
-                                    right_exp_terms = self.parse_call_expr(right_cursor, var_references, func_references, calc_order_comments, var={"varname": cursor.spelling})
-            if right_exp_terms is None:
-                right_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            exp_terms = ' '.join([left_exp_terms, operator_spell, right_exp_terms])
+                                    right_expr_list = [self.parse_call_expr(right_cursor, expr_info, var={"varname": cursor.spelling})]
+            
+            if not len(right_expr_list):
+                right_expr_list = [self.parse_expr(expr_crs[1], expr_info)]
+
+            expr = [left_expr, {"text": operator_spell}, *right_expr_list]
             if self.is_english:
-                comment = binary_operator_comments_en.get(operator_spell, "unresolved operator")
+                if operator_spell in ExprInfo.binary_operator_descriptions_en:
+                    description = ExprInfo.binary_operator_descriptions_en[operator_spell](left_expr,right_expr_list)
+                else:
+                    description = [{"text": "unresolved operator"}]
             else:
-                comment = binary_operator_comments.get(operator_spell, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(left=left_exp_terms, right=right_exp_terms)}")
+                if operator_spell in ExprInfo.binary_operator_descriptions:
+                    description = ExprInfo.binary_operator_descriptions[operator_spell](left_expr,right_expr_list)
+                else:
+                    description = [{"text": "不明な演算子です"}]
+            expr_description = expr_info.append_expr_description(description, expr)
+
         # 複合代入演算子(a += b)
         elif cursor.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
-            exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
-            front_exp_terms_end = exps[0].extent.end.offset
+            expr_crs = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
+            left_expr_end_offset = expr_crs[0].extent.end.offset
             operator_spell = ""
             for token in cursor.get_tokens():
-                if front_exp_terms_end <= token.location.offset:
+                if left_expr_end_offset <= token.location.offset:
                     operator_spell = token.spelling
                     break
                 
-            front_exp_terms = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            back_exp_terms =  self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            exp_terms = ' '.join([front_exp_terms, operator_spell, back_exp_terms])
+            left_expr = self.parse_expr(expr_crs[0], expr_info)
+            right_expr =  self.parse_expr(expr_crs[1], expr_info)
+
+            expr = [left_expr, {"text": operator_spell}, right_expr]
             if self.is_english:
-                comment = compound_assignment_operator_comments_en.get(operator_spell, "unresolved operator")
+                if operator_spell in ExprInfo.compound_assignment_operator_descriptions_en:
+                    description = ExprInfo.compound_assignment_operator_descriptions_en[operator_spell](left_expr,right_expr)
+                else:
+                    description = [{"text": "unresolved operator"}]
             else:
-                comment = compound_assignment_operator_comments.get(operator_spell, "不明な演算子です")
-            calc_order_comments.append(f"{exp_terms} : {comment.format(left=front_exp_terms, right=back_exp_terms)}")
+                if operator_spell in ExprInfo.compound_assignment_operator_descriptions:
+                    description = ExprInfo.compound_assignment_operator_descriptions[operator_spell](left_expr,right_expr)
+                else:
+                    description = [{"text": "不明な演算子です"}]
+            expr_description = expr_info.append_expr_description(description, expr)
+
         # 三項条件式(c? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
-            exps = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
+            expr_crs = [cr for cr in list(cursor.get_children()) if self.check_cursor_error(cr)]
             #まず、条件文を解析し、a : b の aかbを解析する
-            condition = self.parse_exp_term(exps[0], var_references, func_references, calc_order_comments)
-            true_exp_terms = self.parse_exp_term(exps[1], var_references, func_references, calc_order_comments)
-            false_exp_terms = self.parse_exp_term(exps[2], var_references, func_references, calc_order_comments)
-            exp_terms = ''.join([condition, " ? ", true_exp_terms, " : ", false_exp_terms])
-            exp_comment = f"if {condition} is true, get value of {true_exp_terms}、otherwise get value of {false_exp_terms}" if self.is_english else f"{condition} が真なら {true_exp_terms}、偽なら {false_exp_terms} を計算します"
-            calc_order_comments.append(f"{exp_terms} : {exp_comment}")
+            condition_expr = self.parse_expr(expr_crs[0], expr_info)
+            true_expr = self.parse_expr(expr_crs[1], expr_info)
+            false_expr = self.parse_expr(expr_crs[2], expr_info)
+            expr = [condition_expr, {"text": "?"}, true_expr, {"text": ":"}, false_expr]
+            description = (
+                [{"text": "if"}, condition_expr, {"text": "is true, get value of"}, true_expr, {"text": ", otherwise get value of"}, false_expr] 
+                if self.is_english else 
+                [condition_expr, {"text": "が真なら"}, true_expr, {"text": "、偽なら"}, false_expr, {"text": "の値を使います"}]
+                )
+            expr_description = expr_info.append_expr_description(description, expr)
+
         # キャスト型
         elif cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
             cr = next(cursor.get_children())
-            casted_exp_terms = self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
-            exp_terms = ''.join(["(", cursor.type.spelling, ") ", casted_exp_terms])
-            casted_exp_type = self.unwrap_unexposed(cr).type.spelling
-            if casted_exp_type:
-                exp_comment = (
-                    f"use value of {casted_exp_terms} cast from {casted_exp_type} to {cursor.type.spelling}"
+            casted_expr = self.parse_expr(cr, expr_info, var=var)
+            expr = [{"text": f"({cursor.type.spelling})"}, casted_expr]
+            casted_expr_type: str | None = self.unwrap_unexposed(cr).type.spelling
+            if casted_expr_type:
+                description = (
+                    [{"text": "cast type of"}, casted_expr, {"text": f"from {casted_expr_type}"}, {"text": f"to {cursor.type.spelling}"}]
                     if self.is_english else
-                    f"{casted_exp_terms} の型を {casted_exp_type} から {cursor.type.spelling} に変換します"
-                )
-                calc_order_comments.append(f"{exp_terms} : {exp_comment}")
+                    [casted_expr, {"text": "の型を"}, {"text": f"{casted_expr_type}から{cursor.type.spelling}"}, {"text": f"{cursor.type.spelling} に変換します"}]
+                    )
             else:
-                exp_comment = (
-                    f"use value of {casted_exp_terms} cast to {cursor.type.spelling}"
+                description = (
+                    [{"text": "cast type of"}, casted_expr, {"text": f"to {cursor.type.spelling}"}]
                     if self.is_english else
-                    f"{casted_exp_terms} の型を {cursor.type.spelling} に変換します"
-                )
-                calc_order_comments.append(f"{exp_terms} : {exp_comment}")
+                    [casted_expr, {"text": f"の型を {cursor.type.spelling} に変換します"}]
+                    )
+            expr_description = expr_info.append_expr_description(description, expr)
+        
         # 配列の要素や構造体のメンバの{}
         elif cursor.kind == ci.CursorKind.INIT_LIST_EXPR:
             for cr in cursor.get_children():
-                self.parse_exp_term(cr, var_references, func_references, calc_order_comments)
+                self.parse_expr(cr, expr_info)
         
-        return exp_terms
+        return expr_description
     
     # 関数の呼び出し(変数と関数の呼び出しは分ける) 
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
-    def parse_call_expr(self, cursor, var_references: set[tuple[list[str], int]], func_references: list[tuple[str, list[list[str]]]], calc_order_comments: list[str | dict], var: dict | None = None):
+    def parse_call_expr(self, cursor, expr_info: ExprInfo, var: dict | None = None) -> dict[str, any]:
         children = list(cursor.get_children())
 
         # --- 関数名ノードの処理 ---
         func_cursor = self.unwrap_unexposed(children[0])
         self.check_cursor_error(func_cursor)
 
-        ref_spell = func_cursor.spelling
+        ref_spell: str = func_cursor.spelling
         self.func_info_dict[self.scanning_func].setRef(ref_spell)
 
-        arg_exp_term_list = []
-        arg_calc_order_comments_list = []
-        arg_func_order_list: list[list[str]] = []
+        arg_expr_description_list: list[dict[str,any]] = []
+
+        custom_func_count_in_args: int = 0
 
         # --- 引数ノードとのエッジ作成 ---
         for arg_cursor in children[1:]:
-            arg_calc_order_comments = []
-            arg_func_order: list[int] = []
-            arg_exp_term_list.append(self.parse_exp_term(arg_cursor, var_references, func_references, arg_calc_order_comments))
-            arg_calc_order_comments_list.append({"values": [arg_calc_order_comment["comment"] if isinstance(arg_calc_order_comment, dict) else arg_calc_order_comment for arg_calc_order_comment in arg_calc_order_comments]})
-            for arg_calc_order_comment in arg_calc_order_comments:
-                if isinstance(arg_calc_order_comment, dict):
-                    calc_order_comments.append(arg_calc_order_comment)
-                    arg_func_order.append(arg_calc_order_comment["name"])
-            arg_func_order_list.append(arg_func_order)
+            arg_expr_info = ExprInfo()
+            arg_expr_info.id = expr_info.id
+            arg_expr_description = self.parse_expr(arg_cursor, arg_expr_info)
+            arg_expr_description_list.append(arg_expr_description)
+            
+            expr_info.var_references.update(arg_expr_info.var_references)
+            # ここでfunc_referencesの差分を取るべき?
+            expr_info.func_references.extend(arg_expr_info.func_references)
+            expr_info.expr_descriptions.extend(arg_expr_info.expr_descriptions)
+            expr_info.id = arg_expr_info.id
+
+            custom_func_count_in_args += arg_expr_info.custom_func_count
+
+        description: list[dict[str, any]] = []
         # 標準関数は特別な形でfunc_referencesに登録する
         if ref_spell == "strcpy":
-            func_references.append({"type": ref_spell, "copyTo": arg_exp_term_list[0], "copyFrom": arg_exp_term_list[1]})
-            # return ref_spell
+            expr_info.append_standard_func_reference(ref_spell, copyTo=arg_expr_description_list[0], copyFrom=arg_expr_description_list[1])
+            description = ([{"text": "copy from"}, arg_expr_description_list[1], {"text": "to"}, arg_expr_description_list[0]] 
+                           if self.is_english else
+                           [arg_expr_description_list[1], {"text": "の内容を"}, arg_expr_description_list[0], {"text": "にコピーします"}]
+                           )
         elif ref_spell == "scanf":
-            func_references.append({"type": ref_spell, "format": [t.spelling for t in children[1].get_tokens()][0]})
-            # return ref_spell
+            format = [t.spelling for t in children[1].get_tokens()][0]
+            expr_info.append_standard_func_reference(ref_spell, format=format)
+            description = ([{"text": f"input awaited... format is {format}"}]
+                           if self.is_english else
+                           [{"text": f"入力待ちです、、、 フォーマットは {format} です"}]
+                           )
         elif ref_spell == "fopen":
             if var is None:
-                sys.exit(-12)
-            func_references.append({"type": ref_spell, "filename": [t.spelling for t in children[1].get_tokens()][0], **var})
+                sys.exit("fopen cannot be used not for varialbe value assignment")
+            filename = [t.spelling for t in children[1].get_tokens()][0]
+            expr_info.append_standard_func_reference(ref_spell, filename=filename, **var)
+            description = ([{"text": f"open file \"{filename}\""}]
+                           if self.is_english else
+                           [{"text": f"ファイル「{filename}」を開きます"}]
+                           )
         elif ref_spell == "fclose":
-            func_references.append({"type": ref_spell, "varname": arg_exp_term_list[0]})
-            # return ref_spell
+            varname = arg_expr_description_list[0]
+            expr_info.append_standard_func_reference(ref_spell, varname=varname)
+            description = ([{"text": f"close file of address"}, varname]
+                           if self.is_english else
+                           [{"text": f"アドレス"}, varname, {"text": "が保存しているファイルを閉じます"}]
+                           )
         elif ref_spell == "malloc":
             if var is None:
-                sys.exit(-13)
-            func_references.append({"type": ref_spell, "size": "".join([t.spelling for t in children[1].get_tokens()]), **var})
+                sys.exit("malloc cannot be used not for varialbe value assignment")
+            size = "".join([t.spelling for t in children[1].get_tokens()])
+            expr_info.append_standard_func_reference(ref_spell, size=size, **var)
+            description = ([{"text": f"reserve memory in size of {size}"}]
+                           if self.is_english else
+                           [{"text": f"{size}が示すサイズ分のメモリを確保します"}]
+                           )
         elif ref_spell == "realloc":
             if var is None:
-                sys.exit(-14)
-            func_references.append({"type": ref_spell, "size": "".join([t.spelling for t in children[2].get_tokens()]), "fromVar": arg_exp_term_list[0], **var})
+                sys.exit("realloc cannot be used not for varialbe value assignment")
+            size = "".join([t.spelling for t in children[2].get_tokens()])
+            fromVar = arg_expr_description_list[0]
+            expr_info.append_standard_func_reference(ref_spell, size=size, fromVar=fromVar, **var)
+            description = ([{"text": f"reserve size {size} memory began with address"}, fromVar]
+                           if self.is_english else
+                           [fromVar, {"text": f"のアドレスを先頭にもつ、{size}が示すメモリを確保します"}]
+                           )
         elif ref_spell == "free":
-            func_references.append({"type": ref_spell, "varname": arg_exp_term_list[0]})
+            varname = arg_expr_description_list[0]
+            expr_info.append_standard_func_reference(ref_spell, varname=varname)
+            description = ([{"text": f"Liberate memory of address"}, varname]
+                           if self.is_english else
+                           [{"text": "アドレス"}, varname, {"text": f"が示すメモリを解放します"}]
+                           )
         elif ref_spell in ["setvbuf", "printf", "fprintf", "fgets", "fscanf"]:
-            func_references.append(ref_spell)
-        # 標準関数以外なら自作関数として登録する
+            expr_info.append_standard_func_reference(ref_spell)
+            description = ([{"text": f"execute function {ref_spell}"}]
+                           if self.is_english else
+                           [{"text": f"関数{ref_spell}を実行します"}]
+                           )
+        
+        if len(description):
+            # 標準関数の引数に自作関数が含まれている場合はそのカウントを追加する(この標準関数が特定の自作関数の引数に含まれている場合に自作関数カウントを使えるようにするために登録する)
+            expr_info.custom_func_count += custom_func_count_in_args
         else:
+            # 標準関数以外なら自作関数として登録する
             if self.is_english:
-                calc_order_comments.append({"name": ref_spell, "comment": f"execute function {ref_spell} with" + ", ".join([f"{arg_exp_term} for #{i+1} argument" for i, arg_exp_term in enumerate(arg_exp_term_list)])
-                                            if len(arg_exp_term_list) else f"execute function {ref_spell} with no arguments", 
-                                            "args": arg_calc_order_comments_list})
+                if len(arg_expr_description_list):
+                    arg_description_list: list[dict] = []
+                    arg_expr_list: list[dict] = []
+                    for i, item in enumerate(arg_expr_description_list):
+                        arg_description_list.extend([item, {"text": f"for #{i+1} argument,"}])
+                        arg_expr_list.extend([item, {"text": ","}])
+                    arg_description_list.pop(-1)
+                    arg_expr_list.pop(-1)
+                    description = [{"text": f"execute function {ref_spell} with"}, *arg_expr_description_list]
+                else:
+                    description = [{"text": f"execute function {ref_spell} with no arguments"}]
             else:
-                calc_order_comments.append({"name": ref_spell, "comment": ", ".join([f"{arg_exp_term}を{i+1}つ目の実引数" for i, arg_exp_term in enumerate(arg_exp_term_list)]) + 
-                                            "として" + f"関数{ref_spell}を実行します" if len(arg_exp_term_list) else f"引数なしで、関数{ref_spell}を実行します", 
-                                            "args": arg_calc_order_comments_list})
+                if len(arg_expr_description_list):
+                    arg_description_list: list[dict] = []
+                    arg_expr_list: list[dict] = []
+                    for i, item in enumerate(arg_expr_description_list):
+                        arg_description_list.extend([item, {"text": f"を{i+1}個目の実引数,"}])
+                        arg_expr_list.extend([item, {"text": ","}])
+                    arg_description_list.pop(-1)
+                    arg_expr_list.pop(-1)
+                    description = [*arg_expr_description_list, {"text": f"として関数{ref_spell}を実行します"}]
+                else:
+                    description = [{"text": f"引数なしで、関数{ref_spell}を実行します"}]
+
+
             # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
-            func_references.append((ref_spell, arg_func_order_list))
-        return f"{ref_spell}( {", ".join(arg_exp_term_list)} )"
+            expr_info.append_custom_func_reference((ref_spell, custom_func_count_in_args))
+            # 自作関数のカウントを1追加する
+            expr_info.custom_func_count += 1
+
+        expr: list[dict[str, any]] = [{"text": f"{ref_spell}("}, *arg_expr_description_list, {"text": ")"}]
+
+        return expr_info.append_expr_description(description, expr)
 
     # typedefの解析
     def parse_typedef(self, cursor):
@@ -1276,7 +1537,7 @@ class ASTtoFlowChart:
             if next_line[1]:
                 break
         if next_line is None:
-            sys.exit(-15)
+            sys.exit("no next line is found")
         
         return next_line
     
@@ -1295,8 +1556,8 @@ class ASTtoFlowChart:
 
         return endNodeID
 
-    def parse_if_branch(self, cursor: ci.Cursor, nodeID, line_track: list[int | tuple[str, list[list[str]]] | None], edgeName=""):
-        def parse_if_branch_start(cursor: ci.Cursor, parentNodeID, line_track: list[int | tuple[str, list[list[str]]] | None], type: str):
+    def parse_if_branch(self, cursor: ci.Cursor, nodeID, line_track: list[int | tuple[str,int] | dict[str, any]], edgeName=""):
+        def parse_if_branch_start(cursor: ci.Cursor, parentNodeID, line_track: list[int | tuple[str,int] | dict[str, any]], type: str):
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == ci.CursorKind.COMPOUND_STMT:
@@ -1316,11 +1577,12 @@ class ASTtoFlowChart:
         # --- 条件式処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
-        condNodeID = self.get_exp(cond_cursor, shape='diamond', label='if')
+        condNodeID = self.get_expr(cond_cursor, shape='diamond', label='if')
         self.createEdge(nodeID, condNodeID, edgeName)
 
         line_track.append(cond_cursor.location.line)
-        line_track += self.expNode_info[f'"{condNodeID}"'][2]
+        line_track += self.expr_node_info[f'"{condNodeID}"']["funcs"]
+
         if edgeName != "False":
             self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
 
@@ -1371,14 +1633,14 @@ class ASTtoFlowChart:
                 else:
                     nodeID = condNodeID
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
-                    self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', line_track + [next_line[0]])
+                    self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', [*line_track, next_line[0]])
                     self.createEdge(nodeID, falseEndNodeID, "False")
                 nodeIDs = [trueEndNodeID, falseEndNodeID]
         else:
             # elseがなくても終点を作る
             falseEndNodeID = self.createNode("", 'terminator')
             # elseがない場合は仮ifとしてcondition_moveを取得する
-            self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', line_track + [cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else line_track + [next_line[0]])
+            self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', [*line_track, cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else [*line_track, next_line[0]])
             # print(end_line)
             # self.line_info_dict[self.scanning_func].setLine(end_line)
             self.createEdge(condNodeID, falseEndNodeID, "False")
@@ -1401,7 +1663,7 @@ class ASTtoFlowChart:
         # --- 条件処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
-        condNodeID = self.get_exp(cond_cursor, shape='pentagon', label='while')
+        condNodeID = self.get_expr(cond_cursor, shape='pentagon', label='while')
         self.createRoomSizeEstimate(condNodeID)
 
         self.createEdge(nodeID, condNodeID, edgeName)
@@ -1422,12 +1684,12 @@ class ASTtoFlowChart:
         if content_cursor.kind == ci.CursorKind.COMPOUND_STMT:
             cr_true = list(content_cursor.get_children())
             if len(cr_true):
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_true[0].location.line])
+                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_true[0].location.line])
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cond_cursor.location.line])
+                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cond_cursor.location.line])
             body_end = self.parse_comp_stmt(content_cursor, trueNodeID, "while")
         else:
-            self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], content_cursor.location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], content_cursor.location.line])
             self.nextLines.append((cond_cursor.location.line, True))
             body_end = self.parse_stmt(content_cursor, trueNodeID)
             self.nextLines.pop(-1)
@@ -1444,7 +1706,7 @@ class ASTtoFlowChart:
         self.createRoomSizeEstimate(endNodeID)
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
+        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]])
 
         self.createEdgeForLoop(endNodeID, loop_back_node, [cursor.location.line] if isFinalStmtInSwitch else [], [cond_cursor.location.line])
 
@@ -1480,7 +1742,7 @@ class ASTtoFlowChart:
             else:
                 if nodeID is None:
                     return None
-                condNodeID = self.get_exp(cr, shape='diamond', label='do')
+                condNodeID = self.get_expr(cr, shape='diamond', label='do')
                 # 今まではdo_whileだけ条件分岐の部屋を作っていなかったが、continueにも対応させるために作ることにする
                 self.createRoomSizeEstimate(condNodeID)
                 self.condition_move[f'"{condNodeID}"'] = ('doWhileIn', [cr.location.line])
@@ -1492,15 +1754,15 @@ class ASTtoFlowChart:
         if len(cr_in):
             self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cr_in[0].location.line])
             # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_in[0].location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_in[0].location.line])
         else:
             self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cursor.location.line])
             # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.location.line])
 
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cursor.extent.end.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]])
+        self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]])
         #ここでdo_whileを抜けた後の部屋情報を作る
         self.createRoomSizeEstimate(falseNodeID)
 
@@ -1537,11 +1799,11 @@ class ASTtoFlowChart:
                         self.check_cursor_error(var_cr)
                         varNodeID = self.parse_var_decl(var_cr, varNodeID, "")
                 else:
-                    initNodeID = self.get_exp(cr, shape='invhouse')
+                    initNodeID = self.get_expr(cr, shape='invhouse')
                 self.createEdge(nodeID, initNodeID, edgeName)
                 edgeName = ""
             elif semi_offset[0] < cr.location.offset < semi_offset[1]:
-                condNodeID = self.get_exp(cr, shape='pentagon', label='for')
+                condNodeID = self.get_expr(cr, shape='pentagon', label='for')
                 self.createRoomSizeEstimate(condNodeID)
                 if initNodeID:
                     self.createEdge(initNodeID, condNodeID)
@@ -1571,12 +1833,12 @@ class ASTtoFlowChart:
         if exec_cursor.kind == ci.CursorKind.COMPOUND_STMT:
             cr_true = list(exec_cursor.get_children())
             if len(cr_true):
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cr_true[0].location.line])
+                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_true[0].location.line])
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.location.line])
+                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.location.line])
             nodeID = self.parse_comp_stmt(exec_cursor, trueNodeID, "for_w_change" if changeExpr_cursor else "for_wo_change")
         else:
-            self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], exec_cursor.location.line])
+            self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], exec_cursor.location.line])
             self.nextLines.append((cursor.location.line, True))
             nodeID = self.parse_stmt(exec_cursor, trueNodeID)
             self.nextLines.pop(-1)
@@ -1584,7 +1846,7 @@ class ASTtoFlowChart:
         #changeノードがある条件
         if self.loopBreaker_list[-1]["continue"] or nodeID:
             if changeExpr_cursor:
-                changeNodeID = self.get_exp(changeExpr_cursor, shape='parallelogram', label=str(exec_cursor.extent.end.line))
+                changeNodeID = self.get_expr(changeExpr_cursor, shape='parallelogram', label=str(exec_cursor.extent.end.line))
             else:
                 changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
         else:
@@ -1600,7 +1862,7 @@ class ASTtoFlowChart:
 
         next_line = self.get_next_line()
 
-        forFalse_condition_move = [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], cursor.extent.end.line, next_line[0]] if isFinalStmtInSwitch else [cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line[0]]
+        forFalse_condition_move = [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.extent.end.line, next_line[0]] if isFinalStmtInSwitch else [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]]
         self.condition_move[f'"{endNodeID}"'] = ('forFalse', forFalse_condition_move)
         
         self.downSwitchBreakerLevel()
@@ -1619,7 +1881,7 @@ class ASTtoFlowChart:
 
         #switchのcaseのbreakノードを追加する。
         def createSwitchBreakerEdge(endNodeID):
-            switchBreaker = self.switchBreaker_list.pop()
+            switchBreaker = self.switchBreaker_list.pop(-1)
             break_list = switchBreaker["break"]
             next_line = self.get_next_line()
             for breakNodeID, line in break_list:
@@ -1632,7 +1894,7 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
 
         #switchの構造はswitch(A)のようにAは必ず必要
-        condNodeID = self.get_exp(cond_cursor, shape='diamond', label='switch')
+        condNodeID = self.get_expr(cond_cursor, shape='diamond', label='switch')
         self.createEdge(nodeID, condNodeID, edgeName)
         nodeID = None
 
@@ -1650,13 +1912,13 @@ class ASTtoFlowChart:
             cursor_list_by_case: list[tuple[list[tuple[ci.Cursor, ci.Cursor]], list[ci.Cursor]]] = []
             begin_line_list: list[int] = []
 
-            # まずはcomp_stmt_cursor_list (B) の処理用にcaseの遷移先の行を取得する
+            # まずはcomp_stmt_cursor_list (すなわちB) の処理用にcaseの遷移先の行を取得する
             while len(comp_stmt_cursor_list):
                 cr = comp_stmt_cursor_list.pop(0)
                 self.check_cursor_error(cr)
                 if cr.kind == ci.CursorKind.CASE_STMT:
                     if isDefault:
-                        sys.exit(-30)
+                        sys.exit("case label cannot be set after default label")
                     case_cursor_list: list[tuple[ci.Cursor, ci.Cursor]] = []
                     while cr.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
                         caseValue_cursor, next_cr = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
@@ -1697,10 +1959,9 @@ class ASTtoFlowChart:
                         comp_stmt_cursor_list = comp_stmt_cursor_list[i:]
                     else:
                         comp_stmt_cursor_list = comp_stmt_cursor_list[i+1:]
-                     
                 elif cr.kind == ci.CursorKind.DEFAULT_STMT:
                     if isDefault:
-                        sys.exit(-31)
+                        sys.exit("default label cannot be overlapped")
                     cursor_in_default = next(cr.get_children())
                     self.check_cursor_error(cursor_in_default)
                     isDefault = True
@@ -1728,9 +1989,9 @@ class ASTtoFlowChart:
                             begin_line_list.append(comp_exec_cursor.extent.end.line)
                     comp_stmt_cursor_list = []
                     cursor_list_by_case.append(([(cr, cursor_in_default)], stmt_cursor_list_in_case))
-                # 複合文や文が単独で出てくる場合は対応せずにプログラムを終了する
+                # caseやdefaultラベルではなく、複合文や文が単独で出てくる場合は対応せずにプログラムを終了する
                 else:
-                    sys.exit(-22)
+                    sys.exit("case or default label has to be set")
             
             # 最後のcase(default)が終わった後にbreakがない時、switchの末尾の } に遷移するので、その行番を先頭行番リストの末尾に登録しておく
             begin_line_list.append(comp_exec_cursor.extent.end.line)
@@ -1742,7 +2003,7 @@ class ASTtoFlowChart:
                 prevNodeID = condNodeID
                 for j, (case_cursor, case_value_cursor) in enumerate(case_cursor_list):
                     if case_cursor.kind == ci.CursorKind.CASE_STMT:
-                        caseNodeID = self.get_exp(case_value_cursor, shape='invtriangle', label='case')
+                        caseNodeID = self.get_expr(case_value_cursor, shape='invtriangle', label='case')
                     else:
                         caseNodeID = self.createNode('default', shape='invtriangle')
                     
@@ -1759,7 +2020,7 @@ class ASTtoFlowChart:
                 # ここで一つのcaseの部屋情報を作る
                 self.createRoomSizeEstimate(caseNodeID)
                 # switchの条件式からcase直下の最初の行への遷移情報を登録する
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expNode_info[f'"{condNodeID}"'][2], begin_line_list[i]])
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], begin_line_list[i]])
                 
                 nodeID = caseNodeID
                 begin_line_list_by_stmt: list[int | None] = []
@@ -1843,7 +2104,7 @@ class ASTtoFlowChart:
             if comp_exec_cursor.kind == ci.CursorKind.DEFAULT_STMT:
                 isDefault = True
 
-            caseNodeID = self.get_exp(caseValue_cursor, shape='invtriangle')
+            caseNodeID = self.get_expr(caseValue_cursor, shape='invtriangle')
             self.createEdge(condNodeID, caseNodeID)
             createSwitchBreakerInfo()
             #switchの元の部屋のサイズを+1する
@@ -1851,9 +2112,9 @@ class ASTtoFlowChart:
             #ここでDのための部屋情報を作る
             self.createRoomSizeEstimate(caseNodeID)
             if (next_line := self.get_next_line_in_comp([exec_cursor])):
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], next_line])
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line])
             else:
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expNode_info[f'"{condNodeID}"'][2], self.get_next_line()[0]])
+                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], self.get_next_line()[0]])
             nodeID = self.parse_stmt(exec_cursor, caseNodeID)
              
             self.line_info_dict[self.scanning_func].setLine(exec_cursor.location.line)
@@ -1877,7 +2138,7 @@ class ASTtoFlowChart:
 
     # ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
     def createEdgeForLoop(self, breakToNodeID: str, continueToNodeID: str, break_line_track: list[int], continue_line_track: list[int]):
-        loopBreaker = self.loopBreaker_list.pop()
+        loopBreaker = self.loopBreaker_list.pop(-1)
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
         next_line = self.get_next_line()

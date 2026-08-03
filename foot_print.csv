@@ -1,2 +1,2 @@
-start,104_array_struct,61, 46
-itemget, 104_array_struct,63, 49,students
+start,104_array_struct,9, 49
+end, 104_array_struct,3, 50
