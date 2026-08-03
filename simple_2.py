@@ -2326,7 +2326,7 @@ class Player(Character):
             chara.update(mymap)  # 向きを変えたので更新
 
             if isinstance(chara, Character):
-                ################# 計算式キャラクターについては、どの変数の値が変わったかをプレイヤーに答えさせることで、それぞれのアクションを区別化する
+                # 計算式キャラクターについては、どの変数の値が変わったかをプレイヤーに答えさせることで、それぞれのアクションを区別化する
                 if isinstance(chara, CharaExpression):
                     linenum = self.sender.programCodeWindow.linenum
                     if chara.linenum is None:
@@ -2386,9 +2386,10 @@ class Player(Character):
                                 if (mymap.name, chara.func, comment["fromTo"][0]) in self.checkedFuncs:
                                     self.completed_checkFuncs_key = (mymap.name, chara.func, comment["fromTo"][0])
                                 
-                                self.add_log(f"executed expression {chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]} of line {chara.linenum}"
+                                log_comment = " ".join([h["expr"] for h in chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]])
+                                self.add_log(f"executed expression {log_comment} of line {chara.linenum}"
                                              if ISENGLISH else
-                                             f"{chara.linenum}行目の計算式「{chara.codeElementWindow_dict[str(chara.linenum)].detail.hoverComment_list[0]}」を実行しました")
+                                             f"{chara.linenum}行目の計算式「{log_comment}」を実行しました")
                                 chara.linenum = None
 
                                 if len(charaExpressionResult.get("vars_w_value_unchanged", [])):
@@ -4201,7 +4202,13 @@ class MoveEvent():
 
     def __str__(self):
         return f"MOVE,{self.x},{self.y},{self.mapchip},{self.dest_map},{self.dest_x},{self.dest_y}"
-                                                 
+
+
+class HoverComment(TypedDict):
+    description: str
+    expr: str
+    value: str
+
 # 88888888ba,                                 88 88  
 # 88      `"8b               ,d               "" 88  
 # 88        `8b              88                  88  
@@ -4300,10 +4307,10 @@ class Detail:
 
         return reference
 
-    def get_hover_comment(self, expr_descriptions: list[ExprDescription]) -> str:
+    def get_hover_comment(self, expr_descriptions: list[ExprDescription]) -> list[HoverComment]:
         # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
         expr_str_base_by_id: dict[int, str] = {}
-        expr_description_str_to_show: list[str] = []
+        expr_description_str_to_show: list[HoverComment] = []
         for middle_expr in expr_descriptions:
             expr_str_base: list[str] = []
             expr_description: list[str] = []
@@ -4324,8 +4331,8 @@ class Detail:
                     expr_description.append(expr_str_base_by_id[expr_part["expr_id"]])
 
             expr_str_base_by_id[middle_expr["id"]] = " ".join(expr_str_base)
-            expr_description_str_to_show.append(f"{' '.join(expr_str_base)} : {' '.join(expr_description)}")
-        return '\f'.join(expr_description_str_to_show)
+            expr_description_str_to_show.append({"expr": ' '.join(expr_str_base), "description": ' '.join(expr_description)})
+        return expr_description_str_to_show
 
     def draw(self, surface: pygame.Surface):
         for baseComment_info in self.baseComment_info_list:
@@ -4489,8 +4496,9 @@ class CodeElementWindow(Window):
         elif self.detail:
             for i, hoverLink_info in enumerate(self.detail.hoverLink_info_list):
                 if hoverLink_info[1].collidepoint(local_pos):
-                    print(self.detail.hoverComment_list[i])
-                    MSGWND.set(self.detail.hoverComment_list[i])
+                    # log_commentの内容は、プレイヤーが間違えた回数によって変える必要がある。
+                    log_comment = '\f'.join([f"{h["expr"]} : {h["description"]}" for h in self.detail.hoverComment_list[i]])
+                    MSGWND.set(log_comment)
                     return None
             if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
                 return 'scroll'
