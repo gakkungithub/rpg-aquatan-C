@@ -1,0 +1,6276 @@
+#!/usr/bin/env python3
+"""RPGあくあたん"""
+from __future__ import annotations
+import codecs
+import os
+import subprocess
+import random
+import sys
+# socket通信を行う
+import socket
+import json
+import ast
+import time
+import math
+import datetime
+from threading import Thread
+from configparser import ConfigParser
+import copy
+import time
+import import_lib
+import unicodedata
+from typing import TypedDict, Literal
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
+# --- 外部モジュールを自動チェック ---
+import_lib.ensure_package("ephem")
+import_lib.ensure_package("pygame")
+
+import ephem
+#from genericpath import exists
+import pygame
+import pygame.freetype
+from pygame.locals import *
+
+from rpg_aquatan_utils.types.expr_descriptions import *
+from rpg_aquatan_utils.types.execution_info import *
+from rpg_aquatan_utils.types.json_data_type import *
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = BASE_DIR + "/mapdata_for_test"
+
+#FONT_NAME = "Boku2-Regular.otf"
+#FONT_NAME = "logotypejp_mp_b_1.ttf"
+#FONT_NAME = "rounded-mgenplus-1cp-bold.ttf"
+FONT_DIR = "./font/"
+FONT_NAME = "PixelMplus12-Bold.ttf"
+
+# fpsはデフォルト
+MAX_FRAME_PER_SEC = 24
+
+GS = 32
+DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
+STOP, MOVE = 0, 1  # 移動タイプ
+PROB_MOVE = 0.0075  # 移動確率
+TRANS_COLOR = (190, 179, 145)  # マップチップの透明色
+
+SBW_WIDTH = 800
+SBW_HEIGHT = 600
+
+MSGWND = None
+DIMWND = None
+LIGHTWND = None
+STATUSWND = None
+ITEMWND = None
+
+PLAYER = None
+
+e = []
+AUTOMOVE = 1
+
+BUTTON_WINDOW = None
+BUTTON_WIDTH = 50
+PATH = "foot_print.csv"
+
+cmd = "aquatan"
+# time [ms]
+INTERVAL = 100
+mouse_down = False
+last_action_time = 0
+
+LONGPRESS_EVENT = pygame.USEREVENT + 1
+
+@dataclass(frozen=True)
+class CheckedFuncLocation:
+    map_name: str
+    func_name: str
+    line: int
+    var_name: str | None = None
+
+@dataclass(frozen=True)
+class CheckedFuncState:
+    func_name: str
+    return_value: str | None
+    checked: bool
+
+# 長押し処理をするためのメソッド (200m秒後に長押しイベントをキューに追加する = キューの中の複数の処理が順に実行されていく)
+def start_timer():
+    pygame.time.set_timer(LONGPRESS_EVENT, 200)
+def end_timer():
+    pygame.time.set_timer(LONGPRESS_EVENT, 0)
+
+def resource_path(relative_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+#                                               
+#                               88              
+#                               ""              
+#                                               
+# 88,dPYba,,adPYba,  ,adPPYYba, 88 8b,dPPYba,   
+# 88P'   "88"    "8a ""     `Y8 88 88P'   `"8a  
+# 88      88      88 ,adPPPPP88 88 88       88  
+# 88      88      88 88,    ,88 88 88       88  
+# 88      88      88 `"8bbdP"Y8 88 88       88  
+#                                               
+#                                               
+# 
+
+def main():
+    """Main"""
+    global MSGWND, PLAYER, DIMWND, LIGHTWND, STATUSWND, ITEMWND, ISENGLISH, SMANAGER, cmd
+    # 現状はグローバル変数にしているが、今後どうするかは考える
+    global SCR_RECT, SCR_WIDTH, SCR_HEIGHT, MIN_MAP_SIZE, TXTBOX_HEIGHT
+
+    pygame.init()
+
+    SBW_RECT = pygame.Rect(0, 0, SBW_WIDTH, SBW_HEIGHT)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.path.abspath("modules") + (":" + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
+
+    SMANAGER = SoundManager()
+
+    while True:
+        if os.uname()[0] != 'Darwin':
+            drivers = ['fbcon', 'directfb', 'svgalib']
+            found = False
+            for driver in drivers:
+                # Make sure that SDL_VIDEODRIVER is set
+                if not os.getenv('SDL_VIDEODRIVER'):
+                    os.putenv('SDL_VIDEODRIVER', driver)
+                try:
+                    pygame.display.init()
+                except pygame.error:
+                    print(f'Driver: {driver} failed.')
+                    continue
+                found = True
+                break
+            if not found:
+                raise Exception('No suitable video driver found!')
+
+            size = (pygame.display.Info().current_w,
+                    pygame.display.Info().current_h)
+            print(f"Framebuffer size: {size[0]} x {size[1]}")
+            screen = pygame.display.set_mode(SBW_RECT.size, FULLSCREEN)
+        else:
+            scropt = DOUBLEBUF | HWSURFACE
+            screen = pygame.display.set_mode(SBW_RECT.size, scropt)
+
+        ISENGLISH = False
+        SBWND = StageButtonWindow()
+        SBWND.show()
+        SBWND.draw(screen)
+        pygame.display.update()
+
+        # region ステージ選択メニュー
+        stage_name: str | None = None
+        button_name = None
+        sbw_scroll_mouse_pos = None
+        mouse_down = False
+        scroll_start = False
+        server = None
+        
+        try:
+            SMANAGER.play_bgm("stage_button_window", 0.7)
+
+            while stage_name is None:
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        sys.exit()
+                    # Command + W の同時押し検知 (Mac: KMOD_META、Windows/Linuxなら KMOD_CTRL)
+                    if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        pygame.quit()
+                        sys.exit()
+
+                    # region mouse click event
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1 and SBWND.is_visible:
+                            mouse_down = True
+                            button_name = SBWND.is_clicked(event.pos)
+                            sbw_scroll_mouse_pos = event.pos
+                    elif event.type == pygame.MOUSEBUTTONUP:
+                        if event.button == 1 and SBWND.is_visible:
+                            if button_name == "color_support":
+                                if SBWND.is_clicked(event.pos) ==  "color_support":
+                                    SMANAGER.play_se("button_io")
+                                    SBWND.color_support = not SBWND.color_support
+                            elif button_name == "check_lldb":
+                                if SBWND.is_clicked(event.pos) == "check_lldb":
+                                    SMANAGER.play_se("button_io")
+                                    if server is not None:
+                                        SBWND.close()
+                                        server = None
+                                    else:
+                                        SBWND.is_stage_selecting = not SBWND.is_stage_selecting
+                            elif button_name == "switch_language":
+                                if SBWND.is_clicked(event.pos) == "switch_language":
+                                    ISENGLISH = not ISENGLISH
+                                    SBWND.load_sb()
+                            elif button_name == "tutorial":
+                                if SBWND.is_clicked(event.pos) == "tutorial":
+                                    stage_index = 0
+                                    SBWND.hide()
+                                    stage_name = "tutorial_en" if ISENGLISH else "tutorial"
+                            elif button_name == "bgm slider":
+                                SMANAGER.bgm_volume = (SBWND.sm_window.bgm_knob_x - SBWND.sm_window.knob_min_x) / (SBWND.sm_window.knob_max_x - SBWND.sm_window.knob_min_x)
+                                SMANAGER.set_bgm_volume()
+                            elif button_name == "se slider":
+                                SMANAGER.set_all_se_volume((SBWND.sm_window.se_knob_x - SBWND.sm_window.knob_min_x) / (SBWND.sm_window.knob_max_x - SBWND.sm_window.knob_min_x))            
+                            # ステージボタンを押した場合、ステージセレクトモードかデバッグモードかで処理を変化させる
+                            # button_nameがNoneなら何も実行しない (0の場合があるので、button_name is not Noneと明確にする必要がある)
+                            elif button_name is not None and scroll_start == False and button_name == SBWND.is_clicked(event.pos):
+                                if SBWND.is_stage_selecting:
+                                    stage_index = button_name + 1
+                                    SBWND.hide()
+                                    stage_name = SBWND.code_names[button_name]
+                                elif server is None:
+                                    programname = SBWND.code_names[button_name]
+                                    programpath = f"{DATA_DIR}/{programname}/{programname}"
+                                    # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+                                    # 現在は一つのcファイルにしか対応してないので、下記のようにリストに要素を一つだけ入れる
+                                    cfiles = [f"{programpath}.c"]
+                                    # cプログラムを整形する
+                                    subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+                                    subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+                                    server = subprocess.Popen(["/opt/homebrew/opt/python@3.13/bin/python3.13", "checking_lldb.py", "--name", programpath], cwd="debugger-C", env=env)
+                                    SBWND.start_checking_lldb()
+                            elif scroll_start:
+                                SMANAGER.play_se("scroll")
+                            
+                            mouse_down = False
+                            scroll_start = False
+
+                    if mouse_down and event.type == pygame.MOUSEMOTION:
+                        scroll_start = True
+
+                        if button_name == "bgm slider":
+                            if SBWND.sm_window.knob_min_x < event.pos[0] < SBWND.sm_window.knob_max_x:
+                                SBWND.sm_window.bgm_knob_x = event.pos[0]
+                            elif event.pos[0] <= SBWND.sm_window.knob_min_x != SBWND.sm_window.bgm_knob_x:
+                                SBWND.sm_window.bgm_knob_x = SBWND.sm_window.knob_min_x
+                            elif event.pos[0] >= SBWND.sm_window.knob_max_x != SBWND.sm_window.bgm_knob_x:
+                                SBWND.sm_window.bgm_knob_x = SBWND.sm_window.knob_max_x
+                        elif button_name == "se slider":
+                            if SBWND.sm_window.knob_min_x <= event.pos[0] <= SBWND.sm_window.knob_max_x:
+                                SBWND.sm_window.se_knob_x = event.pos[0]
+                            elif event.pos[0] <= SBWND.sm_window.knob_min_x != SBWND.sm_window.se_knob_x:
+                                SBWND.sm_window.se_knob_x = SBWND.sm_window.knob_min_x
+                            elif event.pos[0] >= SBWND.sm_window.knob_max_x != SBWND.sm_window.se_knob_x:
+                                SBWND.sm_window.se_knob_x = SBWND.sm_window.knob_max_x
+                        else:
+                            dx = - (event.pos[0] - sbw_scroll_mouse_pos[0])
+                            if 0 <= SBWND.scrollX + dx <= SBWND.maxScrollX:
+                                SBWND.scrollX += dx
+                            elif SBWND.scrollX + dx < 0:
+                                SBWND.scrollX = 0
+                            else:
+                                SBWND.scrollX = SBWND.maxScrollX
+                            if dx != 0:
+                                SBWND.load_sb()
+                            sbw_scroll_mouse_pos = event.pos
+                    
+                    if server is not None and event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN):
+                        # ステップ実行してプログラムの終了に到達した時プログラムを終了する
+                        if SBWND.step_into():
+                            SBWND.close()
+                            server = None
+                    
+                    SBWND.draw(screen)
+                    pygame.display.update()
+        except Exception as e:
+            if e == SystemExit:
+                return
+            continue
+        # endregion
+
+        # region マップデータ生成
+        programpath = f"{DATA_DIR}/{stage_name}/{stage_name}"
+        cfiles = [f"{programpath}.c"]
+        # 現在は一つのcファイルにしか対応してないが、複数対応する時、下記のようにリストに要素を一つだけ入れる
+        # cfiles = [f"{DATA_DIR}/{programname}/{cfile}" for cfile in args.cfiles]
+
+        try:
+            # チュートリアルマップは固定のマップデータを既に生成しているのでマップデータ生成システムを起動する必要はない
+            if stage_name not in ("tutorial", "tutorial_en"):
+                # cプログラムを整形する
+                subprocess.run(["clang-format", "-i", f"{programpath}.c"])
+
+                # cファイルを解析してマップデータを生成する
+                # args.universalがあるなら -uオプションをつけてカラーユニバーサルデザインを可能にする
+                cfcode = ["python3.13", "c-flowchart_4.py", "-p", stage_name, "-c", ", ".join(cfiles)]
+                if SBWND.color_support:
+                    cfcode.append("-u")
+                if ISENGLISH:
+                    cfcode.append("-e")
+
+                subprocess.run(cfcode, cwd=resource_path("mapdata_generator"), check=True)
+            subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
+        except subprocess.CalledProcessError as e:
+            print(f"subprocess failed with exit code {e.returncode}")
+            sys.exit(1)   # 呼び出し元プログラムを終了
+
+        SMANAGER.stop_bgm()
+        SMANAGER.play_se("stage_entry")
+        # サーバを立てる
+        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_4.py", "--name", programpath, "--lines", "", "--events", "--english" if ISENGLISH else ""]
+        server = subprocess.Popen(c_backdoor_code, cwd="debugger-C", env=env)
+        # endregion
+
+        # region マップの初期設定
+        config = ConfigParser()
+        config.read(f"mapdata_for_test/{stage_name}/{stage_name}.ini")
+        SCR_WIDTH = int(config.get('screen', 'width'))
+        SCR_HEIGHT = int(config.get('screen', 'height'))
+
+        PAUSE_RECT = pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
+
+        SCR_RECT = pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
+        DB_CHECK_WAIT = 30 * MAX_FRAME_PER_SEC
+        SCR_RECT_WITH_TXTBOX = pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT)
+        TXTBOX_HEIGHT = 40
+        TXTBOX_RECT = pygame.Rect(0, SCR_HEIGHT - TXTBOX_HEIGHT, SCR_WIDTH, TXTBOX_HEIGHT)
+
+        RIGHT_WND_WIDTH = 300
+        ## ミニマップの表示座標を設定する
+        MIN_MAP_SIZE = 256
+        MMAP_RECT = pygame.Rect(SCR_WIDTH - RIGHT_WND_WIDTH - MIN_MAP_SIZE - 20, SCR_HEIGHT - MIN_MAP_SIZE - 20, MIN_MAP_SIZE, MIN_MAP_SIZE)
+
+        ## デバッグコードの表示座標を設定する
+        MIN_CODE_SIZE_Y = 440
+        MCODE_RECT = pygame.Rect(SCR_WIDTH - RIGHT_WND_WIDTH - 10, SCR_HEIGHT - MIN_CODE_SIZE_Y - 10, RIGHT_WND_WIDTH, MIN_CODE_SIZE_Y)
+
+        if os.uname()[0] != 'Darwin':
+            drivers = ['fbcon', 'directfb', 'svgalib']
+            found = False
+            for driver in drivers:
+                # Make sure that SDL_VIDEODRIVER is set
+                if not os.getenv('SDL_VIDEODRIVER'):
+                    os.putenv('SDL_VIDEODRIVER', driver)
+                try:
+                    pygame.display.init()
+                except pygame.error:
+                    print(f'Driver: {driver} failed.')
+                    continue
+                found = True
+                break
+            if not found:
+                raise Exception('No suitable video driver found!')
+
+            size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+            print(f"Framebuffer size: {size[0]} x {size[1]}")
+            screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, FULLSCREEN)
+        else:
+            scropt = DOUBLEBUF | HWSURFACE
+            screen = pygame.display.set_mode(SCR_RECT_WITH_TXTBOX.size, scropt)
+
+        # region ポーズ画面の設定
+        PAUSEWND = PauseWindow(PAUSE_RECT)
+        # endregion
+
+        # region コマンドラインの設定
+        pygame.draw.rect(screen, (0,0,0), TXTBOX_RECT)
+        font = pygame.font.Font(None, 36)
+        text_surface = font.render("Command Box:", True, (255, 255, 255))
+        screen.blit(text_surface, (10, SCR_RECT.height + 10))
+        input_text = "hogehoge"
+        input_surface = font.render(input_text, True, (255, 255, 255))
+        screen.blit(input_surface, (10, SCR_RECT.height + 40))
+        # endregion
+
+        atxt = ""
+        # endregion
+
+        print("1")
+        ## set mouse visible for debug
+        ## pygame.mouse.set_visible(0)
+        print("2")
+        # pygame.display.set_caption("あくあたんクエスト")
+        # キャラクターチップをロード
+        load_charachips("data", "charachip.dat")
+        print("3")
+        # マップチップをロード
+        load_mapchips()
+        # マップとプレイヤー作成
+        print("4")
+
+        # region キャラクターの初期設定
+        init_player_chara = str(config.get("game", "player"))
+        init_player_x = int(config.get("game", "player_x"))
+        init_player_y = int(config.get("game", "player_y"))
+        mapname = str(config.get("game", "map"))
+
+        # グローバル変数 = 初期アイテム
+        items = ast.literal_eval(config.get("game", "items"))
+
+        ## コードウィンドウを作る
+        PCODEWND = ProgramCodeWindow(MCODE_RECT, mapname)
+        PCODEWND.show()
+
+        sender = EventSender(PCODEWND)
+        
+        PLAYER = Player(init_player_chara, (init_player_x, init_player_y), DOWN, sender)
+        initialResult = sender.receive_json()
+        if "is_end" in initialResult:
+            PLAYER.fp.write("end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            PLAYER.fp.close()
+            server.terminate()
+            sys.exit()
+        
+        PLAYER.func = initialResult["first_func"]
+
+        ITEMWND_RECT = pygame.Rect(SCR_WIDTH - RIGHT_WND_WIDTH - 10, 10, RIGHT_WND_WIDTH, SCR_HEIGHT - MIN_CODE_SIZE_Y - 30)
+        ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
+        ITEMWND.show()
+
+        for gvar_name, item_info in initialResult["items"].items():
+            for line, values in item_info.items():
+                PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
+
+        fieldmap = Map(mapname)
+        fieldmap.add_chara(PLAYER)
+
+        # region ウィンドウの設定
+        MSGWND = MessageWindow(
+            pygame.Rect(BUTTON_WIDTH * 3 + 70 , SCR_HEIGHT // 4 * 3, 
+                SCR_WIDTH // 2 - 30, SCR_HEIGHT // 4 - 10), MessageEngine(), sender)
+        
+        if fieldmap.name in ("tutorial", "tutorial_en"):
+            mission_message_list: list[str] = []
+            if ISENGLISH:
+                for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
+                    mission_message_list.append('\n'.join(help_message_list))
+            else:
+                for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
+                    mission_message_list.append('\n'.join(help_message_list))
+            PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
+            MSGWND.set('\f'.join(mission_message_list))
+
+        DIMWND = DimWindow(pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
+        DIMWND.hide()
+        LIGHTWND = LightWindow(pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT), screen, fieldmap)
+        LIGHTWND.set_color_scene("normal")
+        LIGHTWND.show()
+
+        STATUSWND = StatusWindow(pygame.Rect(10, 10, SCR_WIDTH // 5 - 10, 100), PLAYER, stage_index)
+        STATUSWND.show()
+
+        ## ミニマップを作る
+        MMAPWND = MiniMapWindow(MMAP_RECT, mapname)
+        MMAPWND.show()
+
+        CMNDWND = CommandWindow(TXTBOX_RECT)
+        CMNDWND.hide()
+
+        # 操作説明ウィンドウ
+        CTRLGWND = ControllerGuideWindow(pygame.Rect(10, 120, SCR_WIDTH // 5 - 10, 150), MMAPWND, CMNDWND)
+        CTRLGWND.show()
+
+        # 今までのアクションのログウィンドウ
+        LOGWND = LogWindow(pygame.Rect(10, 280, SCR_WIDTH // 5 - 10, 370))
+        LOGWND.show()
+
+        BTNWND = ArrowButtonWindow()
+        BTNWND.show()
+        mouse_down = False
+
+        # endregion
+        clock = pygame.time.Clock()
+        print("5")
+
+        db_check_count = 0
+
+        print("6")
+        lightrooms = []
+        lightrooms = list(set(lightrooms))
+        LIGHTWND.set_rooms(lightrooms)
+
+        PLAYER.fp.write("start," + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+
+        programCodeWindow_scroll_mouse_pos = None
+        itemWindow_expand_mouse_pos = None
+        itemWindow_scroll_mouse_pos = None
+        controllerGuideWindow_scroll_mouse_pos = None
+        logWindow_scroll_mouse_pos = None
+        codeElementWindow_scroll_mouse_pos = None
+        
+        button_name = None
+        while PLAYER.game_status == "playing":
+            clock.tick(MAX_FRAME_PER_SEC)
+
+            if PLAYER.status["HP"] <= 0 and not MSGWND.is_visible:
+                SMANAGER.stop_bgm()
+                SMANAGER.play_se("game_over")
+                if ISENGLISH:
+                    MSGWND.set("Your HP ran off,,, \nGAME OVER !!", (["Go back to the Stage-Select Menu"], 'finished'))
+                else:
+                    MSGWND.set("プレイヤーのライフが尽きました、、、\nGAME OVER !!", (["ステージ選択画面に戻る"], 'finished'))
+
+            # メッセージウィンドウ表示中は更新を中止
+            if not MSGWND.is_visible:
+                fieldmap.update()
+                # チュートリアルステージではhelp用のメッセージがあり、それを表示させる
+                if fieldmap.name in ("tutorial", "tutorial_en") and PLAYER.sender.programCodeWindow.linenum not in PLAYER.help_line_number_aquired:
+                    mission_message_list: list[str] = []
+                    if ISENGLISH:
+                        for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
+                            mission_message_list.append('\n'.join(help_message_list))
+                    else:
+                        for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
+                            mission_message_list.append('\n'.join(help_message_list))
+                    PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
+                    MSGWND.set('\f'.join(mission_message_list))
+            elif PLAYER.damage_motion:
+                PLAYER.update(fieldmap)
+
+            MSGWND.update()
+            offset = calc_offset(PLAYER)
+            if DIMWND.is_visible:
+                DIMWND.dim()
+                pygame.display.update()
+                continue
+
+            fieldmap.draw(screen, offset)
+
+            # For every interval
+            if db_check_count > DB_CHECK_WAIT:
+                db_check_count = 0
+                lightrooms = []
+                lightrooms = list(set(lightrooms))
+                LIGHTWND.set_rooms(lightrooms)
+
+            db_check_count = db_check_count + 1
+
+            LIGHTWND.draw(offset)
+            MSGWND.draw(screen)
+            STATUSWND.draw(screen)
+            CTRLGWND.draw(screen, bool(MSGWND.selectMsgText))
+            LOGWND.draw(screen, fieldmap.name in ("tutorial", "tutorial_en"))
+            ITEMWND.draw(screen)
+            BTNWND.draw(screen)
+            # ミニマップだけは、メッセージウィンドウと被る場所に表示されるので、メッセージウィンドウ表示中には表示しない
+            if not MSGWND.is_visible:
+                MMAPWND.draw(screen, fieldmap)
+
+            PCODEWND.draw(screen)
+
+            draw_string(
+                screen, 
+                SCR_WIDTH-60, 
+                10,
+                f"{PLAYER.x},{PLAYER.y}", 
+                Color(255, 255, 255, 128)
+            )  # プレイヤー座標
+
+            pygame.display.update()
+
+            if cmd == "command":
+                cmd = ""
+                mouse_down = False
+                if MSGWND.is_visible:
+                    CMNDWND.hide()
+                    continue
+
+                CMNDWND.show()
+                atxt = CMNDWND.draw(screen, font)
+                CMNDWND.hide()
+
+                if atxt is None:
+                    break
+
+                parts = atxt.split(' ', 1)
+                cmd = parts[0]
+                atxt = parts[1] if len(parts) > 1 else ''
+
+                if cmd == "":
+                    continue
+                elif cmd == "rollback":
+                    if len(PCODEWND.history) > 1:
+                        sender.send_event({"rollback": True})
+                        sender.receive_json()
+                    else:
+                        if ISENGLISH:
+                            MSGWND.set("Would you go back to rightly after the dungeon began ?", (['Yes', 'No'], 'rollback_to_init'))
+                        else:
+                            MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
+                elif cmd == "undo":
+                    if len(PLAYER.move5History) < 1:
+                        MSGWND.set("No history...")
+                    else:
+                        move = PLAYER.move5History.pop()
+                        if move["return"]:
+                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+
+                        # 暗転
+                        DIMWND.show(200, 'warp')
+
+                        PLAYER.commonItembag.items[-1] = move['cItems']
+                        PLAYER.itembag.items[-1] = move['items']
+
+                        fieldmap.warp_player(move['mapname'], move['x'], move['y'])
+
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "break":
+                    try:
+                        move = PLAYER.moveHistory.pop()
+
+                        DIMWND.show(200, 'warp')
+
+                        fieldmap.warp_player(move['mapname'], move['x'], move['y'])
+
+                    except IndexError:
+                        MSGWND.set("No history.")
+
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "restart":
+                    # ゲームを最初から始める
+                    dest_x = int(config.get("game", "player_x"))
+                    dest_y = int(config.get("game", "player_y"))
+                    dest_map =  str(config.get("game", "map"))
+
+                    DIMWND.show(200, 'warp')
+
+                    fieldmap.warp_player(dest_map, dest_x, dest_y)
+
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write("restart, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "echo":
+                    MSGWND.set(atxt)
+                    atxt = "\0"
+                    cmd = "\0"
+                elif cmd == "itemsetall":
+                    sender.send_event({"itemsetall": True})
+
+                    itemsetAllResult = sender.receive_json()
+                    MSGWND.set(itemsetAllResult['message'])
+                elif cmd == "goto":
+                    ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
+                    parts = atxt.split(",", 1)
+                    dest_x = int(parts[0])
+                    dest_y = int(parts[1])
+
+                    DIMWND.show(200, 'warp')
+
+                    fieldmap.warp_player(mapname, dest_x, dest_y)
+
+                    cmd = "\0"
+                    atxt = "\0"
+                    PLAYER.fp.write( "goto, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                elif cmd == "stdin":
+                    try:
+                        parts = atxt.split(' ', 1)
+                        value = " ".join(parts)
+                        sender.send_event({"stdin": f"{value}\n"})
+                        stdinResult = sender.receive_json()
+                        if stdinResult["status"] == "ok":
+                            # 今回更新した変数以外の計算コメントは全て消去する
+                            PLAYER.remove_itemvalue()
+                            for name, item_info in stdinResult["items"].items():
+                                for line, value in item_info.items():
+                                    if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
+                                        item.update_value(value)
+                        MSGWND.set(stdinResult['message'])
+                    except (IndexError, ValueError):
+                        MSGWND.set("ERROR...")
+                    cmd = "\0"
+                    atxt = "\0"
+                elif cmd == "jump":
+                    # 関数の入り口まで飛ばしてくれる　同じマップ内だけ 
+                    # 部屋と関数名の関連付けを取得できるようになったらこのコマンドを有効にする
+                    # jumpするなら、デバッグモードに移行するなどを考える
+                    MSGWND.set("not valid yet...")
+                    # MSGWND.set("Function \'"+atxt+"\' is not found...")
+                    cmd = "\0"
+                    atxt = "\0"
+                elif cmd == "aquatan":
+                    MSGWND.set("Make aquatan\nGrate Again!!!")
+                    atxt = "\0"
+                    cmd = "\0"
+                elif cmd in ("down", "left", "right", "up"):
+                    if atxt != "":
+                        cmd = "\0"
+                    continue
+                else:
+                    MSGWND.set("Undefined command")
+                    atxt = "\0"
+                    cmd = "\0"
+
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.close()
+                    server.terminate()
+                    sys.exit()
+                # Command + W の同時押し検知 (Mac: KMOD_META、Windows/Linuxなら KMOD_CTRL)
+                if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
+                    PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.close()
+                    server.terminate()
+                    sys.exit()
+
+                # region mouse click event
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mouse_down = True
+                    start_timer()
+                    if PCODEWND.is_visible:
+                        local_pos = (event.pos[0] - PCODEWND.x, event.pos[1] - PCODEWND.y)
+                        if PCODEWND.auto_scroll_button_rect.collidepoint(local_pos):
+                            PCODEWND.is_auto_scroll = True
+                            PCODEWND.update_displayed_area(PCODEWND.linenum)
+                        elif PCODEWND.is_cursor_in_window(event.pos):
+                            programCodeWindow_scroll_mouse_pos = event.pos
+                    if ITEMWND.is_visible:
+                        if (action_type := ITEMWND.is_cursor_in_window(event.pos)):
+                            if action_type == 'expand':
+                                itemWindow_expand_mouse_pos = event.pos
+                            elif action_type == 'scroll':
+                                itemWindow_scroll_mouse_pos = event.pos
+                    if CTRLGWND.is_visible:
+                        if CTRLGWND.is_cursor_in_window(event.pos):
+                            controllerGuideWindow_scroll_mouse_pos = event.pos
+                    if LOGWND.is_visible:
+                        if LOGWND.is_cursor_in_window(event.pos):
+                            logWindow_scroll_mouse_pos = event.pos
+
+                    if PLAYER.is_scrollable_code_element_window(event.pos):
+                        codeElementWindow_scroll_mouse_pos = event.pos
+                    
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    mouse_down = False
+                    if itemWindow_expand_mouse_pos:
+                        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
+                    elif itemWindow_scroll_mouse_pos:
+                        ITEMWND.is_inAction = True
+                    end_timer()
+                    if cmd == "pause" == BTNWND.is_clicked(event.pos):
+                        # ここより下の部分を関数化するかどうかは後で考える
+                        SMANAGER.play_se("pause_open")
+                        PAUSEWND.show()
+                    programCodeWindow_scroll_mouse_pos = None
+                    itemWindow_expand_mouse_pos = None
+                    itemWindow_scroll_mouse_pos = None
+                    controllerGuideWindow_scroll_mouse_pos = None
+                    logWindow_scroll_mouse_pos = None
+                    codeElementWindow_scroll_mouse_pos = None
+
+                if mouse_down:
+                    if event.type == pygame.MOUSEMOTION:
+                        if programCodeWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - programCodeWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - programCodeWindow_scroll_mouse_pos[0]
+                            if dy < 0 and PCODEWND.offset_y + PCODEWND.maxY > PCODEWND.rect.height:
+                                PCODEWND.offset_y = max(PCODEWND.offset_y+dy, PCODEWND.rect.height - PCODEWND.maxY)
+                            elif dy >= 0 and PCODEWND.offset_y < 10:
+                                PCODEWND.offset_y = min(PCODEWND.offset_y+dy, 10)
+                            if dx < 0 and PCODEWND.offset_x + PCODEWND.local_right_edge_x > PCODEWND.rect.width:
+                                PCODEWND.offset_x = max(PCODEWND.offset_x+dx, PCODEWND.rect.width - PCODEWND.local_right_edge_x)
+                            elif dx >= 0 and PCODEWND.offset_x < 10:
+                                PCODEWND.offset_x = min(PCODEWND.offset_x+dx, 10)
+                            programCodeWindow_scroll_mouse_pos = event.pos
+                        elif itemWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - itemWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - itemWindow_scroll_mouse_pos[0]
+                            if dy < 0 and ITEMWND.offset_y + ITEMWND.local_bottom_edge_y > ITEMWND.rect.height:
+                                ITEMWND.offset_y = max(ITEMWND.offset_y+dy, ITEMWND.rect.height - ITEMWND.local_bottom_edge_y)
+                            elif dy >= 0 and ITEMWND.offset_y < 10:
+                                ITEMWND.offset_y = min(ITEMWND.offset_y+dy, 10)
+                            if dx < 0 and ITEMWND.offset_x + ITEMWND.local_right_edge_x > ITEMWND.rect.width:
+                                ITEMWND.offset_x = max(ITEMWND.offset_x+dx, ITEMWND.rect.width - ITEMWND.local_right_edge_x)
+                            elif dx >= 0 and ITEMWND.offset_x < 10:
+                                ITEMWND.offset_x = min(ITEMWND.offset_x+dx, 10)
+                            itemWindow_scroll_mouse_pos = event.pos
+                        elif controllerGuideWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - controllerGuideWindow_scroll_mouse_pos[1]
+                            if dy < 0 and CTRLGWND.offset_y + CTRLGWND.local_bottom_edge_y > CTRLGWND.rect.height:
+                                CTRLGWND.offset_y = max(CTRLGWND.offset_y+dy, CTRLGWND.rect.height - CTRLGWND.local_bottom_edge_y)
+                            elif dy >= 0 and CTRLGWND.offset_y < 10:
+                                CTRLGWND.offset_y = min(CTRLGWND.offset_y+dy, 10)
+                            controllerGuideWindow_scroll_mouse_pos = event.pos
+                        elif logWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - logWindow_scroll_mouse_pos[1]
+                            if dy < 0 and LOGWND.offset_y + LOGWND.local_bottom_edge_y > LOGWND.rect.height:
+                                LOGWND.offset_y = max(LOGWND.offset_y+dy, LOGWND.rect.height - LOGWND.local_bottom_edge_y)
+                            elif dy >= 0 and LOGWND.offset_y < 10:
+                                LOGWND.offset_y = min(LOGWND.offset_y+dy, 10)
+                            logWindow_scroll_mouse_pos = event.pos
+                        elif codeElementWindow_scroll_mouse_pos:
+                            dy = event.pos[1] - codeElementWindow_scroll_mouse_pos[1]
+                            dx = event.pos[0] - codeElementWindow_scroll_mouse_pos[0]
+                            crnt_codeElementWindow = PLAYER.codeElementWindow_list[PLAYER.codeElementWindow_index]
+                            if dy < 0 and not crnt_codeElementWindow.is_bottom_edge:
+                                crnt_codeElementWindow.offset_y += dy
+                            elif dy >= 0:
+                                crnt_codeElementWindow.offset_y = min(crnt_codeElementWindow.offset_y+dy, 10)
+                            if dx < 0 and not crnt_codeElementWindow.is_right_edge:
+                                crnt_codeElementWindow.offset_x += dx
+                            elif dx >= 0:
+                                crnt_codeElementWindow.offset_x = min(crnt_codeElementWindow.offset_x+dx, 10)
+                            codeElementWindow_scroll_mouse_pos = event.pos
+                                      
+                    elif programCodeWindow_scroll_mouse_pos is None and itemWindow_expand_mouse_pos is None and itemWindow_scroll_mouse_pos is None and controllerGuideWindow_scroll_mouse_pos is None and logWindow_scroll_mouse_pos is None:
+                        cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
+                        if cmd == "command":
+                            CMNDWND.show()
+                
+                # endregion
+                
+                # region keydown event
+                ## open map
+                if event.type == KEYDOWN and event.key == K_c:
+                    cmd = "command"
+                    CMNDWND.show()
+
+                if event.type == KEYDOWN and event.key == K_p:
+                    SMANAGER.play_se("pause_open")
+                    PAUSEWND.show()
+                
+                if event.type == KEYDOWN and event.key in [K_LEFT, K_RIGHT]:
+                    if bool(MSGWND.selectMsgText):
+                        MSGWND.selectMsg(-1 if event.key == K_LEFT else 1)
+
+                if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
+                    if PCODEWND.rollback_index is not None:
+                        PCODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
+
+                if (event.type == KEYDOWN and event.key == K_f) or cmd == "foot":
+                    cmd = ""
+                    # 足元にあるのが宝箱かワープゾーンかを調べる
+                    if not MSGWND.is_visible and PLAYER.search(fieldmap):
+                        continue
+
+                if (event.type == KEYDOWN and (event.key == K_SPACE or event.key == K_RETURN or event.key == K_z)) or cmd == "action":
+                    cmd = ""
+                    if MSGWND.is_visible:
+                        # メッセージウィンドウ表示中なら次ページへ
+                        MSGWND.next(fieldmap)
+                    else:
+                        # ドアを開ける
+                        if PLAYER.unlock(fieldmap):
+                            continue
+
+                        # 表示中でないなら話す
+                        PLAYER.talk(fieldmap)
+
+                # endregion
+
+            while PAUSEWND.is_visible:
+                PAUSEWND.draw(screen)
+                pygame.display.update()
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        server.terminate()
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        sys.exit()
+
+                    if event.type == KEYDOWN and event.key == K_w and (event.mod & KMOD_META):
+                        server.terminate()
+                        print("Game was terminated" if ISENGLISH else "ゲームを終了しました")
+                        sys.exit()
+
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
+                        if (button_name := PAUSEWND.sm_window.touchKnob(event.pos)):
+                            continue
+                        if PAUSEWND.button_toGame_rect.collidepoint(event.pos):
+                            SMANAGER.play_se("pause_close")
+                            PAUSEWND.hide()
+                        elif PAUSEWND.button_toStageSelect_rect.collidepoint(event.pos):  
+                            SMANAGER.play_se("pause_close")
+                            PAUSEWND.hide()
+                            PLAYER.game_status = "quitted"
+                        elif PAUSEWND.button_left.get_clicked_button_name(event.pos):
+                            PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index - 1) % len(PAUSEWND.guide_images_list)
+                            SMANAGER.play_se("scroll")
+                        elif PAUSEWND.button_right.get_clicked_button_name(event.pos):
+                            PAUSEWND.guide_images_index = (PAUSEWND.guide_images_index + 1) % len(PAUSEWND.guide_images_list)
+                            SMANAGER.play_se("scroll")
+                    elif event.type == MOUSEBUTTONUP:
+                        if button_name == "bgm slider":
+                            SMANAGER.bgm_volume = (PAUSEWND.sm_window.bgm_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)
+                            SMANAGER.set_bgm_volume()
+                        elif button_name == "se slider":
+                            SMANAGER.set_all_se_volume((PAUSEWND.sm_window.se_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)) 
+                        button_name = None
+
+                    if button_name:
+                        if event.type == pygame.MOUSEMOTION:
+                            if button_name == "bgm slider":
+                                if PAUSEWND.sm_window.knob_min_x < event.pos[0] < PAUSEWND.sm_window.knob_max_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
+                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.bgm_knob_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_min_x
+                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.bgm_knob_x:
+                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_max_x
+                            elif button_name == "se slider":
+                                if PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
+                                    PAUSEWND.sm_window.se_knob_x = event.pos[0]
+                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.se_knob_x:
+                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_min_x
+                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.se_knob_x:
+                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_max_x
+                
+                offset = calc_offset(PLAYER)
+                fieldmap.draw(screen, offset)
+                
+            pygame.display.flip()
+
+        if PLAYER.game_status == "goaled" and mapname not in ("tutorial", "tutorial_en"):
+            with open(f"{BASE_DIR}/score.json", 'w') as f:
+                if PLAYER.status["HP"] > 0:
+                    SBWND.scores_dict[mapname] = max(PLAYER.status["HP"] // 20, 1)
+                else:
+                    SBWND.scores_dict[mapname] = 0
+                json.dump(SBWND.scores_dict, f)
+        
+        SMANAGER.stop_se("hp_warning")
+        SMANAGER.stop_bgm()
+        server.terminate()
+
+#                                                                                                                                                                                         
+#                                                                                       88                                                                                                
+#                          ,d                                                           ""                                                                                         ,d     
+#                          88                                                                                                                                                      88     
+#  ,adPPYb,d8  ,adPPYba, MM88MMM           ,adPPYba, 88       88 8b,dPPYba,  8b,dPPYba, 88 888888888  ,adPPYba,           ,adPPYba, 88       88 8b,dPPYba,  ,adPPYba,  ,adPPYba, MM88MMM  
+# a8"    `Y88 a8P_____88   88              I8[    "" 88       88 88P'   `"8a 88P'   "Y8 88      a8P" a8P_____88           I8[    "" 88       88 88P'   `"8a I8[    "" a8P_____88   88     
+# 8b       88 8PP"""""""   88               `"Y8ba,  88       88 88       88 88         88   ,d8P'   8PP"""""""            `"Y8ba,  88       88 88       88  `"Y8ba,  8PP"""""""   88     
+# "8a,   ,d88 "8b,   ,aa   88,             aa    ]8I "8a,   ,a88 88       88 88         88 ,d8"      "8b,   ,aa           aa    ]8I "8a,   ,a88 88       88 aa    ]8I "8b,   ,aa   88,    
+#  `"YbbdP"Y8  `"Ybbd8"'   "Y888           `"YbbdP"'  `"YbbdP'Y8 88       88 88         88 888888888  `"Ybbd8"'           `"YbbdP"'  `"YbbdP'Y8 88       88 `"YbbdP"'  `"Ybbd8"'   "Y888  
+#  aa,    ,88                                                                                                                                                                             
+#   "Y8bbdP"                    888888888888                                                                   888888888888                                                               
+# 
+
+def get_sunrise_sunset(dt):
+    """日の出日の入り"""
+    # 京都市の緯度経度
+    kyoto = ephem.Observer()
+    kyoto.lat = '35.021'
+    kyoto.lon = '135.756'
+
+    kyoto.date = dt
+    sun = ephem.Sun()
+    # 日の出時刻を表示
+    #print(ephem.localtime(kyoto.previous_rising(sun)))
+    # 日の入り時刻を表示
+    #print(ephem.localtime(kyoto.next_setting(sun)))
+    return (ephem.localtime(kyoto.previous_rising(sun)), ephem.localtime(kyoto.next_setting(sun)))
+
+#                                                                                                                         
+#          88                                                                                 88                          
+#          88                                                                ,d               ""                          
+#          88                                                                88                                           
+#  ,adPPYb,88 8b,dPPYba, ,adPPYYba, 8b      db      d8           ,adPPYba, MM88MMM 8b,dPPYba, 88 8b,dPPYba,   ,adPPYb,d8  
+# a8"    `Y88 88P'   "Y8 ""     `Y8 `8b    d88b    d8'           I8[    ""   88    88P'   "Y8 88 88P'   `"8a a8"    `Y88  
+# 8b       88 88         ,adPPPPP88  `8b  d8'`8b  d8'             `"Y8ba,    88    88         88 88       88 8b       88  
+# "8a,   ,d88 88         88,    ,88   `8bd8'  `8bd8'             aa    ]8I   88,   88         88 88       88 "8a,   ,d88  
+#  `"8bbdP"Y8 88         `"8bbdP"Y8     YP      YP               `"YbbdP"'   "Y888 88         88 88       88  `"YbbdP"Y8  
+#                                                                                                             aa,    ,88  
+#                                                     888888888888                                             "Y8bbdP"   
+# 
+
+def draw_string(screen, x, y, string, color):
+    """画面上に文字列を表示"""
+    font_height = 16
+    surf, rect = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 18).render(string, color)
+    screen.blit(surf, (x, y+(font_height-4)-rect[3]))
+
+#                                                                                                                                                          
+# 88                                 88                      88                                                      88          88                        
+# 88                                 88                      88                                                      88          ""                        
+# 88                                 88                      88                                                      88                                    
+# 88  ,adPPYba,  ,adPPYYba,  ,adPPYb,88            ,adPPYba, 88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba,  ,adPPYba, 88,dPPYba,  88 8b,dPPYba,  ,adPPYba,  
+# 88 a8"     "8a ""     `Y8 a8"    `Y88           a8"     "" 88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 a8"     "" 88P'    "8a 88 88P'    "8a I8[    ""  
+# 88 8b       d8 ,adPPPPP88 8b       88           8b         88       88 ,adPPPPP88 88         ,adPPPPP88 8b         88       88 88 88       d8  `"Y8ba,   
+# 88 "8a,   ,a8" 88,    ,88 "8a,   ,d88           "8a,   ,aa 88       88 88,    ,88 88         88,    ,88 "8a,   ,aa 88       88 88 88b,   ,a8" aa    ]8I  
+# 88  `"YbbdP"'  `"8bbdP"Y8  `"8bbdP"Y8            `"Ybbd8"' 88       88 `"8bbdP"Y8 88         `"8bbdP"Y8  `"Ybbd8"' 88       88 88 88`YbbdP"'  `"YbbdP"'  
+#                                                                                                                                   88                     
+#                                      888888888888                                                                                 88                     
+# 
+
+def load_charachips(dir, file):
+    """キャラクターチップをロードしてCharacter.imagesに格納"""
+    file = os.path.join(dir, file)
+    with open(file, "r", encoding="utf-8") as fp:
+        for line in fp:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue  # コメント行は無視
+            data = line.split(",")
+            # chara_id = int(data[0])
+            chara_name = str(data[1])
+            Character.images[chara_name] = split_image(load_image("charachip", f"{chara_name}.png", TRANS_COLOR))
+
+#                                                                                                                                            
+# 88                                 88                                                                88          88                        
+# 88                                 88                                                                88          ""                        
+# 88                                 88                                                                88                                    
+# 88  ,adPPYba,  ,adPPYYba,  ,adPPYb,88           88,dPYba,,adPYba,  ,adPPYYba, 8b,dPPYba,   ,adPPYba, 88,dPPYba,  88 8b,dPPYba,  ,adPPYba,  
+# 88 a8"     "8a ""     `Y8 a8"    `Y88           88P'   "88"    "8a ""     `Y8 88P'    "8a a8"     "" 88P'    "8a 88 88P'    "8a I8[    ""  
+# 88 8b       d8 ,adPPPPP88 8b       88           88      88      88 ,adPPPPP88 88       d8 8b         88       88 88 88       d8  `"Y8ba,   
+# 88 "8a,   ,a8" 88,    ,88 "8a,   ,d88           88      88      88 88,    ,88 88b,   ,a8" "8a,   ,aa 88       88 88 88b,   ,a8" aa    ]8I  
+# 88  `"YbbdP"'  `"8bbdP"Y8  `"8bbdP"Y8           88      88      88 `"8bbdP"Y8 88`YbbdP"'   `"Ybbd8"' 88       88 88 88`YbbdP"'  `"YbbdP"'  
+#                                                                               88                                    88                     
+#                                      888888888888                             88                                    88                     
+# 
+
+def load_mapchips():
+    """マップチップをロードしてMap.imagesに格納"""
+    file = os.path.join("data", "mapchip.dat")
+    with open(file, "r", encoding="utf-8") as fp:
+        for line in fp:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue  # コメント行は無視
+            data = line.split(",")
+            mapchip_name = data[1]
+            movable = int(data[2])  # 移動可能か？
+            transparent = int(data[3])  # 背景を透明にするか？
+            # 画像のidで若い順に画像を登録しているので画像のidは配列の添字と一致する
+            if transparent == 0:
+                Map.images.append(load_image("mapchip", f"{mapchip_name}.png", -1))
+            else:
+                Map.images.append(load_image("mapchip", f"{mapchip_name}.png", TRANS_COLOR))
+            Map.movable_type.append(movable)
+
+    file = os.path.join("data", "backgroundchip.dat")
+    with open(file, "r", encoding="utf-8") as fp:
+        for line in fp:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue  # コメント行は無視
+            data = line.split(",")
+            backgroundchip_name = data[1]
+            movable = int(data[2])  # 移動可能か？
+            transparent = int(data[3])  # 背景を透明にするか？
+            # 画像のidで若い順に画像を登録しているので画像のidは配列の添字と一致する
+            Map.bg_images.append(pygame.transform.smoothscale(load_image("backgroundchip", f"{backgroundchip_name}.png", -1).convert_alpha(), (32, 32)))
+                                                                      
+# 88                                        ,ad8888ba,  88          88                        
+# 88   ,d                                  d8"'    `"8b 88          ""                        
+# 88   88                                 d8'           88                                    
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  88            88,dPPYba,  88 8b,dPPYba,  ,adPPYba,  
+# 88   88   a8P_____88 88P'   "88"    "8a 88            88P'    "8a 88 88P'    "8a I8[    ""  
+# 88   88   8PP""""""" 88      88      88 Y8,           88       88 88 88       d8  `"Y8ba,   
+# 88   88,  "8b,   ,aa 88      88      88  Y8a.    .a8P 88       88 88 88b,   ,a8" aa    ]8I  
+# 88   "Y888 `"Ybbd8"' 88      88      88   `"Y8888Y"'  88       88 88 88`YbbdP"'  `"YbbdP"'  
+#                                                                      88                     
+#                                                                      88                     
+
+class ItemChips():
+    def __init__(self):
+        self.typeModifierUIMap = {
+            'int' : {
+                frozenset() : self.load_itemChip('jewel2l-5.png'),
+                frozenset(['long']) : self.load_itemChip('jewel2l-3.png'),
+                frozenset(['long', 'long']) : self.load_itemChip('jewel2l-4.png'),
+                frozenset(['short']) : self.load_itemChip('jewel2l-2.png'),
+                frozenset(['unsigned']) : self.load_itemChip('jewel2b-5.png'),
+                frozenset(['unsigned', 'long']) : self.load_itemChip('jewel2b-3.png'),
+                frozenset(['unsigned', 'long', 'long']) : self.load_itemChip('jewel2b-4.png'),
+                frozenset(['unsigned', 'short']) : self.load_itemChip('jewel2b-2.png'),
+            },
+            'char' : {
+                frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-25.png'), (32,32)),
+            },
+            'float' : {
+                frozenset() : load_image('mapchip', 'foods-35.png'),
+            },
+            'double' : {
+                frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-33.png'), (24,24)),
+                frozenset(['long']) : load_image('mapchip', 'foods-33.png'),
+            },
+            'other' : {
+                frozenset() : self.load_itemChip('jewel2t-5.png'),
+            }
+        }
+        self.constUIMap = {
+            True : pygame.transform.smoothscale(self.load_itemChip('shield.png'), (12,12)),
+            False: None
+        }
+
+    def load_itemChip(self, name):
+        return load_image('itemchip', name)
+    
+    def getChip(self, type_name: str):
+        tokens = type_name.strip().split()
+
+        is_const = 'const' in tokens
+        tokens = [t for t in tokens if t != 'const']
+
+        base_types = ['int', 'char', 'float', 'double', '_Bool', 'bool']
+
+        base_type = None
+        struct_type = None
+        is_array = False
+    
+        tokens_to_remove = []
+        for t in tokens:
+            if '*' in t and t != "FILE":
+                return pygame.transform.smoothscale(self.load_itemChip('pointer.png'), (24,24)), None
+            if t == "FILE":
+                return pygame.transform.smoothscale(self.load_itemChip('file.png'), (48,48)), None
+            if t in base_types:
+                base_type = t
+                tokens_to_remove.append(t)
+            if 'struct' in t:
+                struct_type = 'struct'
+            if '[' in t:
+                is_array = True
+                base_type = t.split('[')[0]
+                tokens_to_remove.append(t)
+                break
+
+        if struct_type is not None:
+            return [pygame.transform.smoothscale(self.load_itemChip('struct.png'), (8,8)) for _ in range(3)] if is_array else pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
+        
+        tokens = [t for t in tokens if t not in tokens_to_remove]
+
+        if base_type is None:
+            base_type = 'int'
+        
+        modifier_set = frozenset(tokens)
+
+        base_icon: pygame.Surface = self.typeModifierUIMap.get(base_type, self.typeModifierUIMap['other']).get(modifier_set, self.typeModifierUIMap['other'][frozenset()])
+        const_overlay = self.constUIMap[is_const]
+
+        if is_array:
+            w, h = base_icon.get_size()
+            return [pygame.transform.smoothscale(base_icon.copy(), (w//2, h//2)) for _ in range(3)], const_overlay
+        else:
+            return base_icon, const_overlay
+
+#                                                                                                        
+#                       88                                    ad88    ad88                               
+#                       88                                   d8"     d8"                          ,d     
+#                       88                                   88      88                           88     
+#  ,adPPYba, ,adPPYYba, 88  ,adPPYba,            ,adPPYba, MM88MMM MM88MMM ,adPPYba,  ,adPPYba, MM88MMM  
+# a8"     "" ""     `Y8 88 a8"     ""           a8"     "8a  88      88    I8[    "" a8P_____88   88     
+# 8b         ,adPPPPP88 88 8b                   8b       d8  88      88     `"Y8ba,  8PP"""""""   88     
+# "8a,   ,aa 88,    ,88 88 "8a,   ,aa           "8a,   ,a8"  88      88    aa    ]8I "8b,   ,aa   88,    
+#  `"Ybbd8"' `"8bbdP"Y8 88  `"Ybbd8"'            `"YbbdP"'   88      88    `"YbbdP"'  `"Ybbd8"'   "Y888  
+#                                                                                                        
+#                                    888888888888                                                        
+# 
+
+def calc_offset(p):
+    """オフセット(全体マップ中の相対マップ位置)を計算する"""
+    offset_x = p.rect.topleft[0] - SCR_RECT.width//2
+    offset_y = p.rect.topleft[1] - SCR_RECT.height//2
+    return offset_x, offset_y
+
+#                                                                                                          
+# 88                                 88           88                                                       
+# 88                                 88           ""                                                       
+# 88                                 88                                                                    
+# 88  ,adPPYba,  ,adPPYYba,  ,adPPYb,88           88 88,dPYba,,adPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba,  
+# 88 a8"     "8a ""     `Y8 a8"    `Y88           88 88P'   "88"    "8a ""     `Y8 a8"    `Y88 a8P_____88  
+# 88 8b       d8 ,adPPPPP88 8b       88           88 88      88      88 ,adPPPPP88 8b       88 8PP"""""""  
+# 88 "8a,   ,a8" 88,    ,88 "8a,   ,d88           88 88      88      88 88,    ,88 "8a,   ,d88 "8b,   ,aa  
+# 88  `"YbbdP"'  `"8bbdP"Y8  `"8bbdP"Y8           88 88      88      88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'  
+#                                                                                   aa,    ,88             
+#                                      888888888888                                  "Y8bbdP"              
+# 
+
+def load_image(imgdir, file, colorkey=None):
+    """画像をロードする"""
+    file = os.path.join(imgdir, file)
+    try:
+        image = pygame.image.load(resource_path(file))
+    except pygame.error as message:
+        print("Cannot load image:", file)
+        raise SystemExit(message)
+    if colorkey is not None:
+        if colorkey == -1:
+            image = image.convert_alpha()
+        else:
+            image = image.convert()
+            image.set_colorkey(colorkey, RLEACCEL)
+    else:
+        image = image.convert_alpha()
+
+    return image
+
+#                                                                                                        
+#                       88 88                   88                                                       
+#                       88 ""   ,d              ""                                                       
+#                       88      88                                                                       
+# ,adPPYba, 8b,dPPYba,  88 88 MM88MMM           88 88,dPYba,,adPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba,  
+# I8[    "" 88P'    "8a 88 88   88              88 88P'   "88"    "8a ""     `Y8 a8"    `Y88 a8P_____88  
+#  `"Y8ba,  88       d8 88 88   88              88 88      88      88 ,adPPPPP88 8b       88 8PP"""""""  
+# aa    ]8I 88b,   ,a8" 88 88   88,             88 88      88      88 88,    ,88 "8a,   ,d88 "8b,   ,aa  
+# `"YbbdP"' 88`YbbdP"'  88 88   "Y888           88 88      88      88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'  
+#           88                                                                    aa,    ,88             
+#           88                       888888888888                                  "Y8bbdP"              
+# 
+
+def split_image(image):
+    """128x128のキャラクターイメージを32x32の16枚のイメージに分割
+    分割したイメージを格納したリストを返す"""
+    image_list: list[pygame.Surface] = []
+    for i in range(0, 128, GS):
+        for j in range(0, 128, GS):
+            surface = pygame.Surface((GS, GS))
+            surface.blit(image, (0, 0), (j, i, GS, GS))
+            surface.convert()
+            surface.set_colorkey(surface.get_at((0, 0)), RLEACCEL)
+            image_list.append(surface)
+    return image_list
+
+#                                                                                                                  
+# 88888888ba,                                 88                                         88                        
+# 88      `"8b               ,d               88                                         88                        
+# 88        `8b              88               88                                         88                        
+# 88         88 ,adPPYYba, MM88MMM ,adPPYYba, 88          ,adPPYba,  ,adPPYYba,  ,adPPYb,88  ,adPPYba, 8b,dPPYba,  
+# 88         88 ""     `Y8   88    ""     `Y8 88         a8"     "8a ""     `Y8 a8"    `Y88 a8P_____88 88P'   "Y8  
+# 88         8P ,adPPPPP88   88    ,adPPPPP88 88         8b       d8 ,adPPPPP88 8b       88 8PP""""""" 88          
+# 88      .a8P  88,    ,88   88,   88,    ,88 88         "8a,   ,a8" 88,    ,88 "8a,   ,d88 "8b,   ,aa 88          
+# 88888888Y"'   `"8bbdP"Y8   "Y888 `"8bbdP"Y8 88888888888 `"YbbdP"'  `"8bbdP"Y8  `"8bbdP"Y8  `"Ybbd8"' 88          
+#                                                                                                                  
+#                                                                                                                  
+# 
+
+class DataLoader(Thread):
+    """別スレッドでデータを取得し続けるためのクラス"""
+    def __init__(self, data, t):
+        super(DataLoader, self).__init__()
+        self.interval = t
+        self.data = data
+
+    def run(self):
+        """無限ループで実行"""
+        while True:
+            time.sleep(self.interval)
+            self.data.get_data()
+
+#                                           
+# 88b           d88                         
+# 888b         d888                         
+# 88`8b       d8'88                         
+# 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,   
+# 88  `8b   d8'  88 ""     `Y8 88P'    "8a  
+# 88   `8b d8'   88 ,adPPPPP88 88       d8  
+# 88    `888'    88 88,    ,88 88b,   ,a8"  
+# 88     `8'     88 `"8bbdP"Y8 88`YbbdP"'   
+#                              88           
+#                              88           
+# 
+
+class Map:
+    """マップオブジェクト"""
+    # main()のload_mapchips()でセットされる
+    images: list[pygame.Surface] = []  # マップチップ（ID->イメージ）
+    bg_images: list[pygame.Surface] = []
+    movable_type = []  # マップチップが移動可能か？（0:移動不可, 1:移動可）
+
+    def __init__(self, name):
+        self.name: str = name
+        self.row: int = -1  # 行数
+        self.col: int = -1  # 列数
+        self.map: list[list[int]] = []  # マップデータ（2次元リスト）
+        self.charas: list[Character] = []  # マップにいるキャラクターリスト
+        self.events: list[Event] = []  # マップにあるイベントリスト
+        self.helps: dict[tuple[int, int], str] = {}
+        self.lights: list[Light] = []  # マップにある光源リスト
+        self.floor: int = 0
+        self.red_overlay = pygame.Surface((SCR_WIDTH, SCR_HEIGHT), pygame.SRCALPHA)
+        self.load_json()
+
+    def create(self, dest_map: str):
+        """dest_mapでマップを初期化"""
+        self.name = dest_map
+        self.charas = []
+        self.events = []
+        self.lights = []
+        self.load_json()
+
+    def add_chara(self, chara):
+        """キャラクターをマップに追加する"""
+        self.charas.append(chara)
+
+    def update(self):
+        """マップの更新"""
+        # マップにいるキャラクターの更新
+        for chara in self.charas:
+            chara.update(self)  # mapを渡す
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int,int]):
+        """マップを描画する"""
+        offset_x, offset_y = offset
+        # マップの描画範囲を計算
+        startx = offset_x // GS
+        endx = startx + SCR_RECT.width//GS + 1
+        starty = offset_y // GS
+        endy = starty + SCR_RECT.height//GS + 1
+        # マップの描画
+        for y in range(starty, endy):
+            for x in range(startx, endx):
+                # マップの範囲外はデフォルトイメージで描画
+                # この条件がないとマップの端に行くとエラー発生
+                if x < 0 or y < 0 or x > self.col-1 or y > self.row-1:
+                    screen.blit(self.images[self.default], (x*GS-offset_x, y*GS-offset_y))
+                else:
+                    if 3200 <= self.map[y][x] <= 3299:
+                        screen.blit(self.images[32], (x*GS-offset_x, y*GS-offset_y))
+                        screen.blit(self.bg_images[self.map[y][x] % 100], (x*GS-offset_x, y*GS-offset_y))
+                    elif self.map[y][x] == 16000:
+                        screen.blit(self.images[160], (x*GS-offset_x, y*GS-offset_y))
+                        screen.blit(self.bg_images[100], (x*GS-offset_x, y*GS-offset_y))
+                    else:
+                        screen.blit(self.images[self.map[y][x]], (x*GS-offset_x, y*GS-offset_y))
+
+        if self.name in ("tutorial", "tutorial_en"):
+            is_visible = (pygame.time.get_ticks() // 300) % 5 != 0
+            # このマップにあるイベントを描画
+            for event in self.events:
+                if is_visible or not (PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict and event.pos() == PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][2]):
+                    event.draw(screen, offset)
+            # このマップにいるキャラクターを描画
+            for chara in self.charas:
+                if isinstance(chara, Player) or is_visible or not (PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict and chara.pos() == PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][2]):
+                    chara.draw(screen, offset)
+        else:
+            # このマップにあるイベントを描画
+            for event in self.events:
+                event.draw(screen, offset)
+            # このマップにいるキャラクターを描画
+            for chara in self.charas:
+                chara.draw(screen, offset)
+
+        # 条件・関数ウィンドウはイベント・キャラクターより上に描画したいので、上のループの後に描画する
+        if len(PLAYER.codeElementWindow_list):
+            PLAYER.codeElementWindow_list[PLAYER.codeElementWindow_index].draw(screen)
+
+        if PLAYER.status["HP"] <= 30:
+            self.red_overlay.fill((255, 0, 0, 110 - PLAYER.status["HP"] * 3))
+            screen.blit(self.red_overlay, (0, 0))
+
+    def is_movable(self, x, y):
+        """(x,y)は移動可能か？"""
+        # マップ範囲内か？
+        if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
+            return False
+        if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
+            return False
+        # マップチップは移動可能か？
+        if self.movable_type[self.map[y][x]] == 0:
+            return False
+        # キャラクターと衝突しないか？
+        for chara in self.charas:
+            if chara.pos() == (x, y):
+                return False
+        # イベントと衝突しないか？
+        for event in self.events:
+            if self.movable_type[event.mapchip] == 0:
+                if event.pos() == (x, y):
+                    if isinstance(event, SmallDoor) and event.status == 1:
+                        break
+                    return False
+        return True
+
+    def is_movable_but_chara(self, x: int, y: int):
+        """(x,y)は移動可能か？"""
+        # マップ範囲内か？
+        if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
+            return False
+        # マップチップは移動可能か？
+        if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
+            return False
+        if self.movable_type[self.map[y][x]] == 0:
+            return False
+        # イベントと衝突しないか？
+        for event in self.events:
+            # print(event.mapchip)
+            if self.movable_type[event.mapchip] == 0:
+                if event.pos() == (x, y):
+                    return False
+        return True
+
+    def get_chara(self, x: int, y: int):
+        """(x,y)にいるキャラクターを返す。いなければNone"""
+        for chara in self.charas:
+            if chara.pos() == (x, y):
+                return chara
+        return None
+
+    def get_event(self, x: int, y: int):
+        """(x,y)にあるイベントを返す。なければNone"""
+        for event in self.events:
+            if event.pos() == (x, y):
+                return event
+        return None
+
+    def remove_event(self, event: Event):
+        """eventを削除する"""
+        self.events.remove(event)
+
+    def load_json(self):
+        """json形式のマップ・イベントを読み込む"""
+        # ここのファイル名は後々変える -----------------------------------------------------------
+        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", self.name.lower(), self.name.lower() + ".json")
+        with codecs.open(file, "r", "utf-8") as fp:
+            json_data = json.load(fp)
+        self.row = json_data["row"]
+        self.col = json_data["col"]
+        self.default = json_data["default"]
+        if self.floor != json_data["floor"]:
+            # bgm設定
+            SMANAGER.stop_bgm()
+            if self.name in ("tutorial", "tutorial_en"):
+                SMANAGER.play_bgm("tutorial", 0.3)
+            elif json_data["floor"] == 31: # sand
+                SMANAGER.play_bgm("sand_stage_bgm")
+            elif json_data["floor"] == 390: # brick
+                SMANAGER.play_bgm("brick_stage_bgm")
+            elif json_data["floor"] == 43: # grass
+                SMANAGER.play_bgm("grass_stage_bgm", 0.3)
+            else: # 402 = iron
+                SMANAGER.play_bgm("iron_stage_bgm")
+        self.floor = json_data["floor"]
+        self.map = json_data["map"]
+        self.events = []
+        self.charas = []
+        for chara in json_data["characters"]:
+            chara_type = chara["type"]
+            if chara_type == "CHARA":  # キャラクター
+                self.create_chara_j(chara)
+            elif chara_type == "CHARAEXPRESSION": # 計算式のチェックを行うキャラクター
+                self.create_charaexpression_j(chara)
+            elif chara_type == "CHARARETURN": #キャラクター+遷移元に戻る
+                self.create_charareturn_j(chara)
+            elif chara_type == "CHARACHECKCONDITION":
+                self.create_characheckcondition_j(chara)
+            elif chara_type == "NPC":  # NPC
+                self.create_npc_j(chara)
+            elif chara_type == "NPCPATH":  # NPCPATH
+                self.create_npcpath_j(chara)
+        for event in json_data["events"]:
+            event_type = event["type"]
+            if event_type == "SIGN":  # 任意の文字を書く看板
+                self.create_sign_j(event)
+            elif event_type == "TREASURE":  # 宝箱
+                self.create_treasure_j(event)
+            elif event_type == "DOOR":  # ドア
+                self.create_door_j(event)
+            elif event_type == "SDOOR":  #  小さいドア
+                self.create_smalldoor_j(event)
+            elif event_type == "ZLIGHT":  # 光源
+                self.create_light_j(event)
+            elif event_type == "MOVE":  # マップ間移動イベント
+                self.create_move_j(event)
+            elif event_type == "AUTO":  # 自動移動イベント
+                self.create_auto_j(event)
+            elif event_type == "PLPATH":  # プレイヤー移動目標
+                self.create_plpath_j(event)
+            elif event_type == "PLACESET":  # 場所マーカー
+                self.create_placeset_j(event)
+            
+    def create_chara_j(self, data):
+        """キャラクターを作成してcharasに追加する"""
+        name = data["name"]
+        x, y = int(data["x"]), int(data["y"])
+        direction = int(data["dir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        chara = Character(name, (x, y), direction, movetype, message)
+        # print(chara)
+        self.charas.append(chara)
+
+    def create_npc_j(self, data):
+        """NPCを作成してcharasに追加する"""
+        name = data["name"]
+        npcname = data["npcname"]
+        dest = (int(data["x"]), int(data["y"]))
+        direction = int(data["dir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        chara = Character(name, dest, direction, movetype, message)
+        chara.npcname = npcname
+        self.charas.append(chara)
+
+    def create_npcpath_j(self, data):
+        """NPCの部屋での目的地を設定する"""
+        npcname = data["name"]
+        pathname = data["pathname"]
+        dest = (int(data["x"]), int(data["y"]))
+
+    def create_sign_j(self, data):
+        """看板を作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        text = data["text"]
+        self.events.append(Sign((x,y),text))
+
+    def create_treasure_j(self, data):
+        # 一度取得したアイテムの宝箱は現れないようにする
+        if (PLAYER.find_item_belong_to_player(data["name"], data["start"])) is not None:
+            return
+
+        """宝箱を作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        name = data["name"]
+        start = data["start"]
+        end = data["end"]
+        func_groups = data["func_groups"]
+        func = data["func"]
+        treasure = Treasure((x, y), name, func, start, end, func_groups, self.name.lower())
+        self.events.append(treasure)
+
+    def create_light_j(self, data):
+        """光源を作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        room = data["roomname"]
+        light = Light((x, y), room)
+        self.lights.append(light)
+
+    def create_door_j(self, data):
+        """ドアを作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        name = data["door_name"]
+        door = Door((x, y), name)
+        self.events.append(door)
+
+    def create_smalldoor_j(self, data):
+        """ドアを作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        name = data["door_name"]
+        direction = data["dir"]
+        door = SmallDoor((x, y), name, direction)
+        self.events.append(door)
+
+    # chara_return = {
+    #     "type": "CHARARETURN", 
+    #     "name": "15161" if chara_return.func_name else "15084", 
+    #     "x": int(chara_return.local_pos[1]+self.offset["x"]), 
+    #     "y": int(chara_return.local_pos[0]+self.offset["y"]),
+    #     "dir": 0, 
+    #     "movetype": 1, 
+    #     "message": ("Congraturations !! Here is A Goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!") if chara_return.func_name == "main" else (f"This is the end of function {chara_return.func_name} !!" if self.is_english else f"ここが {chara_return.func_name} の終了地点です!!"), 
+    #     "execution_info": chara_return.execution_info,
+    #     "detail": self.convert_to_comment_window_info(chara_return.comment_window_info),
+    #     "func": chara_return.func_name
+    # }
+
+    def create_charareturn_j(self, data):
+        """キャラクター(遷移元に戻る)を作成してcharasに追加する"""
+        name = data["name"]
+        x, y = int(data["x"]), int(data["y"])
+        direction = int(data["dir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        func = data["func"]
+        execution_info = data["execution_info"]
+        detail = data["detail"]
+        chara = CharaReturn(name, (x, y), direction, movetype, message, execution_info, func, detail, self.name.lower())
+        # print(chara)
+        self.charas.append(chara)
+
+    # chara_check_condition = {
+    #     "type": "CHARACHECKCONDITION", 
+    #     "name": str(color), 
+    #     "x": pos[1], 
+    #     "y": pos[0], 
+    #     "dir": chara_checkCondition.dir, 
+    #     "moveDir": move_dir,
+    #     "movetype": 1, 
+    #     "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", 
+    #     "func": chara_checkCondition.func,
+    #     "execution_info": chara_checkCondition.execution_info, 
+    #     "detail": self.convert_to_comment_window_info(chara_checkCondition.comment_window_info)
+    # }
+
+    def create_characheckcondition_j(self, data):
+        name = data["name"]
+        x = int(data["x"]) 
+        y = int(data["y"]) 
+        direction = int(data["dir"])
+        move_direction = int(data["moveDir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        func = data["func"]
+        execution_info = data["execution_info"]
+        detail = data["detail"]
+        
+        chara = CharaCheckCondition(
+            name, 
+            (x, y), 
+            direction, 
+            move_direction, 
+            movetype, 
+            message, 
+            execution_info, 
+            func, 
+            detail,
+            self.name.lower()
+        )
+        # print(chara)
+        self.charas.append(chara)
+
+    # detail_by_line[firstLine] = {
+    #     "expr": self.convert_to_comment_window_info(detail["expr"]), 
+    #     "execution_info": detail["execution_info"],
+    #     "vars": [
+    #         {
+    #             "name": var_reference[0], 
+    #             "line": var_reference[1]
+    #         } 
+    #         for var_reference in detail["vars"]
+    #     ]
+    # }
+
+    # chara_expression = {
+    #     "type": "CHARAEXPRESSION", 
+    #     "name": "15165", 
+    #     "x": int(chara_expression.local_pos[1]+self.offset["x"]), 
+    #     "y": int(chara_expression.local_pos[0]+self.offset["y"]), 
+    #     "dir": 0,
+    #     "movetype": 1, 
+    #     "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", 
+    #     "func": chara_expression.func, 
+    #     "comments": detail_by_line
+    # }
+
+    def create_charaexpression_j(self, data):
+        """計算式を確認するキャラクターを追加する"""
+        name = data["name"]
+        x, y = int(data["x"]), int(data["y"])
+        direction = int(data["dir"])
+        movetype = int(data["movetype"])
+        message = data["message"]
+        func = data["func"]
+        comments = data["comments"]
+        chara = CharaExpression(name, (x, y), direction, movetype, message, func, comments, self.name.lower())
+        # print(chara)
+        self.charas.append(chara)
+
+    # move_event = {
+    #     "type": "MOVE", 
+    #     "x": int(move_event.local_from_pos[1]+self.offset["x"]), 
+    #     "y": int(move_event.local_from_pos[0]+self.offset["y"]),
+    #     "func": move_event.func_name,
+    #     "dest_x": int(move_event.local_to_pos[1]+self.offset["x"]), 
+    #     "dest_y": int(move_event.local_to_pos[0]+self.offset["y"]), 
+    #     "dest_map": program_name,
+    #     "execution_info": move_event.execution_info,
+    #     "detail": self.convert_to_comment_window_info(move_event.comment_window_info),
+    #     "mapchip": move_event.mapchip
+    # }
+
+    def create_move_j(self, data):
+        """移動イベントを作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        mapchip = int(data["mapchip"])
+        dest_map = data["dest_map"]
+        dest_x, dest_y = int(data["dest_x"]), int(data["dest_y"])
+        func = data["func"]
+        execution_info = data["execution_info"]
+        detail = data["detail"]
+        move = MoveEvent((x, y), mapchip, dest_map, (dest_x, dest_y), execution_info, func, detail, self.name.lower())
+        self.events.append(move)
+
+    def create_plpath_j(self, data):
+        """プレイヤーの目的地を設定する"""
+        pathname = data["pathname"]
+        dest = (int(data["x"]),int(data["y"]))
+        PLAYER.dest[str(pathname)] = dest
+
+    def create_placeset_j(self, data):
+        """移動イベントを作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        mapchip = int(data["mapchip"])
+        place_label = data["place_label"]
+        place = PlacesetEvent((x, y), mapchip, place_label)
+        self.events.append(place)
+
+    def create_help_j(self, data):
+        x, y = int(data["x"]), int(data["y"])
+        if (x, y) in PLAYER.helps_aquired:
+            return
+        raw_comments_list: list[list[str]] = data["comments"]
+        comments_list: list[str] = []
+        for raw_comments_by_page in raw_comments_list:
+            comments_list.append('\n'.join(raw_comments_by_page))
+        self.helps[(x, y)] = '\f'.join(comments_list)
+
+    def create_auto_j(self, data):
+        """自動イベントを作成してeventsに追加する"""
+        x, y = int(data["x"]), int(data["y"])
+        mapchip = int(data["mapchip"])
+        sequence = list(data["sequence"])
+        auto = AutoEvent((x, y), mapchip, sequence)
+        self.events.append(auto)
+
+    def warp_player(self, map_name: str, dest_x: int, dest_y: int):
+        if PLAYER is None:
+            sys.exit("player is not found")
+        
+        self.create(map_name)  # 移動先のマップで再構成
+        PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
+        self.add_chara(PLAYER)  # マップに再登録
+    
+#                                                                                                     
+#   ,ad8888ba,  88                                                                                    
+#  d8"'    `"8b 88                                                        ,d                          
+# d8'           88                                                        88                          
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba,  ,adPPYba, MM88MMM ,adPPYba, 8b,dPPYba,  
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 a8"     ""   88   a8P_____88 88P'   "Y8  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 8b           88   8PP""""""" 88          
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88 "8a,   ,aa   88,  "8b,   ,aa 88          
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8  `"Ybbd8"'   "Y888 `"Ybbd8"' 88          
+#                                                                                                     
+#                                                                                                     
+# 
+
+class Character:
+    """一般キャラクタークラス"""
+    speed = 8  # 1フレームの移動ピクセル数
+    animcycle = MAX_FRAME_PER_SEC // 4  # アニメーション速度 //の後の数字を増やすと早くなる
+    frame = 0
+    # キャラクターイメージ（mainで初期化）
+    # キャラクター名 -> 分割画像リストの辞書
+    images: dict[str, list[pygame.Surface]] = {}
+
+    def __init__(self, name: str, pos: tuple[int, int], direction: Literal[0, 1, 2, 3], movetype: int, message: str):
+        self.name = name  # プレイヤー名（ファイル名と同じ）
+        self.npcname = ""  # 頭の上の名前
+        self.image = self.images[name][0]  # 描画中のイメージ
+        self.x: int = pos[0]
+        self.y: int = pos[1]  # 座標（単位：マス）
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+        self.vx, self.vy = 0, 0  # 移動速度
+        self.moving = False  # 移動中か？
+        self.direction: Literal[0,1,2,3] = direction  # 向き
+        self.movetype = movetype  # 移動タイプ
+        self.message = message  # メッセージ
+        self.moveto = []
+        self.damage_label = ""  # ダメージラベル
+        self.damage_color = (255, 0, 0, 255)
+        self.lim_lu = (self.x - 2, self.y - 2)
+        self.lim_rd = (self.x + 2, self.y + 2)
+
+    def pos(self):
+        """座標を返す"""
+        return (self.x, self.y)
+
+    def set_speed(self, s: int):
+        """移動スピードを設定"""
+        self.speed = s
+
+    def update(self, mymap: Map):
+        """キャラクター状態を更新する。
+        mapは移動可能かの判定に必要。"""
+        # プレイヤーの移動処理
+        if self.moving:
+            # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
+            self.rect.move_ip(self.vx, self.vy)
+            if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
+                self.moving = False
+                self.x = self.rect.left // GS
+                self.y = self.rect.top // GS
+        elif len(self.moveto) > 0:
+            # 移動中でなく，movetoに行き先座標がセットされているなら
+            newdir = self.get_next_automove()
+            if newdir is not None:
+                # print "name:%s -> (%2d,%2d)" % (self.name,self.x,self.y)
+                # mymap.get_event(self.x, self.y) #もし、後々CPUは宝箱の上を通れないようにするなら、ここで確認する
+                self.direction = newdir
+                if self.direction == DOWN:
+                    if mymap.is_movable_but_chara(self.x, self.y+1):
+                        self.vx, self.vy = 0, self.speed
+                        self.moving = True
+                elif self.direction == LEFT:
+                    if mymap.is_movable_but_chara(self.x-1, self.y):
+                        self.vx, self.vy = -self.speed, 0
+                        self.moving = True
+                elif self.direction == RIGHT:
+                    if mymap.is_movable_but_chara(self.x+1, self.y):
+                        self.vx, self.vy = self.speed, 0
+                        self.moving = True
+                elif self.direction == UP:
+                    if mymap.is_movable_but_chara(self.x, self.y-1):
+                        self.vx, self.vy = 0, -self.speed
+                        self.moving = True
+            else:
+                #print(f"name:{self.name} -> [{self.x},{self.y}]")
+                self.lim_lu = (self.x - 3, self.y - 3)
+                self.lim_rd = (self.x + 3, self.y + 3)
+                self.set_speed(8)
+        
+        # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
+        self.frame += 1
+        self.image = self.images[self.name][self.direction * 4 + (self.frame // self.animcycle  % 4)]
+
+    def draw_light(self, screen: pygame.Surface, color: pygame.Color, offset: tuple[int, int]):
+        """オフセットを考慮し光を描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]-80
+        py = self.rect.topleft[1]-80
+        light_surface = pygame.Surface((160, 160), pygame.SRCALPHA)
+        # screen.blit(self.image, (px-offset_x, py-offset_y))
+        pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//6), (80,80), 80, 0)
+        pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//4), (80,80), 70, 0)
+        pygame.draw.circle(light_surface,Color(color.r,color.g,color.b,color.a//2), (80,80), 60, 0)
+        pygame.draw.circle(light_surface,Color(0,0,0,color.a),(80,80),48,0)
+        screen.blit(light_surface, (px-offset_x+15, py-offset_y+15), special_flags=BLEND_RGBA_SUB)
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してプレイヤーを描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+        font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 20)
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+        screen.blit(font.render(self.npcname, Color(255, 255, 255, 255))[
+                    0], (px-offset_x, py-offset_y-18))
+        screen.blit(font.render(self.damage_label, self.damage_color)
+                    [0], (px-offset_x+32, py-offset_y))
+
+    def set_pos(self, x: int, y: int, direction: Literal[0,1,2,3]):
+        """キャラクターの位置と向きをセット"""
+        self.x, self.y = x, y
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+        self.direction = direction
+
+    def append_moveto(self, seq):
+        """移動先を追加"""
+        self.moveto.extend(seq)
+
+    def get_next_automove(self):
+        """次の移動先を得る"""
+        direction: list[Literal[0,1,2,3]] = []
+        # moveto[0]が現座標だったらpop
+        if len(self.moveto) > 0:
+            if self.x - self.moveto[0][0] == 0 and self.y - self.moveto[0][1] == 0:
+                self.moveto.pop(0)
+        if len(self.moveto) > 0:
+            if self.x - self.moveto[0][0] > 0:
+                direction.append(LEFT)
+            elif self.x - self.moveto[0][0] < 0:
+                direction.append(RIGHT)
+            if self.y - self.moveto[0][1] > 0:
+                direction.append(UP)
+            elif self.y - self.moveto[0][1] < 0:
+                direction.append(DOWN)
+            return random.choice(direction)
+        return None
+
+    def __str__(self):
+        values: list[str] = [
+            f"{name}={value}"
+            for name, value in self.__dict__.items()
+            if type(value) in (str, int)
+        ]
+        return f"{self.__class__.__name__.upper()}({', '.join(values)})"
+
+
+#                                                              
+# 88888888ba  88                                               
+# 88      "8b 88                                               
+# 88      ,8P 88                                               
+# 88aaaaaa8P' 88 ,adPPYYba, 8b       d8  ,adPPYba, 8b,dPPYba,  
+# 88""""""'   88 ""     `Y8 `8b     d8' a8P_____88 88P'   "Y8  
+# 88          88 ,adPPPPP88  `8b   d8'  8PP""""""" 88          
+# 88          88 88,    ,88   `8b,d8'   "8b,   ,aa 88          
+# 88          88 `"8bbdP"Y8     Y88'     `"Ybbd8"' 88          
+#                               d8'                            
+#                              d8'                             
+# 
+
+class Player(Character):
+    """プレイヤークラス"""
+    FONT_SIZE = 12
+
+    def __init__(self, name: str, pos: tuple[int, int], direction: int, sender: EventSender):
+        Character.__init__(self, name, pos, direction, False, None)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.prevPos = [pos, pos]
+        self.damage_motion: list[int] = []
+        self.dest = {}
+        self.place_label = "away"
+        self.automove = []
+        self.waitingMove = None
+        self.moveHistory: list[dict] = []
+        self.move5History: list[dict] = []
+        self.status = {"HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
+        self.itembag = ItemBag()
+        self.commonItembag = ItemBag()
+        self.sender : EventSender = sender
+        self.sender.programCodeWindow.history.append(
+            (
+                "", 0, 
+                {
+                    "x": self.x, 
+                    "y": self.y, 
+                    "door": None, 
+                    "ccchara": None, 
+                    "checked_funcs": {}, 
+                    "func": "main", 
+                    "gvars": {}, 
+                    "vars": []
+                }
+            )
+        )
+        self.itemNameShow = True
+        # スモールドアを扉を閉じるために記憶
+        self.door: dict | None = None 
+        # プレイヤーが条件式通過した後に条件式確認キャラが元の位置に戻るために記憶する
+        self.ccchara: dict | None = None
+
+        # 遷移済みの関数の情報を記憶
+        # ワープゾーンまたは宝箱の計算式におけるチェック済みの関数を確認するための辞書
+        self.checked_funcs: dict[CheckedFuncLocation, list[list[CheckedFuncState]]] = {}
+        # 全ての関数の確認が完了したらすぐに消すのではなく、メッセージウィンドウが消えてから消す。そのための変数
+        self.completed_checked_func_location: CheckedFuncLocation | None = None
+
+        self.game_status = "playing"
+        self.codeElementWindow_list: list[CodeElementWindow] = []
+        self.codeElementWindow_index = 0
+        self.std_messages = []
+        self.address_to_fname = {}
+        self.address_to_size = {}
+        self.func = None
+        self.helps_aquired: list[tuple[int, int]] = []
+        self.isFootActionValid = False
+        self.isFowardActionValid = False
+        self.isLoopStatementInBefore = False
+        self.log_lists: list[list[str]] = []
+        self.help_dict: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
+            3: ([["関数をスキップしなければ、その関数に応じた部屋に遷移します!!"]], ["再び計算式キャラクター", "と話せ!!"], (13,6)),
+            4: ([["黒色のキャラクターに話しかけると「return」に対応して元の部屋に戻ることができます!!"]], ["黒色のキャラクターに話しかけて", "ワープ前の部屋に戻れ!!"], (13,3)),
+            9: ([["ようこそ!C言語ダンジョンの世界へ!!"],["青の帽子のキャラクターがあなたです!!"],["これからチュートリアルを開始します!!"],["まずは右にある宝箱を取ってみましょう!!"]], ["アイテム「test」を取得せよ!!"], (27,27)),
+            11: ([["取得したアイテムは右上のアイテムウィンドウで確認できます!!"], ["次は左上のアイテムを取りに行きましょう!!(「shift」キーを押しながら移動でダッシュできます)"]], ["アイテム「c」を取得せよ!!"], (19,20)),
+            14: ([["アイテムには種類(変数の型)があり、", "アイコンが異なります!!"], ["値が更新されたアイテムにはハイライトが引かれており、", "クリックでその内容を確認できます!!"], ["次はドアを開けて、キャラクターに話しかけてみましょう!!"], ["条件が正しいキャラクターに話しかけるとその先に進めます!!(今回は右のキャラが正しいです!!)"]], ["右のキャラクターに話しかけよ!!"], (26,19)),
+            20: ([["次は全身白色のキャラクターに話しかけてみましょう!!"], ["彼らはプログラムの計算式を司っていて、話しかけるとその計算式を実行してくれます!!"]], ["計算式キャラクターに", "話しかけろ!!"], (27,17)),
+            24: ([["次はアイテム「finalResult」を取得しましょう!!"], ["どうやら計算式にtestCheckという関数が含まれているそうですね、、、"]], ["アイテム「finalResult」を", "取得せよ!!"], (5,11)),
+            27: ([["あとは、茶色のキャラクターに話しかけてゴールするだけです!!"], ["操作に不安があるなら今までの処理を逆戻し(rollback)して確認してみましょう!!"]], ["ゴールキャラクターに", "話しかけろ!!"], (6,9)),
+        }
+        self.help_dict_en: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
+            3: ([["If you don't skip function, you warp to the room of function !!"]], ["Talk to the white", "character again !!"], (13,6)),
+            4: ([["With talking to the black character, as like \"return\", you can go back to the room you came from !!"]], ["Talk to the black character to be back the room you came from !!"], (13,3)),
+            9: ([["Welcome to the C Dungeon Game !!"], ["You are a character with a blue hat !!"], ["Let's begin tutorial !!"],["Move right with the right key onto the treasure box !!", "Then, open the box with \"f\" key for item !!"]], ["Get item \"test\" !!"], (27,27)),
+            11: ([["You got item !!"], ["You can check the item on the right-top window !!"], ["Get item left-top the next !! (dash moving with \"shift\" key)"]], ["Get item \"c\" !!"], (19,20)),
+            14: ([["There are types of items (variables)", "Different icons for different types !!"], ["Highlight is set to the item with new value, and you can check about the value clicking on the highlighted line !!"], ["Next, open the right door, and talk to the character with a correct C condition over the door !!"]], ["Talk to the right character !!"], (26,19)),
+            20: ([["Talk to a white character next!!"], ["They are supervisers of C expressions, and do the expressions for you !!"], ["Similar to condition check, you can understand about the expressions on a red string !!"]], ["Talk to the white", "exp character !!"], (27,17)),
+            24: ([["Open a treasure box after getting in the right warp zone !!"], ["It looks like the expression contains a function \"testCheck\"..."]], ["Get item \"finalResult\" !!"], (5,11)),
+            27: ([["Then, the final mission is... to talk to a brown Goal character !!"], ["But, if you are nervous with how-to-play, check it going the past !!"], ["You can go back the past with \"rollback\" command !!", "(open the command window with \"c\" key, then input \"rollback\" !!)"]], ["Talk to the brown", "Goal Character !!"], (6,9)),
+        }
+        self.help_line_number_aquired: list[int] = []
+        self.fp = open(PATH, mode='w')
+
+    def update(self, mymap: Map):
+        """プレイヤー状態を更新する。
+        mapは移動可能かの判定に必要。"""
+        self.codeElementWindow_list = []
+        self.isFootActionValid = False
+        self.isFowardActionValid = False
+        # プレイヤーの移動処理
+        if self.moving:
+            # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
+            self.rect.move_ip(self.vx, self.vy)
+            if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
+                # self.fp.write( str(self.x)+", " + str(self.y) + "\n")
+                self.moving = False
+                self.x = self.rect.left // GS
+                self.y = self.rect.top // GS
+
+                if mymap.map[self.y][self.x] == 43:
+                    SMANAGER.play_se("grass_walk")
+                elif mymap.map[self.y][self.x] == 31:
+                    SMANAGER.play_se("sand_walk")
+                elif mymap.map[self.y][self.x] == 402:
+                    SMANAGER.play_se("iron_walk")
+                elif mymap.map[self.y][self.x] == 390:
+                    SMANAGER.play_se("steel_walk")
+                else:
+                    SMANAGER.play_se("walk")
+
+                # if (self.door and 
+                #     ((self.door["direction"] == DOWN and (self.door["x"], self.door["y"]-1) == (self.x, self.y)) or (self.door["direction"] == UP and (self.door["x"], self.door["y"]+1) == (self.x, self.y)) or
+                #      (self.door["direction"] == LEFT and (self.door["x"]+1, self.door["y"]) == (self.x, self.y)) or (self.door["direction"] == RIGHT and (self.door["x"]-1, self.door["y"]) == (self.x, self.y)))):
+                #     door = mymap.get_event(self.door["x"], self.door["y"])
+                #     if isinstance(door, SmallDoor):
+                #         door.close()
+                #         self.door = None
+        elif self.damage_motion:
+            if self.damage_motion[0] == 0:
+                PLAYER.damage_label = ""
+            self.rect.move_ip(self.damage_motion.pop(0), 0)
+        elif self.waitingMove is not None:
+            dest_map = self.waitingMove.dest_map
+            dest_x = self.waitingMove.dest_x
+            dest_y = self.waitingMove.dest_y
+            self.waitingMove = None
+
+            DIMWND.show(200, 'warp')
+            mymap.warp_player(dest_map, dest_x, dest_y)
+        else:
+            # ここで自動移動の判定
+            direction = None
+            pressed_keys = None
+            tempPrevPos = None
+
+            # region command input
+            global cmd
+            if cmd == "down":
+                direction = 'd'
+                # self.append_automove('d')
+                cmd = "\0"
+            elif cmd == "left":
+                direction = 'l'
+                # self.append_automove('l')
+                cmd = "\0"
+            elif cmd == "right":
+                direction = 'r'
+                # self.append_automove('r')
+                cmd = "\0"
+            elif cmd == "up":
+                direction = 'u'
+                # self.append_automove('u')
+                cmd = "\0"
+            # endregion
+
+            # コマンドまたは矢印ボタンの入力(cmd入力)がなければキー移動だと考える
+            if not direction in ('u', 'd', 'l', 'r'):
+                # キー入力 (cmd移動/自動移動がない時のみ許す => 同時入力は受け付けない)
+                pressed_keys = pygame.key.get_pressed()
+
+            self.set_speed(16 if pressed_keys and (pressed_keys[K_LSHIFT] or pressed_keys[K_RSHIFT]) else 8)
+
+            if direction == 'd' or (pressed_keys and pressed_keys[K_DOWN]):
+                self.direction = DOWN  # 移動できるかに関係なく向きは変える
+                if mymap.is_movable(self.x, self.y+1) and mymap.is_movable(self.x, self.y+2):
+                    self.vx, self.vy = 0, self.speed
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+(self.speed//8))]
+                elif mymap.is_movable(self.x, self.y+1):
+                    self.vx, self.vy = 0, 8
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+1)]
+            elif direction == 'l' or (pressed_keys and pressed_keys[K_LEFT]):
+                self.direction = LEFT
+                if mymap.is_movable(self.x-1, self.y) and mymap.is_movable(self.x-2, self.y):
+                    self.vx, self.vy = -self.speed, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-(self.speed//8), self.y)]
+                elif mymap.is_movable(self.x-1, self.y):
+                    self.vx, self.vy = -8, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-1, self.y)]
+            elif direction == 'r' or (pressed_keys and pressed_keys[K_RIGHT]):
+                self.direction = RIGHT
+                if mymap.is_movable(self.x+1, self.y) and mymap.is_movable(self.x+2, self.y):
+                    self.vx, self.vy = self.speed, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else  [self.prevPos[1], (self.x+(self.speed//8), self.y)]
+                elif mymap.is_movable(self.x+1, self.y):
+                    self.vx, self.vy = 8, 0
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x+1, self.y)]
+            elif direction == 'u' or (pressed_keys and pressed_keys[K_UP]):
+                self.direction = UP
+                if mymap.is_movable(self.x, self.y-1) and mymap.is_movable(self.x, self.y-2):
+                    self.vx, self.vy = 0, -self.speed
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-(self.speed//8))]
+                elif mymap.is_movable(self.x, self.y-1):
+                    self.vx, self.vy = 0, -8
+                    self.moving = True
+                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
+            elif direction is None and not MSGWND.selectMsgText:
+                # 接触イベントチェック
+                event = mymap.get_event(self.x, self.y)
+                if isinstance(event, MoveEvent) or isinstance(event, Treasure):
+                    self.append_code_element_window(event.codeElementWindow)
+                    self.isFootActionValid = True
+
+                if self.direction == DOWN:
+                    nextx = self.x
+                    nexty = self.y + 1
+                elif self.direction == LEFT:
+                    nextx = self.x - 1
+                    nexty = self.y
+                elif self.direction == RIGHT:
+                    nextx = self.x + 1
+                    nexty = self.y
+                else:
+                    nextx = self.x
+                    nexty = self.y - 1
+                if event is None and (len(mymap.helps) and (self.x, self.y) in mymap.helps) and not MSGWND.is_visible:
+                    MSGWND.set(mymap.helps[(self.x, self.y)], (None, 'help'))
+                    self.helps_aquired.append((self.x, self.y))
+                    mymap.helps.pop((self.x, self.y))
+
+                chara = mymap.get_chara(nextx, nexty)
+                if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
+                    self.append_code_element_window(chara.codeElementWindow)
+                    self.isFowardActionValid = True
+                elif isinstance(chara, CharaExpression):
+                    self.append_code_element_window(chara.codeElementWindow_dict.get(str(self.sender.programCodeWindow.linenum)))
+                    self.isFowardActionValid = True
+
+                event = mymap.get_event(nextx, nexty)
+                if isinstance(event, SmallDoor) and not event.status:
+                    self.isFowardActionValid = True
+
+            if self.moving and self.ccchara:
+                if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
+                    chara = mymap.get_chara(self.ccchara["avoiding_x"], self.ccchara["avoiding_y"])
+                    if isinstance(chara, CharaCheckCondition):
+                        if chara.initial_direction != self.direction:
+                            chara.back_to_init_pos()
+                            self.ccchara = None
+                            self.close_opened_door(mymap)
+        
+        # if self.speed != 8:
+        #     self.speed = 8
+        self.set_speed(8)
+
+        # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
+        self.frame += 1
+        self.image = self.images[self.name][self.direction * 4+(self.frame // self.animcycle % 4)]
+
+    def get_next_automove(self):
+        """次の移動先を得る"""
+        if len(self.automove) > 0:
+            return self.automove[0]
+        return None
+    
+    def pop_automove(self):
+        """自動移動を1つ取り出す"""
+        self.automove.pop(0)
+
+    def append_automove(self, ch):
+        """自動移動に追加する"""
+        self.automove.extend(ch)
+
+    def search(self, mymap: Map):
+        """足もとに宝箱またはワープゾーンがあるか調べる"""
+        event = mymap.get_event(self.x, self.y)
+        if isinstance(event, Treasure):
+            # 宝箱を開けることの情報を送信する
+            self.sender.send_event(
+                {
+                    "item": {
+                        "name": event.item, 
+                        "line": event.start
+                    }, 
+                    "start": event.start, 
+                    "end": event.end, 
+                    "func_groups": event.codeElementWindow.func_groups
+                }
+            )
+            
+            if (itemResult := self.sender.receive_json()) is None:
+                return False
+            
+            self.add_skipped_funcs(
+                itemResult["skipped_function_list"], 
+                mymap.name, 
+                event.func, 
+                event.start, 
+                event.item
+            )
+
+            if itemResult['status'] == "ok":
+                if itemResult.get('skip', False):
+                    MSGWND.set(itemResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'func_skip'))
+                else:
+                    # 初期化値なしの変数でコメントを初期化する
+                    if 'values' not in itemResult:
+                        PLAYER.remove_itemvalue()
+                        
+                    event.open(itemResult['item']['value'], itemResult['item']['line'], itemResult["expr_descriptions"])
+                    item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
+                    self.add_log(f"Item \"{event.item}\" of {event.start} line was acquired" if ISENGLISH else f"{event.start}行目のアイテム「{event.item}」を取得")
+                    if (indexes_comments := itemResult["expr_descriptions"]["indexes"]):
+                        item_get_message += "\f" + "\f".join(indexes_comments)
+                    if not itemResult['item']["initialized"]:
+                        item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                    self.set_completed_checked_func_location(mymap.name, event.func, event.start, event.item)
+
+                    mymap.remove_event(event)
+                    MSGWND.set(item_get_message)
+                self.fp.write("itemget, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "," + event.item + "\n")
+            else:
+                MSGWND.set(itemResult['message'])
+            return True
+        elif isinstance(event, MoveEvent):
+            if event.execution_info:
+                self.sender.send_event(
+                    {
+                        "execution_info": event.execution_info,
+                        "func_groups": event.codeElementWindow.func_groups if event.codeElementWindow else []
+                    }
+                )
+
+                if (move_result := self.sender.receive_json()) is None:
+                    return False
+
+                self.add_skipped_funcs(
+                    move_result["skipped_function_list"], 
+                    mymap.name, 
+                    event.func, 
+                    event.execution_info["line"]
+                )
+
+                if move_result['status'] == "ok":
+                    # 関数のスキップ
+                    if move_result.get('skipCond', False):
+                        MSGWND.set(move_result['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
+                        return True
+                    
+                    # 繰り返し文のスキップ
+                    if move_result.get('skip', False):
+                        MSGWND.set(move_result['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
+                    else:
+                        self.set_completed_checked_func_location(mymap.name, event.func, event.execution_info["line"])
+                    
+                    self.add_log_of_action(event.execution_info)
+
+                    dest_map = event.dest_map
+                    dest_x = event.dest_x
+                    dest_y = event.dest_y
+
+                    PLAYER.append_move5History(
+                        {
+                            'mapname': mymap.name, 
+                            'x': PLAYER.x, 
+                            'y': PLAYER.y, 
+                            'cItems': PLAYER.commonItembag.items[-1], 
+                            'items': PLAYER.itembag.items[-1], 
+                            'return':False
+                        }
+                    )
+
+                    DIMWND.show(200, 'warp')
+                    mymap.warp_player(dest_map, dest_x, dest_y)
+
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                else:
+                    MSGWND.set(move_result['message'])
+
+                return True
+            # 便宜上のワープ ( = execution_infoがない )
+            else:
+                self.sender.send_event({"execution_info": None})
+                self.sender.receive_json()
+
+                dest_map = event.dest_map
+                dest_x = event.dest_x
+                dest_y = event.dest_y
+                from_map = mymap.name
+
+                self.append_move5History(
+                    {
+                        'mapname': from_map, 
+                        'x': PLAYER.x, 
+                        'y': PLAYER.y, 
+                        'cItems': PLAYER.commonItembag.items[-1], 
+                        'items': PLAYER.itembag.items[-1], 
+                        'return':False
+                    }
+                )
+
+                DIMWND.show(200, 'warp')
+                mymap.warp_player(dest_map, dest_x, dest_y)
+
+                PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                return True
+
+        MSGWND.set("nothing on foot" if ISENGLISH else "足元には何もない。")
+        return False
+
+    def unlock(self, mymap: Map):
+        """キャラクターが向いている方向にドアがあるか調べる"""
+        # 向いている方向のとなりの座標を求める
+        nextx, nexty = self.x, self.y
+        if self.direction == DOWN:
+            nexty = self.y + 1
+        elif self.direction == LEFT:
+            nextx = self.x - 1
+        elif self.direction == RIGHT:
+            nextx = self.x + 1
+        elif self.direction == UP:
+            nexty = self.y - 1
+        # その方向にドアがあるか？
+        event = mymap.get_event(nextx, nexty)
+        if not isinstance(event, Door):
+            return False
+        
+        # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
+        if isinstance(event, SmallDoor):
+            # 開いているなら「扉がない」と判定させる
+            if event.status != 0:
+                return False
+            
+            if event.direction == self.direction:
+                event.open()
+                # MSGWND.set(f"「{event.door_name}」への扉を開けた！")
+                self.close_opened_door(mymap)
+                self.door = {"x": event.x, "y": event.y, "direction": event.direction}
+            else:
+                MSGWND.set("Cannot open this door from this side !!" if ISENGLISH else "この方向から扉は開けられません!!")
+        else:
+            mymap.remove_event(event)
+
+        return True
+
+    def close_opened_door(self, mymap: Map):
+        if self.door is None:
+            return
+        
+        door = mymap.get_event(self.door["x"], self.door["y"])
+        if not isinstance(door, SmallDoor):
+            return
+        
+        door.close()
+        self.door = None
+
+    def talk(self, mymap: Map):
+        """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
+
+        # 向いている方向のとなりの座標を求める
+        nextx, nexty = self.x, self.y
+        if self.direction == DOWN:
+            nexty = self.y + 1
+        elif self.direction == LEFT:
+            nextx = self.x - 1
+        elif self.direction == RIGHT:
+            nextx = self.x + 1
+        else: # UP
+            nexty = self.y - 1
+        # その方向にキャラクターがいるか？
+        chara = mymap.get_chara(nextx, nexty)
+        # キャラクターがいればプレイヤーの方向へ向ける
+        if chara is None:
+            MSGWND.set("Nobody is in this direction" if ISENGLISH else "そのほうこうには　だれもいない。")
+            return False
+        
+        if self.direction == DOWN:
+            chara.direction = UP
+        elif self.direction == LEFT:
+            chara.direction = RIGHT
+        elif self.direction == RIGHT:
+            chara.direction = LEFT
+        else: # UP
+            chara.direction = DOWN
+            
+        chara.update(mymap)  # 向きを変えたので更新
+
+        # 計算式キャラクターについては、どの変数の値が変わったかをプレイヤーに答えさせることで、それぞれのアクションを区別化する
+        if isinstance(chara, CharaExpression):
+            if chara.linenum is None:
+                chara.linenum = self.sender.programCodeWindow.linenum
+
+            if (comment := chara.comments.get(str(chara.linenum), None)):
+                self.sender.send_event(
+                    {
+                        "execution_info": comment["execution_info"],
+                        "func_groups": comment["expr"]["func_groups"]
+                    }
+                )
+                charaExpressionResult: dict | None = self.sender.receive_json()
+
+                if charaExpressionResult is None:
+                    return False
+                
+                if comment["execution_info"]["line"]:
+                    self.add_skipped_funcs(
+                        charaExpressionResult["skipped_function_list"], 
+                        mymap.name, 
+                        chara.func, 
+                        comment["execution_info"]["line"]
+                    )
+                
+                if charaExpressionResult['status'] == "ng":
+                    MSGWND.set(charaExpressionResult['message'])
+                    return True
+                
+                if charaExpressionResult.get('skipCond', False):
+                    MSGWND.set(charaExpressionResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'exp_func_skip'))
+                    return True
+                
+                item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
+
+                vars_quiz_count = 0
+                var_quiz_list: list[tuple[tuple[str,...], bool]] = []
+
+                # 変数の値の更新に対するコメント(例: 「a++: aの値を1増やす」)があれば、アイテムウィンドウに白ハイライトと共に登録する
+                for item_w_value_changed in charaExpressionResult["vars_w_value_changed"]:
+                    varname = item_w_value_changed["item"]["name"]
+                    line = item_w_value_changed["item"]["line"]
+                    if (varname, line) in item_info_dict:
+                        item_info_dict[(varname, line)].append(item_w_value_changed["path"])
+                    else:
+                        item_info_dict[(varname, line)] = [item_w_value_changed["path"]]
+
+                # キャラの計算式で参照されている変数のみハイライトをつける
+                for var_info in comment["vars"]:
+                    varname = var_info["name"]
+                    line = var_info["line"]
+                    if (path_list := item_info_dict.get((varname, line))) is None:
+                        continue
+
+                    if (item := PLAYER.find_item_belong_to_player(varname, line)) is None:
+                        continue
+                    
+                    for path in path_list:
+                        item.set_comments(path, comment["comments"])
+                        vars_quiz_count += 1
+
+                        var_path = (varname, *path)
+                        if len(var_quiz_list) < 3:
+                            var_quiz_list.append((var_path, True))
+                            continue
+
+                        if (r := random.randint(0, vars_quiz_count - 1)) < 3:
+                            var_quiz_list[r] = (var_path, True)
+
+                self.set_completed_checked_func_location(mymap.name, chara.func, comment["fromTo"][0])
+                
+                log_comment = " ".join(
+                    [
+                        h["expr"] 
+                        for h in chara.codeElementWindow_dict[str(chara.linenum)].hoverComment_list[0]
+                    ]
+                )
+                self.add_log(
+                    f"executed expression {log_comment} of line {chara.linenum}"
+                    if ISENGLISH else
+                    f"{chara.linenum}行目の計算式「{log_comment}」を実行しました"
+                )
+
+                if len(charaExpressionResult.get("vars_w_value_unchanged", [])):
+                    for var_w_value_unchanged in charaExpressionResult["vars_w_value_unchanged"]:
+                        var_quiz_list.append(((var_w_value_unchanged["item"]["name"], *var_w_value_unchanged["path"]), False))
+                    ''' 
+                    変数の値が更新されたかどうかのクイズを設定する。選択は共通して「はい」、「いいえ」のみなので、これだけ渡しておく。
+                    その上で、クイズを出す変数をMSGWNDに登録しておく。
+                    '''
+                    MSGWND.var_quiz_list = random.sample(var_quiz_list, math.ceil(len(var_quiz_list)/2))
+                    MSGWND.set("Variable QUIZ!!" if ISENGLISH else "変数クイズ !!", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))   
+                else:
+                    # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
+                    MSGWND.set(chara.message)
+            else:
+                self.sender.send_event({"itemsetall": True})
+                itemsetAllResult = self.sender.receive_json()
+                MSGWND.set(itemsetAllResult['message'])
+            
+            chara.linenum = None
+        elif isinstance(chara, CharaCheckCondition):
+            if not (chara.initial_direction, self.direction) in ((DOWN, UP), (UP, DOWN), (LEFT, RIGHT), (RIGHT, LEFT)):
+                MSGWND.set("Not exit here" if ISENGLISH else "ここは　出口ではありません。")
+                return False
+            
+            if chara.moving: # 条件キャラが道を開けようとしているところ
+                # MSGWND.set("Nobody is in this direction" if ISENGLISH else "そのほうこうには　だれもいない。")
+                return False
+            
+            if chara.avoiding: # 条件確認して当キャラクターが道を開けてくれているとき
+                MSGWND.set("Condition checked !! Please get in !!" if ISENGLISH else "条件を確認済みです!!　どうぞお通りください!!")
+                return True
+            
+            self.sender.send_event(
+                {
+                    "execution_info": chara.execution_info, 
+                    "func_groups": chara.codeElementWindow.func_groups
+                }
+            )
+            CCCharacterResult = self.sender.receive_json()
+
+            if CCCharacterResult is None: # 結果を取得できない場合
+                MSGWND.set("You did a different action" if ISENGLISH else "異なる行動をしようとしています")
+                return False
+            
+            self.add_skipped_funcs(
+                CCCharacterResult["skipped_function_list"], 
+                mymap.name, 
+                chara.func, 
+                chara.execution_info["line"]
+            )
+
+            if CCCharacterResult['status'] == "ng": # 間違った行動をした場合
+                if mymap.name in ("tutorial", "tutorial_en"):
+                    MSGWND.set(
+                        "HP -10 if you do a wrong action for a C step execution... \fKeep your HP above 0!!"
+                        if ISENGLISH else
+                        "間違ったアクションを実行すると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
+                    )
+                else:
+                    MSGWND.set(CCCharacterResult['message'])
+            else:
+                if CCCharacterResult.get('skipCond', False):
+                    MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
+                elif CCCharacterResult.get('skip', False):
+                    MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
+                    self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
+                    self.ccchara = chara.set_checked()
+                else:
+                    self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
+                    self.ccchara = chara.set_checked()
+
+                    self.add_log_of_action(chara.execution_info)
+
+                    MSGWND.set("Condition checked !! Please get in !!" if ISENGLISH else "条件を確認済みです!!　どうぞお通りください!!")
+        elif isinstance(chara, CharaReturn):
+            # main以外のreturnキャラ
+            # void関数のreturnについては後で考える
+            if self.moveHistory:
+                self.sender.send_event(
+                    {
+                        "execution_info": chara.execution_info,
+                        "func_groups": chara.codeElementWindow.func_groups
+                    }
+                )
+                returnResult = self.sender.receive_json()
+
+                self.add_skipped_funcs(
+                    returnResult["skipped_function_list"], 
+                    mymap.name,
+                    chara.func,
+                    chara.execution_info["line"]
+                )
+
+                if returnResult['status'] == 'ok':
+                    if returnResult.get('skipReturn', False):
+                        MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
+                    else:
+                        self.set_completed_checked_func_location(
+                            mymap.name, 
+                            chara.func, 
+                            chara.execution_info["line"]
+                        )
+
+                        self.append_move5History(
+                            {
+                                'mapname': mymap.name, 
+                                'x': self.x, 
+                                'y': self.y, 
+                                'cItems': self.commonItembag.items[-1], 
+                                'items': self.itembag.items[-1], 
+                                'return':True
+                            }
+                        )
+
+                        move = self.moveHistory.pop(-1)
+                        self.itembag.items.pop(-1)
+                        PLAYER.remove_itemvalue()
+                        self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
+                        for name, item_info in returnResult["items"].items():
+                            for line, value in item_info.items():
+                                if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
+                                    item.update_value(value)
+                        
+                        checked_func_location = CheckedFuncLocation(map_name=move['mapname'], func_name=returnResult["backToFunc"], line=returnResult["backToLine"])
+                        if checked_func_location in PLAYER.checked_funcs:
+                            PLAYER.checked_funcs[checked_func_location][-1].return_value = returnResult["function_return_info"]
+                        else:
+                            # ここに来ることはシステム上ありえないが一応
+                            sys.exit("error in checked func location after return")
+
+                        PLAYER.func = returnResult["backToFunc"]
+                        self.waitingMove = chara
+                        self.waitingMove.dest_map = move['mapname']
+                        self.waitingMove.dest_x = move['x']
+                        self.waitingMove.dest_y = move['y']
+                        self.fp.write("moveout, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "\n")
+                        MSGWND.set(chara.message)
+                    return True
+            # mainのreturnキャラ
+            else:
+                self.sender.send_event(
+                    {
+                        "execution_info": chara.execution_info,
+                        "func_groups": chara.codeElementWindow.func_groups,
+                        'main': True
+                    }
+                )
+                returnResult = self.sender.receive_json()
+
+                self.add_skipped_funcs(
+                    returnResult["skipped_function_list"], 
+                    mymap.name, 
+                    chara.func, 
+                    chara.execution_info["line"]
+                )
+
+                if returnResult['status'] == 'ok':
+                    if returnResult.get('skipReturn', False):
+                        MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
+                    elif returnResult.get('finished', False):
+                        SMANAGER.stop_bgm()
+                        SMANAGER.play_se("goal")
+                        self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
+                        if mymap.name in ("tutorial", "tutorial_en"):
+                            if ISENGLISH:
+                                returnResult['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
+                            else:
+                                returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                        MSGWND.set(returnResult['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
+                        self.fp.write("finished\n")
+                    return True
+            
+            MSGWND.set(returnResult['message'])
+        
+        return True
+    
+    def add_log_of_action(self, execution_info: ExecutionInfo):
+        if execution_info["type"] == "if":
+            # else以外のif文
+            if execution_info["true_condition_index"]:
+                self.add_log(
+                    f"Checked if condition of line {str(execution_info["condition_line"])} is true" 
+                    if ISENGLISH else 
+                    f"if文の{str(execution_info["condition_line"])}行目の条件が真であることを確認"
+                )
+            # elseの場合
+            elif execution_info["condition_line"]:
+                self.add_log(
+                    f"Chose 'else' because all if conditions began from line {str(execution_info["line"])} were false" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行目から始まるif文の条件が全て偽であるためにelseを選んだ"
+                )
+            # elseがない場合
+            else:
+                self.add_log(
+                    f"Got over if statement began from line {str(execution_info["line"])} because the all conditions were wrong" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行目から始まるif文の条件が全て偽であることを確認し、何もしないで通過"
+                )
+        elif execution_info["type"] == "while":
+            is_true = execution_info["condition"]
+            self.add_log(
+                f"Checked while condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のwhile文の条件が{"真" if is_true else "偽"}であることを開始"
+            )
+        elif execution_info["type"] == "do_while":
+            is_true = execution_info["conditioin"]
+            self.add_log(
+                f"Checked do while condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if is_true else "偽"}であることを開始"
+            )
+        elif execution_info["type"] == "for":
+            is_true = execution_info["condition"]
+            self.add_log(
+                f"Checked for condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のfor文の条件が{"真" if is_true else "偽"}であることを開始"
+            )
+        elif execution_info["type"] == "switch":
+            if execution_info["true_case_index"] >= 0:
+                self.add_log(
+                    f"Checked switch condition of line {str(execution_info["line"])} matched one of its cases" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行目のswithc文の条件に合致するcaseを発見"
+                )
+            else:
+                self.add_log(
+                    f"Checked switch condition of line {str(execution_info["line"])} did not match any of its cases" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行目のswithc文にて、条件式の値がいずれのcaseにも合致しなかった"
+                )
+        elif execution_info["type"] == "break":
+            self.add_log(
+                f"Got out of a loop with break statement of line {str(execution_info["line"])}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のbreakでループを1つ抜けました"
+            )
+        elif execution_info["type"] == "continue":
+            self.add_log(
+                f"Enter into a next loop with continue statement of line {str(execution_info["line"])}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のcontinueで次のループに移ります"
+            )
+        else:
+            sys.exit("unknown execution-info type is found")
+
+    def find_item_belong_to_player(self, name: str, line: int | str):
+        return PLAYER.commonItembag.find(name, int(line)) or PLAYER.itembag.find(name, int(line))
+
+    def remove_itemvalue(self):
+        self.commonItembag.remove_item_comments()
+        self.itembag.remove_item_comments()
+
+    def append_code_element_window(self, code_element_window: CodeElementWindow | None):
+        if code_element_window is None:
+            return
+        self.codeElementWindow_list.append(code_element_window)
+
+    def is_scrollable_code_element_window(self, mouse_pos: tuple[int, int]):
+        return len(self.codeElementWindow_list) != 0 and self.codeElementWindow_list[self.codeElementWindow_index].is_cursor_in_window(mouse_pos) == "scroll"
+
+    def add_skipped_funcs(self, skipped_functions_list: list[list[str]] | None, map_name: str, func_name: str, line: int, var_name: str | None = None):
+        if skipped_functions_list is None:
+            return
+        
+        checked_func_location = CheckedFuncLocation(map_name, func_name, line, var_name)
+        if checked_func_location not in self.checked_funcs:
+            return
+
+        # list[[a,b], [c,d]] に list[[], [], [e,f]]を追加
+        checked_funcs = self.checked_funcs[checked_func_location]
+        for i, skipped_functions in enumerate(skipped_functions_list):
+            checked_function_state_list = [
+                CheckedFuncState(
+                    func_name = skipped_func_name,
+                    return_value = None,
+                    checked = False
+                )
+                for skipped_func_name in skipped_functions
+            ]
+
+            if i < len(checked_funcs):
+                checked_funcs[i].extend(checked_function_state_list)
+            else:
+                checked_funcs.append(checked_function_state_list)
+
+    def set_completed_checked_func_location(self, map_name: str, func_name: str, line: int, var_name: str | None = None):
+        checked_func_location = CheckedFuncLocation(map_name, func_name, line, var_name)
+        if checked_func_location in self.checked_funcs:
+            self.completed_checked_func_location = checked_func_location
+
+    def append_checked_func_state(self, location: tuple[str, str, int, str | None], state: tuple[str, str | None, bool]):
+        '''
+        location: 
+            map_name, func_name, line, var_name
+        state:
+            func_name, return_value, checked
+        '''
+        checked_func_location = CheckedFuncLocation(*location)
+        checked_func_state = CheckedFuncState(*state)
+        if checked_func_location in self.checked_funcs:
+            self.checked_funcs[checked_func_location].append(checked_func_state)
+        else:
+            self.checked_funcs[checked_func_location] = [checked_func_state]
+
+    def get_func_index_to_check(self, location: tuple[str, str, int, str | None]):
+        checked_func_location = CheckedFuncLocation(*location)
+        if checked_func_location in self.checked_funcs and len(self.checked_funcs[checked_func_location]):
+            return len(self.checked_funcs[checked_func_location]) - 1
+        else:
+            return 0
+        
+    def add_log(self, log: str):
+        count = 0
+        text = ""
+        next_log_list: list[str] = []
+        for ch in log:
+            if unicodedata.east_asian_width(ch) in ("F", "W", "A"):
+                count += 2
+            else:
+                count += 1
+            if count == 30:
+                text += ch
+                next_log_list.append(text)
+                count = 0
+                text = ""
+            elif count == 31:
+                next_log_list.append(text)
+                count = 0
+                text = ch
+            else:
+                text += ch
+        if text != "":
+            next_log_list.append(text)
+        
+        self.log_lists.insert(0, next_log_list)
+
+    def append_move5History(self, status: dict):
+        self.move5History.append(status)
+        if len(self.move5History) > 5:
+            self.move5History.pop(0)
+
+    def set_game_mode(self, type):
+        if type == "item":
+            self.itemNameShow = not self.itemNameShow
+
+    def damage(self, amount: int = 10):
+        SMANAGER.play_se("incorrect_action")
+        self.status["HP"] -= amount
+        self.damage_label = f"-{amount}"
+        self.damage_motion = [2,2,2,-2,-2,-2,0]
+        # if "message" in msg:
+        #     msg["message"] += "\fPLAYER took {amount} damage !!" if ISENGLISH else "\fプレイヤーに{amount}ダメージ !!"
+        if self.status["HP"] == 30:
+            SMANAGER.play_se_loop("hp_warning")
+        elif self.status["HP"] == 0:
+            SMANAGER.stop_se("hp_warning")
+        
+#                                                                                                                                                   
+# 88b           d88                                                                  88888888888                         88                         
+# 888b         d888                                                                  88                                  ""                         
+# 88`8b       d8'88                                                                  88                                                             
+# 88 `8b     d8' 88  ,adPPYba, ,adPPYba, ,adPPYba, ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 88aaaaa     8b,dPPYba,   ,adPPYb,d8 88 8b,dPPYba,   ,adPPYba,  
+# 88  `8b   d8'  88 a8P_____88 I8[    "" I8[    "" ""     `Y8 a8"    `Y88 a8P_____88 88"""""     88P'   `"8a a8"    `Y88 88 88P'   `"8a a8P_____88  
+# 88   `8b d8'   88 8PP"""""""  `"Y8ba,   `"Y8ba,  ,adPPPPP88 8b       88 8PP""""""" 88          88       88 8b       88 88 88       88 8PP"""""""  
+# 88    `888'    88 "8b,   ,aa aa    ]8I aa    ]8I 88,    ,88 "8a,   ,d88 "8b,   ,aa 88          88       88 "8a,   ,d88 88 88       88 "8b,   ,aa  
+# 88     `8'     88  `"Ybbd8"' `"YbbdP"' `"YbbdP"' `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88888888888 88       88  `"YbbdP"Y8 88 88       88  `"Ybbd8"'  
+#                                                              aa,    ,88                                     aa,    ,88                            
+#                                                               "Y8bbdP"                                       "Y8bbdP"                             
+# 
+
+class MessageEngine:
+    """メッセージエンジン"""
+    FONT_WIDTH = 16
+    FONT_HEIGHT = 18
+    WHITE = Color(255, 255, 255, 255)
+    RED = Color(255, 31, 31, 255)
+    GREEN = Color(31, 255, 31, 255)
+    BLUE = Color(31, 31, 255, 255)
+
+    def __init__(self):
+        self.color = self.WHITE
+        self.myfont = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
+
+    def set_color(self, color):
+        """文字色をセット"""
+        self.color = color
+        # 変な値だったらWHITEにする
+        if not self.color in [self.WHITE, self.RED, self.GREEN, self.BLUE]:
+            self.color = self.WHITE
+
+    def draw_character(self, screen, pos, ch):
+        """1文字だけ描画する"""
+        if ch not in [" ", "　"]:
+            x, y = pos
+            try:
+                surf, rect = self.myfont.render(ch, self.color)
+                screen.blit(surf, (x, y+(self.FONT_HEIGHT//2) - rect[3]//2))
+#                screen.blit(self.myfont.render(ch,self.color)[0],(x,y))
+            except KeyError:
+                print(f"描画できない文字があります:{ch}")
+
+    def draw_string(self, screen, pos, string):
+        """文字列を描画"""
+        x, y = pos
+        screen.blit(self.myfont.render(string,self.WHITE)[0],(x,y))
+
+#                                                                                    
+# I8,        8        ,8I 88                      88                                 
+# `8b       d8b       d8' ""                      88                                 
+#  "8,     ,8"8,     ,8"                          88                                 
+#   Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#    `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#     `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#      `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                    
+#                                                                                    
+# 
+
+class Window:
+    """ウィンドウの基本クラス"""
+    EDGE_WIDTH = 4  # 白枠の幅
+
+    def __init__(self, rect: pygame.Rect):
+        self.width = rect[2]
+        self.height = rect[3]
+        self.x = rect[0]
+        self.y = rect[1]
+        self.surface = pygame.Surface(
+            (self.width, self.height), pygame.SRCALPHA)
+        # self.surface.convert_alpha()
+        self.rect: pygame.Rect = pygame.Rect(0, 0, self.width, self.height)  # 一番外側の白い矩形
+        
+        # 内側の黒い矩形
+        self.inner_rect = self.rect.inflate(-self.EDGE_WIDTH, -self.EDGE_WIDTH)
+        self.is_visible = False  # ウィンドウを表示中か？
+
+    def draw(self, bg: bool = True):
+        """ウィンドウを描画"""
+        if self.is_visible is False:
+            return
+        if bg:
+            self.surface.fill(Color(0, 0, 0, 150))
+            pygame.draw.lines(self.surface, Color(255, 255, 255, 255), True,
+                            [[0, 0],
+                             [0, self.height-(self.EDGE_WIDTH/2)],
+                             [self.width-(self.EDGE_WIDTH/2), self.height-(self.EDGE_WIDTH/2)],
+                             [self.width-(self.EDGE_WIDTH/2), 0] ],
+                             self.EDGE_WIDTH)
+        else:
+            self.surface.fill(Color(0, 0, 0, 0))
+
+    # 画面上に本ウィンドウを描画する
+    def blit(self, screen: pygame.Surface):
+        """blit"""
+        screen.blit(self.surface, (self.x, self.y))
+
+    def show(self):
+        """ウィンドウを表示"""
+        self.is_visible = True
+
+    def hide(self):
+        """ウィンドウを隠す"""
+        self.is_visible = False
+                                                                                                                                                                         
+#  ad88888ba                                    88 88            88          88          I8,        8        ,8I 88                      88                                 
+# d8"     "8b                                   88 88            88          88          `8b       d8b       d8' ""                      88                                 
+# Y8,                                           88 88            88          88           "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa,    ,adPPYba, 8b,dPPYba,  ,adPPYba,  88 88 ,adPPYYba, 88,dPPYba,  88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, a8"     "" 88P'   "Y8 a8"     "8a 88 88 ""     `Y8 88P'    "8a 88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 8b         88         8b       d8 88 88 ,adPPPPP88 88       d8 88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P "8a,   ,aa 88         "8a,   ,a8" 88 88 88,    ,88 88b,   ,a8" 88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"   `"Ybbd8"' 88          `"YbbdP"'  88 88 `"8bbdP"Y8 8Y"Ybbd8"'  88  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                                                                                                
+class ScrollableWindow(Window):
+    STRING_COLOR = Color(255, 255, 255, 255)
+    TITLE_COLOR = Color(100, 248, 248, 255)
+    SLIDER_KNOB_COLOR = Color(100,100,100,255)
+    TITLE_FONT_SIZE = 20
+    KNOB_SIZE = 8
+    
+    def __init__(self, rect: pygame.Rect, font_size: int):
+        Window.__init__(self, rect)
+        self.offset_x = 10
+        self.offset_y = 10
+        self.local_right_edge_x = 0
+        self.local_bottom_edge_y = 0
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), font_size)
+        self.font_size = font_size
+
+    # offset_x, yにローカル座標x, yを加えて、文字列を出力する座標を取得する。
+    def draw_string(self, x: int, y: int, string: str, color: pygame.Color | None = None):
+        """文字列出力"""
+        surf, rect = self.font.render(string, color or self.STRING_COLOR)
+        if self.offset_y+y >= 10+self.TITLE_FONT_SIZE+4:
+            self.surface.blit(surf, (self.offset_x+x, self.offset_y+y))
+        self.local_right_edge_x = max(self.local_right_edge_x, x+rect.width+4)
+        self.local_bottom_edge_y = max(self.local_bottom_edge_y, y+rect.height+4)
+    
+    # スクロールウィンドウの共通部分を描画する
+    def draw_base(self, title:str, maxHeight:int|None=None, maxWidth: int|None=None):
+        # まずはタイトル
+        self.font.size = self.TITLE_FONT_SIZE
+        surf, _ = self.font.render(title, self.TITLE_COLOR)
+        self.surface.blit(surf, (10, 10))
+        self.font.size = self.font_size
+
+        # もし、枠に収まり切らない場合は、'▼'のような、「スクロール可能」マークを表示させる
+        if self.offset_x + self.local_right_edge_x > self.rect[2]:
+            surf, _ = self.font.render('▶', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16-self.font_size, self.height-16))
+        if self.offset_x < 10:
+            surf, _ = self.font.render('◀', self.STRING_COLOR)
+            self.surface.blit(surf, (10, self.height-16))
+        if self.rect[2] - self.local_right_edge_x < self.offset_x < 10:
+            pygame.draw.circle(self.surface, self.STRING_COLOR,
+                            (self.font_size*2 + (self.width-self.font_size*6) * (10 - self.offset_x) / -(self.width - (maxWidth or self.local_right_edge_x)), self.height-self.font_size), 
+                                self.KNOB_SIZE)
+
+        if self.offset_y + self.local_bottom_edge_y > self.rect[3]:
+            surf, _ = self.font.render('▼', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16, self.height-16))
+        if self.offset_y < 10:
+            surf, _ = self.font.render('▲', self.STRING_COLOR)
+            self.surface.blit(surf, (self.width-16, 10))
+        if self.rect[3] - self.local_bottom_edge_y < self.offset_y < 10:
+            pygame.draw.circle(self.surface, self.STRING_COLOR,
+                            (self.width-self.font_size, self.font_size*2 + (self.height-self.font_size*6) * (10 - self.offset_y) / -(self.height - (maxHeight or self.local_bottom_edge_y))), 
+                                self.KNOB_SIZE)
+
+#                                                                                                                      
+# 88888888ba,   88                  I8,        8        ,8I 88                      88                                 
+# 88      `"8b  ""                  `8b       d8b       d8' ""                      88                                 
+# 88        `8b                      "8,     ,8"8,     ,8"                          88                                 
+# 88         88 88 88,dPYba,,adPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88         88 88 88P'   "88"    "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88         8P 88 88      88      88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88      .a8P  88 88      88      88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88888888Y"'   88 88      88      88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                                                      
+#                                                                                                                      
+# 
+
+class DimWindow:
+    """薄暗いウインドウを作る"""
+    def __init__(self, rect: pygame.Rect, screen: pygame.Surface):
+        self.screen = screen
+        self.width = rect[2]
+        self.height = rect[3]
+        self.x = rect[0]
+        self.y = rect[1]
+        self.surface = pygame.Surface(
+            (self.width, self.height), pygame.SRCALPHA)
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.df = 0
+        self.target_df = 0
+        self.sound_type = None
+
+    def dim(self):
+        """ウィンドウを描画"""
+        if self.is_visible is False:
+            return
+        if self.target_df > self.df:
+            self.df = self.df + 4
+        else:
+            self.target_df = 0
+            self.df = 0
+            if self.sound_type in ('skip', 'rollback'):
+                SMANAGER.unpause_bgm()
+            self.hide()
+        self.surface.fill(Color(0, 0, 0, self.df))
+        self.screen.blit(self.surface, (self.x, self.y))
+
+    def show(self, df: int, sound_type: str | None = None):
+        """薄暗さを設定してウィンドウを表示"""
+        self.target_df = df
+        if sound_type == 'warp':
+            SMANAGER.play_se("warp")
+        elif sound_type == 'skip':
+            SMANAGER.pause_bgm()
+            SMANAGER.play_se("skip")
+        elif sound_type == 'rollback':
+            SMANAGER.pause_bgm()
+            SMANAGER.play_se("rollback")
+        self.sound_type = sound_type
+        self.is_visible = True
+
+    def hide(self):
+        """ウィンドウを隠す"""
+        self.is_visible = False
+
+#                                                                                                                                
+# 88          88             88               I8,        8        ,8I 88                      88                                 
+# 88          ""             88           ,d  `8b       d8b       d8' ""                      88                                 
+# 88                         88           88   "8,     ,8"8,     ,8"                          88                                 
+# 88          88  ,adPPYb,d8 88,dPPYba, MM88MMM Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88          88 a8"    `Y88 88P'    "8a  88    `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          88 8b       88 88       88  88     `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88 "8a,   ,d88 88       88  88,     `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88888888888 88  `"YbbdP"Y8 88       88  "Y888    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                 aa,    ,88                                                                                                     
+#                  "Y8bbdP"                                                                                                      
+# 
+
+class LightWindow:
+    """光源ウインドウを作る"""
+    def __init__(self, rect: pygame.Rect, screen, fmap):
+        self.screen = screen
+        self.width = rect[2]
+        self.height = rect[3]
+        self.x = rect[0]
+        self.y = rect[1]
+        self.surface = pygame.Surface(
+            (self.width, self.height), pygame.SRCALPHA)
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.alpha = 128
+        self.target_alpha = 0
+        self.color = Color(0,0,0,0)
+        self.map = fmap
+        self.light = False
+        self.rooms = []
+
+    def set_color_scene(self,scene):
+        """背景色の規定セット"""
+        if scene == "evening":
+            self.set_color(255,148,40,64)
+            self.light = False
+            self.show()
+        elif scene == "dusk":
+            self.set_color(32,32,64,128)
+            self.light = True
+            self.show()
+        elif scene == "night":
+            self.set_color(16,0,64,196)
+            self.light = True
+            self.show()
+        elif scene == "midnight":
+            self.set_color(4,0,4,248)
+            self.light = True
+            self.show()
+        elif scene == "morning":
+            self.set_color(0,200,255,48)
+            self.light = False
+            self.show()
+        else:
+            self.set_color(0,0,0,0)
+            self.light = False
+            self.hide()
+
+    def set_rooms(self,rooms):
+        """光らせる部屋をを設定"""
+        self.rooms = rooms
+
+    def set_color(self,r,g,b,a):
+        """背景色を設定"""
+        self.color = Color(r,g,b,a)
+        self.alpha = a
+
+    def set_alpha(self, alpha):
+        """薄暗さの設定"""
+        self.target_alpha = alpha
+
+    def draw(self,offset):
+        """描画"""
+        if self.is_visible is False:
+            return
+        self.surface.fill(self.color)
+        if self.light:
+            self.draw_light(offset)
+        self.screen.blit(self.surface, (self.x, self.y))
+
+    def draw_light(self,offset):
+        """光源の位置を描画"""
+        PLAYER.draw_light(self.surface,self.color,offset)
+        for chara in self.map.charas:
+            if isinstance(chara,Character) and chara.npcname != "" and chara.movetype == 1:
+                chara.draw_light(self.surface,self.color,offset)
+        for light in self.map.lights:
+            if light.room() in self.rooms or light.room() == "":
+                light.draw(self.surface,self.color,offset)
+
+    def show(self):
+        """ウィンドウを表示"""
+        self.is_visible = True
+
+    def hide(self):
+        """ウィンドウを隠す"""
+        self.is_visible = False
+
+#                                                                                                                                                                     
+# 88b           d88                                                                I8,        8        ,8I 88                      88                                 
+# 888b         d888                                                                `8b       d8b       d8' ""                      88                                 
+# 88`8b       d8'88                                                                 "8,     ,8"8,     ,8"                          88                                 
+# 88 `8b     d8' 88  ,adPPYba, ,adPPYba, ,adPPYba, ,adPPYYba,  ,adPPYb,d8  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88  `8b   d8'  88 a8P_____88 I8[    "" I8[    "" ""     `Y8 a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88   `8b d8'   88 8PP"""""""  `"Y8ba,   `"Y8ba,  ,adPPPPP88 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88    `888'    88 "8b,   ,aa aa    ]8I aa    ]8I 88,    ,88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88     `8'     88  `"Ybbd8"' `"YbbdP"' `"YbbdP"' `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                              aa,    ,88                                                                                             
+#                                                               "Y8bbdP"                                                                                              
+# 
+
+class MessageWindow(Window):
+    """メッセージウィンドウ"""
+    MAX_LINES = 30             # メッセージを格納できる最大行数
+    LINE_HEIGHT = 2            # 行間の大きさ
+    animcycle = MAX_FRAME_PER_SEC
+    HIGHLIGHT_COLOR = (0, 0, 255)
+
+    def __init__(self, rect: pygame.Rect, msg_eng, sender):
+        Window.__init__(self, rect)
+        self.sender: EventSender | None = sender
+        self.text_rect = self.inner_rect.inflate(-8, -8)  # テキストを表示する矩形
+        self.text = []  # メッセージ
+        self.cur_page = 0  # 現在表示しているページ
+        self.cur_pos = 0  # 現在ページで表示した最大文字数
+        self.next_flag = False  # 次ページがあるか？
+        self.hide_flag = False  # 次のキー入力でウィンドウを消すか？
+        self.msg_engine = msg_eng  # メッセージエンジン
+        self.cursor = load_image("data", "cursor.png", -1)  # カーソル画像
+        self.frame = 0
+        # max_chars_per_line # 1行の最大文字数
+        self.max_chars_per_line = self.text_rect[2]//msg_eng.FONT_WIDTH
+        # max_lines_per_page # 1行の最大行数（4行目は▼用）
+        self.max_lines_per_page = self.text_rect[3]//msg_eng.FONT_HEIGHT - 1
+        self.max_chars_per_page = self.max_chars_per_line * self.max_lines_per_page  # 1ページの最大文字数
+        self.selectMsgText: list[str] = []
+        self.select_type: str = ""
+        self.selectingIndex = 0
+        self.new_std_messages: list[str] = []
+        self.file_message = ""
+        self.memory_message = ""
+        self.str_messages: list[str] = []
+        self.var_quiz_list: list[tuple[tuple[str,...], bool]] = []
+        self.var_quiz_answer = True
+
+    def set(self, base_message: str, selectMessages: tuple[list[str],str]|None=None):
+        """メッセージをセットしてウィンドウを画面に表示する"""
+        if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
+            SMANAGER.play_se("message_window")
+            message_list: list[str] = []
+            if len(self.new_std_messages):
+                message_list.append("\n".join(["Output:" if ISENGLISH else "コンソール出力:"] + self.new_std_messages))
+                self.new_std_messages = []
+            if len(self.str_messages):
+                message_list.append("\n".join(self.str_messages))
+                self.str_messages = []
+            if len(base_message):
+                message_list.append(base_message)
+            if len(self.file_message):
+                message_list.append(self.file_message)
+                self.file_message = ""
+            if len(self.memory_message):
+                message_list.append(self.memory_message)
+                self.memory_message = ""
+            if selectMessages is not None:
+                # 選択肢を選ぶコメントウィンドウが表示されている時は要素ウィンドウを表示させない (画面全体がごちゃごちゃするのを防ぐため)
+                PLAYER.codeElementWindow_list = []
+                self.selectMsgText, self.select_type = selectMessages
+                if self.select_type == "var_quiz":
+                    var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
+                    varname = var_path[0]
+                    for var_path_element in var_path[1:]:
+                        if var_path_element[0] in ('[', '*'):
+                            varname += var_path_element
+                        else:
+                            varname += '.' + var_path_element
+                    message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
+
+            self.cur_pos = 0
+            self.cur_page = 0
+            self.next_flag = False
+            self.hide_flag = False
+            # 全角スペースで初期化
+            self.text = ""
+            # メッセージをセット
+            p = 0
+            message = "\f".join(message_list)
+            for ch in message:
+                if ch == "\n":  # \nは改行文字
+                    self.text += "\n"
+                    self.text += "　" * (self.max_chars_per_line - (p+1) % self.max_chars_per_line)
+                    p = int(p//self.max_chars_per_line+1)*self.max_chars_per_line
+                elif ch == "\f":  # \fは改ページ文字
+                    self.text += "\f"
+                    self.text += "　" * (self.max_chars_per_page - (p+1) % self.max_chars_per_page)
+                    p = int(p//self.max_chars_per_page+1)*self.max_chars_per_page
+                else:
+                    self.text += ch
+                    p += 1
+            self.show()
+
+    def update(self):
+        """メッセージウィンドウを更新する
+        メッセージが流れるように表示する"""
+        if self.is_visible:
+            if self.next_flag is False and self.hide_flag is False:
+                self.cur_pos += 1  # 1文字流す
+                # テキスト全体から見た現在位置
+                p = self.cur_page * self.max_chars_per_page + self.cur_pos
+                if len(self.text) == p:  # 最後の文字ならウィンドウ消去フラグを建てる
+                    self.hide_flag = True
+                elif self.text[p] == "\n":  # 改行文字
+                    self.cur_pos += self.max_chars_per_line
+                    self.cur_pos = self.cur_pos//self.max_chars_per_line * self.max_chars_per_line
+                elif self.text[p] == "\f":  # 改ページ文字
+                    self.cur_pos += self.max_chars_per_page
+                    self.cur_pos = self.cur_pos//self.max_chars_per_page * self.max_chars_per_page
+                # 1ページの文字数に達したら▼を表示
+                if self.cur_pos % self.max_chars_per_page == 0:
+                    self.next_flag = True
+        self.frame += 1
+
+    def draw(self, screen):
+        """メッセージを描画する
+        メッセージウィンドウが表示されていないときは何もしない"""
+        Window.draw(self)
+        if self.is_visible is False:
+            return
+
+        # 現在表示しているページのcur_posまでの文字を描画
+        for i in range(self.cur_pos):
+            ch = self.text[self.cur_page*self.max_chars_per_page+i]
+            # if ch == "\n" or ch == "\f" or ch == "$":
+            if ch == "\n" or ch == "\f":
+                continue  # 制御文字は表示しない
+            dx = self.text_rect[0] + MessageEngine.FONT_WIDTH * \
+                (i % self.max_chars_per_line)
+            dy = self.text_rect[1] + \
+                (self.LINE_HEIGHT + MessageEngine.FONT_HEIGHT) * (i // self.max_chars_per_line)
+            self.msg_engine.draw_character(self.surface, (dx, dy), ch)
+        # 最後のページでない場合は▼を表示
+        if (not self.hide_flag) and self.next_flag:
+            if int(self.frame // self.animcycle) % 2 == 0:
+                dx = self.text_rect[0] + self.max_chars_per_line//2 * \
+                    MessageEngine.FONT_WIDTH - MessageEngine.FONT_WIDTH//2
+                dy = self.text_rect[1] + \
+                    (self.LINE_HEIGHT + MessageEngine.FONT_HEIGHT) * 4
+                self.surface.blit(self.cursor, (dx, dy))
+        elif self.hide_flag and self.selectMsgText:
+            dx = 5
+            dy += MessageEngine.FONT_HEIGHT
+            for i, text in enumerate(self.selectMsgText):
+                text_length = len(text)
+                if i == self.selectingIndex:
+                    bg_rect = pygame.Rect(
+                        dx,
+                        dy,
+                        text_length * MessageEngine.FONT_WIDTH,
+                        MessageEngine.FONT_HEIGHT + 4
+                    )
+                    pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
+                for j, ch in enumerate(text):
+                    self.msg_engine.draw_character(self.surface, (dx + j * MessageEngine.FONT_WIDTH, dy), ch)
+                dx += (text_length + 1) * MessageEngine.FONT_WIDTH
+        Window.blit(self, screen)
+
+    def selectMsg(self, dir: int):
+        self.selectingIndex = (self.selectingIndex + dir) % len(self.selectMsgText)
+        SMANAGER.play_se("select_menu_cursor")
+
+    def next(self, fieldmap: Map):
+        # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
+        if self.sender is not None and (self.selectMsgText and self.hide_flag):
+            if self.select_type == 'loop_skip':
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    # 暗転
+                    DIMWND.show(200, 'skip')
+                    startLine = self.sender.programCodeWindow.linenum
+                    self.sender.send_event({"skip": True})
+                    skipResult = self.sender.receive_json()
+                    self.sender.programCodeWindow.linenum = skipResult["finalLine"]
+                    # スキップした先がbreak文だった場合 ( = breakでループを抜ける場合 )
+                    if startLine != skipResult["finalLine"]:
+                        for event in fieldmap.events:
+                            if isinstance(event, MoveEvent) and event.execution_info and event.execution_info["line"] == skipResult["finalLine"]:
+                                fieldmap.warp_player(fieldmap.name, *event.pos())
+                                skipResult['message'] += f'\fmoved to break statement of line {skipResult["finalLine"]} !!' if ISENGLISH else f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
+                                break
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
+                                item.update_value(value)
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+            elif self.select_type == 'func_skip':
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    self.sender.send_event({"skip": True})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
+                                item.update_value(value)
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, Treasure):
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, event.func, event.start, event.item), 
+                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                        )
+                    # 暗転
+                    DIMWND.show(200, 'skip')
+                    fieldmap.warp_player(fieldmap.name, *PLAYER.pos())
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
+                    dest_map = fieldmap.name
+                    dest_x = skipResult["next_func"]["x"]
+                    dest_y = skipResult["next_func"]["y"]
+
+                    PLAYER.func = skipResult["next_func"]["name"]
+
+                    from_map = fieldmap.name
+                    PLAYER.append_move5History(
+                        {
+                            'mapname': from_map, 
+                            'x': PLAYER.x, 
+                            'y': PLAYER.y, 
+                            'cItems': PLAYER.commonItembag.items[-1], 
+                            'items': PLAYER.itembag.items[-1], 
+                            'return': False
+                        }
+                    )
+                    PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["from_line"]})
+                    
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, Treasure) and len(event.codeElementWindow.func_groups) != 0:
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, event.func, event.start, event.item), 
+                            (skipResult["next_func"]["name"], None, True)
+                        )
+                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.start, event.item))
+                        
+                        newItems = []
+                        arg_index = 0
+                        for name, argInfo in skipResult["next_func"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], event.comments["values"]["comments"][func_index_to_check]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    # 暗転
+                    DIMWND.show(200, 'warp')
+                    fieldmap.warp_player(dest_map, dest_x, dest_y)
+
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    self.sender.send_event({"skip": True})
+                    DIMWND.show(200, 'skip')
+                    skipResult = self.sender.receive_json()
+                    self.set(skipResult['message'])
+                    PLAYER.remove_itemvalue()
+                    for name, item_info in skipResult["items"].items():
+                        for line, value in item_info.items():
+                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
+                                item.update_value(value)
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, MoveEvent):
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, event.func, event.execution_info["line"], None),
+                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                        )
+
+                    if PLAYER.direction == DOWN:
+                        x = PLAYER.x
+                        y = PLAYER.y+1
+                    elif PLAYER.direction == LEFT:
+                        x = PLAYER.x-1
+                        y = PLAYER.y
+                    elif PLAYER.direction == RIGHT:
+                        x = PLAYER.x+1
+                        y = PLAYER.y
+                    else:
+                        x = PLAYER.x
+                        y = PLAYER.y-1
+                    
+                    chara = fieldmap.get_chara(x, y)
+                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)):
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, chara.func, chara.execution_info["line"], None), 
+                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                        )
+                    elif isinstance(chara, CharaExpression):
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
+                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                        )
+                else:
+                    self.sender.send_event({"skip": False})
+                    skipResult = self.sender.receive_json()
+                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    if isinstance(event, MoveEvent) and event.codeElementWindow and len(event.codeElementWindow.func_groups) != 0:
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, event.func, event.execution_info["line"], None),
+                            (skipResult["next_func"]["name"], None, True)
+                        )
+                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.execution_info["line"], None))
+                        
+                        newItems = []
+                        arg_index = 0
+                        for name, argInfo in skipResult["next_func"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                # event.func_argcomments[func_index_to_check]["args"][arg_index] = detail[expr_id][] if ISENGLISH else detail[expr_id]
+                                # item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
+                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    if PLAYER.direction == DOWN:
+                        x = PLAYER.x
+                        y = PLAYER.y+1
+                    elif PLAYER.direction == LEFT:
+                        x = PLAYER.x-1
+                        y = PLAYER.y
+                    elif PLAYER.direction == RIGHT:
+                        x = PLAYER.x+1
+                        y = PLAYER.y
+                    else:
+                        x = PLAYER.x
+                        y = PLAYER.y-1
+                    chara = fieldmap.get_chara(x, y)
+                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.codeElementWindow.func_groups) != 0:
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, chara.func, chara.execution_info["line"], None), 
+                            (skipResult["next_func"]["name"], None, True)
+                        )
+                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.execution_info["line"], None))
+                        
+                        newItems = []
+                        arg_index = 0
+                        for name, argInfo in skipResult["next_func"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    elif isinstance(chara, CharaExpression):
+                        PLAYER.append_checked_func_state(
+                            (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
+                            (skipResult["next_func"]["name"], None, True)
+                        )
+                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None))
+                        
+                        newItems = []
+                        arg_index = 0
+                        for name, argInfo in skipResult["next_func"]["items"].items():
+                            for line, itemInfo in argInfo.items():
+                                item = Item(name, int(line), itemInfo["value"], chara.comments[str(chara.linenum)]["comments"][func_index_to_check]["args"][arg_index], itemInfo["type"])
+                                newItems.append(item)
+                                arg_index += 1
+                        PLAYER.itembag.items.append(newItems)
+                    self.set(skipResult['message'])
+                    # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
+                    dest_map = fieldmap.name
+                    dest_x = skipResult["next_func"]["x"]
+                    dest_y = skipResult["next_func"]["y"]
+
+                    PLAYER.append_move5History(
+                        {
+                            'mapname': dest_map, 
+                            'x': PLAYER.x, 
+                            'y': PLAYER.y, 
+                            'cItems': PLAYER.commonItembag.items[-1], 
+                            'items': PLAYER.itembag.items[-1], 
+                            'return': False
+                        }
+                    )
+                    PLAYER.moveHistory.append({'mapname': dest_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["from_line"]})
+                    
+                    DIMWND.show(200, 'warp')
+                    fieldmap.warp_player(dest_map, dest_x, dest_y)
+
+                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+            elif self.select_type == 'var_quiz':
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    # クイズの答えが「はい」(「Yes」)なら「正解」メッセージを出す
+                    if self.var_quiz_answer:
+                        message = "CORRECT !!\nIts value has changed !!" if ISENGLISH else "正解です!!\n値は変わってます !!"
+                    # クイズの答えが「いいえ」(「No」)なら「誤答」メッセージを出してプレイヤーにダメージを与える
+                    else:
+                        message = "INCORRECT...\nIts value has changed !!" if ISENGLISH else "不正解です...\n値は変わってません !!"
+                        PLAYER.damage()
+                else:
+                    # クイズの答えが「はい」なら「誤答」メッセージを出してプレイヤーにダメージを与える
+                    if self.var_quiz_answer:
+                        message = "INCORRECT...\nIts value has not changed !!" if ISENGLISH else "不正解です...\n値は変わってます !!"
+                        PLAYER.damage()
+                    # クイズの答えが「いいえ」なら「正解」メッセージを出す
+                    else:
+                        message = "CORRECT !!\nIts value has not changed !!" if ISENGLISH else "正解です!!\n値は変わってませせん !!"
+                # 次の問題があるならさらに追加する
+                if len(self.var_quiz_list):
+                    message += "\fNext Question !!" if ISENGLISH else "\f次の問題です !!"
+                    self.selectingIndex = 0
+                    self.set(message, (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'var_quiz'))
+                    return
+                else:
+                    self.set(message)
+
+            elif self.select_type == 'rollback':
+                self.sender.programCodeWindow.scrollY = 0
+                self.sender.programCodeWindow.scrollX = 0
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    self.sender.send_event({"rollback": True, "index": self.sender.programCodeWindow.rollback_index-1})
+                    rollbackResult = self.sender.receive_json()
+                    player_history = self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index]
+                    self.sender.programCodeWindow.linenum = player_history[1]
+                    # 暗転
+                    DIMWND.show(200, 'rollback')
+                    PLAYER.dest = {}
+                    PLAYER.place_label = "away"
+                    PLAYER.automove = []
+                    PLAYER.waitingMove = None
+                    PLAYER.moveHistory = []
+                    PLAYER.move5History = []
+                    PLAYER.commonItembag = ItemBag()
+
+                    # items = ast.literal_eval(config.get("game", "items"))
+                    for gvar_name, gvar_info in rollbackResult["gvars"].items():
+                        for line, values in gvar_info.items():
+                            PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {}, player_history[2]["gvars"][(gvar_name, int(line))]))
+
+                    PLAYER.itembag = ItemBag()
+                    if len(rollbackResult["vars"]) != 0:
+                        PLAYER.itembag.items.pop(0)
+                    for i, var_dict in enumerate(rollbackResult["vars"]):
+                        PLAYER.itembag.items.append([])
+                        for var_name, var_info in var_dict.items():
+                            for line, values in var_info.items():
+                                PLAYER.itembag.add(Item(var_name, int(line), values, {}, player_history[2]["vars"][i][(var_name, int(line))]))
+
+                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.ccchara = player_history[2]["ccchara"]
+                    PLAYER.checked_funcs = player_history[2]["checked_funcs"]
+                    PLAYER.codeElementWindow_list = []
+                    PLAYER.codeElementWindow_index = 0
+                    PLAYER.std_messages = []
+                    PLAYER.address_to_fname = {}
+                    PLAYER.address_to_size = {}
+                    PLAYER.func = player_history[2]["func"]
+                    PLAYER.log_lists = player_history[2]["logLists"]
+
+                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
+
+                    fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
+
+                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+
+                    MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
+                else:
+                    self.sender.send_event({"rollback": False})
+                    self.sender.receive_json()
+                    MSGWND.set("巻き戻しを取り止めました")
+                self.sender.programCodeWindow.rollback_index = None
+            elif self.select_type == 'rollback_to_init':
+                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
+                    player_history = self.sender.programCodeWindow.history[0]
+                    # 暗転
+                    DIMWND.show(200, 'rollback')
+                    PLAYER.dest = {}
+                    PLAYER.place_label = "away"
+                    PLAYER.automove = []
+                    PLAYER.waitingMove = None
+                    PLAYER.moveHistory = []
+                    PLAYER.move5History = []
+                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.ccchara = player_history[2]["ccchara"]
+                    PLAYER.checked_funcs = player_history[2]["checked_funcs"]
+                    PLAYER.codeElementWindow_list = []
+                    PLAYER.codeElementWindow_index = 0
+                    PLAYER.std_messages = []
+                    PLAYER.address_to_fname = {}
+                    PLAYER.address_to_size = {}
+                    PLAYER.func = player_history[2]["func"]
+                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
+                    
+                    fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
+                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+
+                    MSGWND.set("Back to rightly after game began" if ISENGLISH else "ゲーム開始時点まで巻き戻しました")
+                else:
+                    MSGWND.set("stopped rollback" if ISENGLISH else "巻き戻しを取り止めました")
+            elif self.select_type == 'finished':
+                PLAYER.game_status = "goaled"
+            
+            self.selectMsgText = []
+            self.select_type = ""
+            self.selectingIndex = 0
+            return
+
+        if self.is_visible:
+            # 現在のページが最後のページだったらウィンドウを閉じる
+            if self.hide_flag:
+                if PLAYER.completed_checked_func_location:
+                    PLAYER.checked_funcs.pop(PLAYER.completed_checked_func_location, [])
+                    PLAYER.completed_checked_func_location = None
+                self.hide()
+            # ▼が表示されてれば次のページへ
+            if self.next_flag:
+                SMANAGER.play_se("message_window")
+                self.cur_page += 1
+                self.cur_pos = 0
+                self.next_flag = False
+                                                                                                                                
+# 88888888ba                                            I8,        8        ,8I 88                      88                                 
+# 88      "8b                                           `8b       d8b       d8' ""                      88                                 
+# 88      ,8P                                            "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaaa8P' ,adPPYYba, 88       88 ,adPPYba,  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""""'   ""     `Y8 88       88 I8[    "" a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          ,adPPPPP88 88       88  `"Y8ba,  8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88,    ,88 "8a,   ,a88 aa    ]8I "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          `"8bbdP"Y8  `"YbbdP'Y8 `"YbbdP"'  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                          
+class PauseWindow(Window):
+    """ポーズウィンドウ""" # 操作説明の表示については後々考える
+    FONT_SIZE = 16
+    TEXT_COLOR = (255, 255, 255)
+    HELP_COLOR = (100, 100, 100)
+    HELP_FONT_COLOR = (255, 255, 255)
+    TO_GAME_BG_COLOR = (0, 0, 255) 
+    TO_GAME_FONT_COLOR = (255, 255, 255)
+    TO_SSELECT_BG_COLOR = (255, 0, 0) 
+    TO_SSELECT_FONT_COLOR = (255, 255, 255)   
+
+    def __init__(self, rect):
+        Window.__init__(self, rect)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.button_toGame_rect = pygame.Rect(self.rect.width // 2 - 210, self.rect.height // 3 - 30, 200, 60)
+        self.button_toStageSelect_rect = pygame.Rect(self.rect.width // 2 + 10, self.rect.height // 3 - 30, 200, 60)
+        self.mode = "pause"
+        self.guide_images_list = [(pygame.transform.smoothscale(load_image("data", "move.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "dash.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "door.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "characheckcondition.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "expression.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "item_open.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "warp.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128)),),
+                                 (pygame.transform.smoothscale(load_image("data", "game_quit.png"), (160, 128)), pygame.transform.smoothscale(load_image("data", "commandwindow_on.png"), (160, 128))),
+                                 (pygame.transform.smoothscale(load_image("data", "status.png"), (160, 128)),),
+                                 (pygame.transform.smoothscale(load_image("data", "goal.png"), (160, 128)),),
+                                 ]
+        self.guide_texts_list = [[["矢印キー/ボタンで移動します"], ["shiftキーを押しながら移動でダッシュします"]],
+                                 [["space/Enterキーは前方へのアクションです", "条件文のキャラに向かうドアを開けます"], ["条件文のキャラに話しかけます", "条件が合致しないとダメージです"], ["次の処理が計算式のとき", "白色のキャラに話しかけて実行します"]],
+                                 [["fキーで足元のアクションを行います", "宝箱を開けると変数に応じたアイテム", "を取得できます"], ["ワープゾーンは条件文に対応しています", "合致する条件のワープゾーンに入りましょう"]],
+                                 [["cキーでコマンドウィンドウを開きます", "\"rollback\"と打つと、過去の処理に戻れます"]],
+                                 [["escapeキーでゲームを止められます"], ["コマンドウィンドウが開いているときに", "閉じることができます"]],
+                                 [["左上にはステータスが表示されています", "HPが0になるとゲームオーバーです"]],
+                                 [["ダンジョンを進んでこの色の", "ゴールキャラを目指しましょう!!"]]
+                                 ]
+        self.guide_texts_list_en = [[["move with arrow keys or buttons"], ["dash moving with shift key"]],
+                                 [["action to forward with space or Enter key", "open a door to a conditional character"], ["talk to conditional characters", "get damaged if the condition is incorrect"], ["if the next is expression,", "talk to a white character"]],
+                                 [["f key for action on footf", "open treasure box,", "then get item of variable"], ["warp zones are for conditions", "get into a warp zone with correct condition"]],
+                                 [["c key to open the command window", "type \"rollback\", then go back to the past"]],
+                                 [["quit game with escape key"], ["if the command window is open,", "you can close the window"]],
+                                 [["your status in on the left-top window", "game is over as HP reaches 0"]],
+                                 [["get deeper in a dungeon", "to a Goal character !!"]]
+                                 ]
+        self.guide_images_index = 0
+        self.button_right = Button("arrow.png", self.rect.width // 5 * 4, (self.height - BUTTON_WIDTH)//2, 0, "right")
+        self.button_left = Button("arrow.png", self.rect.width // 5, (self.height - BUTTON_WIDTH)//2, 180, "left")
+        self.sm_window = SoundManageWindow(pygame.Rect(self.rect.width * 4/5 - 10, 50, self.rect.width * 1/5, 90))
+
+    def draw(self, screen: pygame.Surface):
+        """ポーズ画面を描画する"""
+        if self.is_visible is False:
+            return
+
+        Window.draw(self)
+
+        self.font.size = self.FONT_SIZE * 2
+        surf, rect = self.font.render("Pause", self.TEXT_COLOR)
+        self.font.size = self.FONT_SIZE
+        self.surface.blit(surf, ((self.rect.width - rect[2]) // 2 , self.rect.height // 3 - 100))
+
+        # ゲームボタン
+        pygame.draw.rect(self.surface, self.TO_GAME_BG_COLOR, self.button_toGame_rect)
+        label_surf_toGame, _ = self.font.render("Back to game" if ISENGLISH else "ゲームに戻る", self.TO_GAME_FONT_COLOR)
+        label_rect_toGame = label_surf_toGame.get_rect(center=self.button_toGame_rect.center)
+        self.surface.blit(label_surf_toGame, label_rect_toGame)
+
+        # ステージ選択メニューに戻るボタン
+        pygame.draw.rect(self.surface, self.TO_SSELECT_BG_COLOR, self.button_toStageSelect_rect)
+        label_surf_toStageSelect, _ = self.font.render("Back to Stage select" if ISENGLISH else "ステージ選択画面に戻る", self.TO_SSELECT_FONT_COLOR)
+        label_rect_toStageSelect = label_surf_toStageSelect.get_rect(center=self.button_toStageSelect_rect.center)
+        self.surface.blit(label_surf_toStageSelect, label_rect_toStageSelect)
+
+        y = self.rect.height // 3 + 50
+        image_x = self.rect.width // 2 - 210
+        text_x = self.rect.width // 2 - 30
+
+        for i, image in enumerate(self.guide_images_list[self.guide_images_index]):
+            self.surface.blit(image, (image_x, y))
+            text_y = y
+            if ISENGLISH:
+                for text in self.guide_texts_list_en[self.guide_images_index][i]:
+                    surf, rect = self.font.render(text, self.TEXT_COLOR)
+                    self.surface.blit(surf, (text_x,text_y))
+                    text_y += 20
+            else:
+                for text in self.guide_texts_list[self.guide_images_index][i]:
+                    surf, rect = self.font.render(text, self.TEXT_COLOR)
+                    self.surface.blit(surf, (text_x,text_y))
+                    text_y += 20
+            y += 150
+
+        self.button_left.draw(self.surface)
+        self.button_right.draw(self.surface)
+
+        self.sm_window.draw(self.surface)
+
+        Window.blit(self, screen)
+                                                                                                         
+# 88888888888 88 88          I8,        8        ,8I 88                      88                                 
+# 88          "" 88          `8b       d8b       d8' ""                      88                                 
+# 88             88           "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaa     88 88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88"""""     88 88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          88 88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88 88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          88 88  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                              
+class FileWindow(Window):
+    """ファイル表示ウィンドウ"""
+    FONT_SIZE = 20
+    FONT_COLOR = (255, 255, 255)
+
+    def __init__(self):
+        Window.__init__(self, pygame.Rect(SBW_WIDTH // 3, 10, SBW_WIDTH // 3 , SBW_HEIGHT // 2))
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.filename = None
+        self.filelines = []
+
+    def toggle_is_visible(self, filename):
+        if filename == self.filename:
+            self.is_visible = False
+            self.filename = None
+        else:
+            self.is_visible = True
+            self.filename = filename
+            self.read_filelines()
+
+    def read_filelines(self):
+        if self.filename:
+            time.sleep(0.1)
+            with open(f"debugger-C/{self.filename[1:-1]}", "r", encoding="utf-8") as f:
+                self.filelines = f.read().splitlines()
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.FONT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE+2)-rect[3]))
+
+    def draw(self, screen):
+        if self.is_visible:
+            Window.draw(self)
+            offset_y = 10
+            for fileline in self.filelines:
+                self.draw_string(10, offset_y, fileline)
+                offset_y += 24
+            Window.blit(self, screen)
+
+#                                                                                                                          
+# 88                                    I8,        8        ,8I 88                      88                                 
+# 88   ,d                               `8b       d8b       d8' ""                      88                                 
+# 88   88                                "8,     ,8"8,     ,8"                          88                                 
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88   88   a8P_____88 88P'   "88"    "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88   88   8PP""""""" 88      88      88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88   88,  "8b,   ,aa 88      88      88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88   "Y888 `"Ybbd8"' 88      88      88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                                                          
+#                                                                                                                          
+# 
+
+class ItemWindow(ScrollableWindow):
+    """ステータスウィンドウ"""
+    FONT_HEIGHT = 16
+    WHITE = Color(255, 255, 255, 255)
+    BLACK = Color(0, 0, 0, 255)
+    RED = Color(255, 31, 31, 255)
+    GREEN = Color(0, 170, 0, 255)
+    BLUE = Color(31, 31, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
+
+    def __init__(self, rect, player):
+        ScrollableWindow.__init__(self, rect, self.FONT_HEIGHT)
+        self.color = self.WHITE
+        self.player = player
+        self.itemChips = ItemChips()
+        self.item_changed_lines: set[int] = set()
+        self.check_comments_line: tuple[int, bool] = (-1, False)
+        self.file_buttons: dict[str, pygame.Rect] = {}
+        self.file_window = FileWindow()
+        self.is_inAction = True
+        self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
+
+    def draw_itemValueChangedRect(self, comments: list[str], local_y: int):
+        y = self.offset_y + local_y
+        if y < 34:
+            return
+        
+        if not MSGWND.is_visible and self.check_comments_line[0] == y // 24:
+            if self.check_comments_line[1]:
+                self.check_comments_line = (-1, False)
+            else:
+                MSGWND.set('\f'.join(comments))
+                self.check_comments_line = (self.check_comments_line[0], True)
+        self.item_changed_lines.add(y // 24)
+        pygame.draw.rect(self.surface, self.RED if self.check_comments_line[0] == y // 24 and self.check_comments_line[1] else self.WHITE, 
+                            pygame.Rect(0, y, self.rect.width, 24))
+
+    def draw_icon(self, icon, local_x, local_y):
+        y = self.offset_y + local_y
+        if y < 34:
+            return
+        
+        self.surface.blit(icon, (self.offset_x + local_x, y))
+        
+    def draw(self, screen):
+        """メッセージを描画する
+        メッセージウィンドウが表示されていないときは何もしない"""
+        if not self.is_visible:
+            return
+        
+        ScrollableWindow.draw(self)
+
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        # グローバル変数
+        for item in PLAYER.commonItembag.items[-1]:
+            is_item_changed = True
+            # 値が変化している変数に対しては白ハイライトをつける
+            if item.itemvalue.declared_comments is not None:
+                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
+            elif item.index_comments is not None:
+                self.draw_itemValueChangedRect(item.index_comments, y)
+            elif item.itemvalue.changed_comments is not None:
+                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
+            else:
+                is_item_changed = False
+                
+            icon_x = x
+            if item.itemvalue.children:
+                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
+                icon_x += 15
+
+            # 型に応じたアイコンを blit（描画）
+            icon, constLock = self.itemChips.getChip(item.vartype["type"])
+
+            if isinstance(icon, list):
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
+                text_x = icon_x + icon[0].get_width() * 2 + 10
+            else:
+                self.draw_icon(icon, icon_x, y)
+                text_x = icon_x + icon.get_width() + 10  # ← アイコン幅 + 余白（6px）
+
+            if constLock:
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, y+4, f"{item.name:<8}", self.GREEN)
+
+            offset_name = self.font.get_rect(item.name).width + text_x
+
+            # 配列などの値がないvalueは表示しない
+            if item.itemvalue.value is not None:
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", self.GREEN)
+            
+            y += 24
+
+            if item.itemvalue.is_open:
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], False)
+            
+        # ローカル変数
+        for item in PLAYER.itembag.items[-1]:
+            is_item_changed = True
+            if item.itemvalue.declared_comments is not None:
+                for comment in item.itemvalue.declared_comments:
+                    if isinstance(comment, dict):
+                        print(comment)
+
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_comments], y)
+            elif item.index_comments is not None:
+                self.draw_itemValueChangedRect(item.index_comments, y)
+            elif item.itemvalue.changed_comments is not None:
+                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
+            else:
+                is_item_changed = False
+
+            icon_x = x
+            if item.itemvalue.children and item.vartype["type"] != "FILE *":
+                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
+                icon_x += 15
+
+            # 型に応じたアイコンを blit（描画）
+            icon, constLock = self.itemChips.getChip(item.vartype["type"])
+            if isinstance(icon, list):
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
+                text_x = icon_x + icon[0].get_width() * 2 + 10
+            else:
+                text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
+                self.draw_icon(icon, icon_x, y)
+
+            if constLock:
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
+
+            if item.itemvalue.value in PLAYER.address_to_size:
+                self.draw_string(text_x - 12, y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
+
+            # アイコンの右に名前と値を描画
+            self.draw_string(text_x, y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
+
+            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and self.offset_y+y >= 34:
+                offset_name = self.font.get_rect(item.name).width + 30
+                file_button = pygame.Rect(text_x + offset_name, y + 2, 100, 20)
+                pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
+                label_surf, _ = self.font.render(PLAYER.address_to_fname[item.itemvalue.value][1:-1], (255, 255, 255))
+                label_rect = label_surf.get_rect(center=file_button.center)
+                self.file_buttons[PLAYER.address_to_fname[item.itemvalue.value]] = file_button
+                self.surface.blit(label_surf, label_rect)
+
+            offset_name = self.font.get_rect(item.name).width + text_x
+            # 配列などの値がないvalueは表示しない
+            if item.itemvalue.value is not None and item.vartype["type"] != "FILE *":
+                value_color = self.BLACK if is_item_changed else self.WHITE 
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", value_color)
+
+            y += 24
+
+            if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], True)
+
+        if self.is_inAction:
+            self.is_inAction = False
+
+        # ウィンドウ名表示
+        self.draw_base("ITEM" if ISENGLISH else "アイテム")
+
+        self.file_window.draw(screen)
+        ScrollableWindow.blit(self, screen)
+
+    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, "ItemValue"], y: int, x: int, type_dict: dict, isLocal: bool):
+        for valuename, itemvalue in itemvalue_children.items():
+            is_item_changed = True
+            if itemvalue.declared_comments is not None:
+                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in itemvalue.declared_comments], y)
+            elif itemvalue.changed_comments is not None:
+                self.draw_itemValueChangedRect(itemvalue.changed_comments, y)
+            else:
+                is_item_changed = False
+                
+            # 型に応じたアイコンを blit（描画)
+            if valuename[0] == '[' or valuename == '*':
+                icon, constLock = self.itemChips.getChip(type_dict["type"])
+            else:
+                icon, constLock = self.itemChips.getChip(type_dict[valuename]["type"])
+
+            # アイコンの右に名前と値を描画
+            if isLocal:
+                color = self.BLACK if is_item_changed else self.WHITE
+            else:
+                color = self.GREEN
+                
+            icon_x = x
+            if itemvalue.children:
+                self.draw_string(icon_x, y+4, '▼' if itemvalue.is_open else '▶', color)
+                if self.is_inAction:
+                    self.action_trigger_line_dict[y // 24] = (itemvalue, icon_x)
+                icon_x += 15
+
+            if isinstance(icon, list):
+                # (4,4),(12,4),(8,12)の順で描画
+                self.draw_icon(icon[0], icon_x+8, y+4)
+                self.draw_icon(icon[1], icon_x+4, y+12)
+                self.draw_icon(icon[2], icon_x+12, y+12)
+                text_x: int = icon_x + icon[0].get_width() * 2 + 10
+            else:
+                self.draw_icon(icon, icon_x, y)
+                text_x: int = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
+
+            if constLock:
+                self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
+
+            varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename]) if valuename[0] == '[' else ''.join([*var_path, ".", valuename])
+            
+            self.draw_string(text_x, y+4, f"{varname:<8}", color)
+            offset_name = self.font.get_rect(varname).width + text_x
+
+            # 配列などの値がないvalueは表示しない
+            if itemvalue.value is not None:
+                value_color = self.BLACK if is_item_changed else self.WHITE 
+                offset_name += 30
+                self.draw_string(offset_name, y+4, f"({itemvalue.value})", value_color)
+
+            y += 24
+
+            if itemvalue.is_open:
+                y = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename] if valuename[0] == '[' else [*var_path, ".", valuename], itemvalue.children, y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+
+        return y
+    
+    def is_cursor_in_window(self, pos: tuple[int, int]):
+        if self.is_inAction:
+            return None
+        
+        local_pos = (pos[0] - self.x, pos[1] - self.y)
+        
+        for filename, button in self.file_buttons.items():
+            if button.collidepoint(local_pos):
+                self.file_window.toggle_is_visible(filename)
+                return None
+            
+        y_line = (local_pos[1] - 10) // 24
+        if (y_line in self.action_trigger_line_dict and self.action_trigger_line_dict[y_line][1] <= local_pos[0] <= self.action_trigger_line_dict[y_line][1] + 20 
+            and not MSGWND.is_visible):
+            # ▶︎を閉じた後に表示文字列の見切れがなくなることもあるので右端/下端の判別をリセットする
+            if self.action_trigger_line_dict[y_line][0].is_open:
+                self.local_right_edge_x = 0
+                self.local_bottom_edge_y = 0
+            self.action_trigger_line_dict[y_line][0].is_open = not self.action_trigger_line_dict[y_line][0].is_open
+            self.is_inAction = True
+            self.action_trigger_line_dict = {}
+            self.item_changed_lines = set()
+            return None
+        
+        if 10 <= local_pos[0] <= self.rect[2] and y_line in self.item_changed_lines and not MSGWND.is_visible:
+            self.check_comments_line = (y_line, False)
+            return None
+        
+        if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
+            self.item_changed_lines = set()
+            self.action_trigger_line_dict = {}
+            return 'scroll'
+        
+        return None
+
+#                                                                                                                                             
+#  ad88888ba                                               I8,        8        ,8I 88                      88                                 
+# d8"     "8b ,d                 ,d                        `8b       d8b       d8' ""                      88                                 
+# Y8,         88                 88                         "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa, MM88MMM ,adPPYYba, MM88MMM 88       88 ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, 88    ""     `Y8   88    88       88 I8[    "" `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 88    ,adPPPPP88   88    88       88  `"Y8ba,   `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P 88,   88,    ,88   88,   "8a,   ,a88 aa    ]8I   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"  "Y888 `"8bbdP"Y8   "Y888  `"YbbdP'Y8 `"YbbdP"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                                                                             
+#                                                                                                                                             
+# 
+
+class StatusWindow(Window):
+    """ステータスウィンドウ"""
+    FONT_HEIGHT = 16
+    WHITE = Color(255, 255, 255, 255)
+    RED = Color(255, 31, 31, 255)
+    GREEN = Color(31, 255, 31, 255)
+    BLUE = Color(31, 31, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
+
+    def __init__(self, rect: pygame.Rect, player: Player, stage_index: int):
+        Window.__init__(self, rect)
+        self.text_rect = self.inner_rect.inflate(-2, -2)  # テキストを表示する矩形
+        self.myfont = pygame.freetype.Font(
+            resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
+        self.color = self.WHITE
+        self.player = player
+        self.name = "AQUATAN" + self.player.name if ISENGLISH else "あくあたん" + self.player.name
+        self.stage_index = stage_index
+
+    def draw_string(self, x, y, string, color):
+        """文字列出力"""
+        surf, rect = self.myfont.render(string, color)
+        self.surface.blit(surf, (x, y+(self.FONT_HEIGHT+2)-rect[3]))
+
+    def draw_status(self,x,y,label):
+        color = self.RED if label == "HP" and self.player.status["HP"] <= 30 else self.WHITE
+        self.draw_string(x, y, label, color)
+        self.draw_string(x+40, y, f"{self.player.status[label]:>5}", color)
+
+    def draw(self, screen):
+        """メッセージを描画する
+        メッセージウィンドウが表示されていないときは何もしない"""
+        if not self.is_visible:
+            return
+        Window.draw(self)
+        # self.surface.blit(self.img_schedule, self.text_rect)
+        self.draw_string(10, 10, f"Stage {self.stage_index}" if ISENGLISH else f"ステージ {self.stage_index}", self.WHITE)
+        self.draw_string(10, 30, f"Now:　{self.player.func}" if ISENGLISH else f"現在地:　{self.player.func}", self.CYAN)
+
+        self.draw_status(10, 50, "HP")
+        self.draw_status(100, 50, "MP")
+        self.draw_status(10, 70, "ATK")
+        self.draw_status(100, 70, "DEF")
+        # self.draw_status(10, 90, "AGI")
+
+        Window.blit(self, screen)
+
+#                                                                                                                              
+#   ,ad8888ba,  88                                           88888888ba                                                        
+#  d8"'    `"8b 88                                           88      "8b             ,d                                        
+# d8'           88                                           88      ,8P             88                                        
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88aaaaaa8P' ,adPPYba, MM88MMM 88       88 8b,dPPYba, 8b,dPPYba,   
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88""""88'  a8P_____88   88    88       88 88P'   "Y8 88P'   `"8a  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 88    `8b  8PP"""""""   88    88       88 88         88       88  
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88 88     `8b "8b,   ,aa   88,   "8a,   ,a88 88         88       88  
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8 88      `8b `"Ybbd8"'   "Y888  `"YbbdP'Y8 88         88       88  
+#                                                                                                                              
+#                                                                                                                              
+# 
+
+class CharaReturn(Character):
+    '''戻り値用のキャラクター'''
+    def __init__(self, name, pos, direction, movetype, message, execution_info: ReturnExecutionInfo, func: str, detail: CommentWindowInfo, mapname):
+        super().__init__(name, pos, direction, movetype, message)
+        self.execution_info = execution_info
+        self.func = func
+        self.codeElementWindow = CodeElementWindow(detail, (mapname, self.func, execution_info["line"], None))
+        
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if self.execution_info["line"] == PLAYER.sender.programCodeWindow.linenum:
+            offset_x, offset_y = offset
+            px = self.rect.topright[0] - 14
+            py = self.rect.topright[1] - 22
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
+                                                                                                                                                                                                   
+#   ,ad8888ba,  88                                             ,ad8888ba,  88                                88         ,ad8888ba,                                   88 88         88                          
+#  d8"'    `"8b 88                                            d8"'    `"8b 88                                88        d8"'    `"8b                                  88 ""   ,d    ""                          
+# d8'           88                                           d8'           88                                88       d8'                                            88      88                                
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88            88,dPPYba,   ,adPPYba,  ,adPPYba, 88   ,d8 88             ,adPPYba,  8b,dPPYba,   ,adPPYb,88 88 MM88MMM 88  ,adPPYba,  8b,dPPYba,   
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88            88P'    "8a a8P_____88 a8"     "" 88 ,a8"  88            a8"     "8a 88P'   `"8a a8"    `Y88 88   88    88 a8"     "8a 88P'   `"8a  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 Y8,           88       88 8PP""""""" 8b         8888[    Y8,           8b       d8 88       88 8b       88 88   88    88 8b       d8 88       88  
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88  Y8a.    .a8P 88       88 "8b,   ,aa "8a,   ,aa 88`"Yba,  Y8a.    .a8P "8a,   ,a8" 88       88 "8a,   ,d88 88   88,   88 "8a,   ,a8" 88       88  
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8   `"Y8888Y"'  88       88  `"Ybbd8"'  `"Ybbd8"' 88   `Y8a  `"Y8888Y"'   `"YbbdP"'  88       88  `"8bbdP"Y8 88   "Y888 88  `"YbbdP"'  88       88  
+                                                                                                                                                                                                                                                                                                                                                                                                           
+class CharaCheckCondition(Character):
+    '''条件文を確認するキャラクター'''
+
+    # chara = CharaCheckCondition(
+    #     name, 
+    #     (x, y), 
+    #     direction, 
+    #     move_direction, 
+    #     movetype, 
+    #     message, 
+    #     execution_info, 
+    #     func, 
+    #     detail,
+    #     self.name.lower()
+    # )
+    def __init__(self, name: str, pos: tuple[int, int], direction: Literal[0,1,2,3], move_direction: int, movetype: int, message: str, execution_info: ExecutionInfo, func: str, detail: CommentWindowInfo, mapname: str):
+        super().__init__(name, pos, direction, movetype, message)
+        self.initial_direction: Literal[0,1,2,3] = direction
+        self.move_direction = move_direction
+        self.back_direction = None
+        self.execution_info = execution_info
+        self.func = func
+        self.avoiding = False
+        self.codeElementWindow = CodeElementWindow(detail, (mapname, self.func, execution_info["line"], None))
+
+    def update(self, mymap: Map):
+        """キャラクター状態を更新する。
+        mapは移動可能かの判定に必要。"""
+        # プレイヤーの移動処理
+        if self.moving:
+            # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
+            self.rect.move_ip(self.vx, self.vy)
+            if self.rect.left % GS == 0 and self.rect.top % GS == 0:  # マスにおさまったら移動完了
+                if self.avoiding is True:
+                    if self.direction == DOWN:
+                        self.direction = UP
+                    elif self.direction == LEFT:
+                        self.direction = RIGHT
+                    elif self.direction == RIGHT:
+                        self.direction = LEFT
+                    else:
+                        self.direction = DOWN
+                else:
+                    self.direction = self.initial_direction
+                self.moving = False
+                self.x = self.rect.left // GS
+                self.y = self.rect.top // GS
+        # キャラクターアニメーション（frameに応じて描画イメージを切り替える）
+        self.frame += 1
+        self.image = self.images[self.name][self.direction * 4 + (self.frame // self.animcycle  % 4)]
+
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if self.execution_info["line"] != PLAYER.sender.programCodeWindow.linenum:
+            return
+        offset_x, offset_y = offset
+        px = self.rect.topright[0] - 14
+        py = self.rect.topright[1] - 22
+        screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
+
+    def set_checked(self):
+        self.avoiding = True
+        self.moving = True
+        if self.move_direction == DOWN:
+            self.vx, self.vy = 0, self.speed
+            self.direction = DOWN
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1, "avoiding_dir": UP}
+        elif self.move_direction == LEFT:
+            self.vx, self.vy = -self.speed, 0
+            self.direction = LEFT
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y, "avoiding_dir": RIGHT}
+        elif self.move_direction == RIGHT:
+            self.vx, self.vy = self.speed, 0
+            self.direction = RIGHT
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y, "avoiding_dir": LEFT}
+        else:
+            self.vx, self.vy = 0, -self.speed
+            self.direction = UP
+            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1, "avoiding_dir": DOWN}
+
+    def back_to_init_pos(self):
+        self.avoiding = False
+        self.moving = True
+        if self.direction == DOWN:
+            self.vx, self.vy = 0, self.speed
+        elif self.direction == LEFT:
+            self.vx, self.vy = -self.speed, 0
+        elif self.direction == RIGHT:
+            self.vx, self.vy = self.speed, 0
+        else: # UP
+            self.vx, self.vy = 0, -self.speed
+                                                                                                                                                             
+#   ,ad8888ba,  88                                           88888888888                                                                   88                          
+#  d8"'    `"8b 88                                           88                                                                            ""                          
+# d8'           88                                           88                                                                                                        
+# 88            88,dPPYba,  ,adPPYYba, 8b,dPPYba, ,adPPYYba, 88aaaaa     8b,     ,d8 8b,dPPYba,  8b,dPPYba,  ,adPPYba, ,adPPYba, ,adPPYba, 88  ,adPPYba,  8b,dPPYba,   
+# 88            88P'    "8a ""     `Y8 88P'   "Y8 ""     `Y8 88"""""      `Y8, ,8P'  88P'    "8a 88P'   "Y8 a8P_____88 I8[    "" I8[    "" 88 a8"     "8a 88P'   `"8a  
+# Y8,           88       88 ,adPPPPP88 88         ,adPPPPP88 88             )888(    88       d8 88         8PP"""""""  `"Y8ba,   `"Y8ba,  88 8b       d8 88       88  
+#  Y8a.    .a8P 88       88 88,    ,88 88         88,    ,88 88           ,d8" "8b,  88b,   ,a8" 88         "8b,   ,aa aa    ]8I aa    ]8I 88 "8a,   ,a8" 88       88  
+#   `"Y8888Y"'  88       88 `"8bbdP"Y8 88         `"8bbdP"Y8 88888888888 8P'     `Y8 88`YbbdP"'  88          `"Ybbd8"' `"YbbdP"' `"YbbdP"' 88  `"YbbdP"'  88       88  
+#                                                                                    88                                                                                
+#                                                                                    88                                                                                
+
+# 話しかけると頭に計算式が浮かぶようにすると良いかも?
+class CharaExpression(Character):
+    def __init__(self, name: str, pos: tuple[int, int], direction: int, movetype: int, message: str, func: str, comments: dict[str, ExpressionDetail], mapname: str):
+        super().__init__(name, pos, direction, movetype, message)
+        self.func = func
+        self.comments = comments
+        self.linenum = None
+        self.codeElementWindow_dict: dict[str, CodeElementWindow] = {line: CodeElementWindow(expr["expr"], (mapname, self.func, int(line), None)) for line, expr in comments.items()}
+
+    def draw(self, screen, offset):
+        super().draw(screen, offset)
+        if str(PLAYER.sender.programCodeWindow.linenum) in self.codeElementWindow_dict:
+            offset_x, offset_y = offset
+            px = self.rect.topright[0] - 14
+            py = self.rect.topright[1] - 22
+            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
+                                               
+# 88888888888                                        
+# 88                                          ,d     
+# 88                                          88     
+# 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM  
+# 88""""" `8b     d8' a8P_____88 88P'   `"8a  88     
+# 88       `8b   d8'  8PP""""""" 88       88  88     
+# 88        `8b,d8'   "8b,   ,aa 88       88  88,    
+# 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  
+
+class Event:
+    def __init__(self, pos: tuple[int, int], mapchip: int):
+        self.x, self.y = pos
+        self.mapchip = mapchip
+    
+    def pos(self):
+        return (self.x, self.y)
+    
+    @abstractmethod
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]) -> None:
+        pass
+        
+    def __str__(self):
+        values: list[str] = [
+            f"{name}={value}"
+            for name, value in self.__dict__.items()
+            if type(value) in (str, int)
+        ]
+        return f"{self.__class__.__name__.upper()}({', '.join(values)})"
+
+#                                                                                                         
+# 88b           d88                                    88888888888                                        
+# 888b         d888                                    88                                          ,d     
+# 88`8b       d8'88                                    88                                          88     
+# 88 `8b     d8' 88  ,adPPYba,  8b       d8  ,adPPYba, 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM  
+# 88  `8b   d8'  88 a8"     "8a `8b     d8' a8P_____88 88""""" `8b     d8' a8P_____88 88P'   `"8a  88     
+# 88   `8b d8'   88 8b       d8  `8b   d8'  8PP""""""" 88       `8b   d8'  8PP""""""" 88       88  88     
+# 88    `888'    88 "8a,   ,a8"   `8b,d8'   "8b,   ,aa 88        `8b,d8'   "8b,   ,aa 88       88  88,    
+# 88     `8'     88  `"YbbdP"'      "8"      `"Ybbd8"' 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  
+#                                                                                                         
+#                                                                                                         
+# 
+
+class MoveEvent(Event):
+    """移動イベント"""
+    # ((x, y), mapchip, dest_map, (dest_x, dest_y), execution_info, func, detail, self.name.lower())
+    def __init__(self, pos: tuple[int, int], mapchip: int, dest_map: str, dest_pos: tuple[int, int], execution_info: ExecutionInfo | None, func: str, detail: CommentWindowInfo | None, mapname: str):
+        super().__init__(pos, mapchip)
+        self.dest_map = dest_map  # 移動先マップ名
+        self.dest_x, self.dest_y = dest_pos[0], dest_pos[1]  # 移動先座標
+        self.execution_info = execution_info
+        self.func = func
+        self.image = Map.images[self.mapchip]
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+        self.codeElementWindow = CodeElementWindow(detail, (mapname, self.func, execution_info["line"], None)) if detail and execution_info else None
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してイベントを描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+        if self.execution_info and self.execution_info["line"] == PLAYER.sender.programCodeWindow.linenum:
+            offset_x, offset_y = offset
+            px = self.rect.midtop[0] - 16
+            py = self.rect.topright[1] - 28
+            screen.blit(pygame.image.load(resource_path("reaction.png")).convert_alpha(), (px-offset_x, py-offset_y))
+
+class HoverComment(TypedDict):
+    description: str
+    expr: str
+    value: str
+                                                                                                                                                                                                
+#   ,ad8888ba,                       88            88888888888 88                                                           I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                      88            88          88                                                       ,d  `8b       d8b       d8' ""                      88                                 
+# d8'                                88            88          88                                                       88   "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,   ,adPPYb,88  ,adPPYba, 88aaaaa     88  ,adPPYba, 88,dPYba,,adPYba,   ,adPPYba, 8b,dPPYba, MM88MMM Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a a8"    `Y88 a8P_____88 88"""""     88 a8P_____88 88P'   "88"    "8a a8P_____88 88P'   `"8a  88    `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 8b       88 8PP""""""" 88          88 8PP""""""" 88      88      88 8PP""""""" 88       88  88     `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa 88          88 "8b,   ,aa 88      88      88 "8b,   ,aa 88       88  88,     `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"' 88888888888 88  `"Ybbd8"' 88      88      88  `"Ybbd8"' 88       88  "Y888    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                             
+                                                                                                                                                                                                         
+class CodeElementWindow(Window):
+    """関数の遷移歴や条件文、計算式を表示するウィンドウ"""
+    FONT_SIZE = 18
+    NOT_CHECKED_COLOR = (255, 0, 0)
+    SKIPPED_CHECK_COLOR = (0, 0, 255)
+    CHECKED_COLOR = (0, 255, 0)
+    TEXT_COLOR = (255, 255, 255, 255)
+    LINE_COLOR = (255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
+    
+    HOVER_TEXT_COLOR = (255, 255, 255, 255)
+    HOVER_BG_COLOR = (255, 0, 0, 255)
+    WHITE = (255, 255, 255, 255)
+
+    def __init__(self, comment_window_info: CommentWindowInfo, location: tuple[str, str, int, str | None]):
+        # 300は右ウィンドウのサイズに合わせている(後々変えるかを考える)
+        # 200は適当
+        Window.__init__(self, pygame.Rect(SCR_WIDTH // 5 + 10, 10, SCR_WIDTH // 5 * 4 - 300 - 20, 200))
+        # 日本語対応フォントの指定
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.location = CheckedFuncLocation(*location)
+        # func_warpがCommentWindowInfoに移行したので、Detailクラスは削除。その内容をこのCodeElementWindowで取り扱うことにする
+        self.func_groups = comment_window_info["func_groups"]
+        self.left_arrow, _ = self.font.render("◀", (255, 255, 255, 255))
+        self.right_arrow, _ = self.font.render("▶", (255, 255, 255, 255))
+        self.left_rect = self.left_arrow.get_rect(center=(20, 140))
+        self.right_rect = self.right_arrow.get_rect(center=(476, 140))
+        self.offset_x = 50
+        self.offset_y = self.set_expression_comment(comment_window_info["detail"], comment_window_info["hover"], comment_window_info["type"])
+        self.is_bottom_edge = True
+        self.is_right_edge = True
+        self.show()
+
+    def set_expression_comment(self, detail: list[list[str]], hover: list[list[ExprDescription]], comment_type: str):
+        self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect, pygame.Rect]] = []
+        self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
+        self.hoverComment_list = [self.get_hover_comment(h) for h in hover]
+
+        x, y = 50, 10
+        # 各行（'+'区切り）を処理
+
+        for i, comment_by_line in enumerate(detail):
+            for j, text in enumerate(comment_by_line):
+                # 通常テキストを描画
+                base_surf, _ = self.font.render(text, self.CYAN)
+                base_rect = base_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((base_surf, base_rect))
+                x = base_rect.right
+
+                # 条件リンクを描画（最後以外）
+                if j < len(comment_by_line) - 1:
+                    cond_surf, _ = self.font.render(
+                        ("EXP ▷" if ISENGLISH else "計算式 ▷") 
+                        if comment_type == "exps" or (comment_type == "cond-in-change" and i == 1) else 
+                        ("Cond ▷" if ISENGLISH else "条件 ▷"), 
+                        self.HOVER_TEXT_COLOR
+                    )
+                    text_rect = cond_surf.get_rect(topleft=(x+6, y))
+                    outer_rect = pygame.Rect(
+                        x+2,
+                        y-2,
+                        text_rect.width + 8,
+                        text_rect.height + 4
+                    )
+                    self.hoverLink_info_list.append((cond_surf, text_rect, outer_rect))
+                    x = outer_rect.right + 2
+
+            y = base_rect.bottom + 4
+            # 最後の要素でなければ「かつ」を追加して改行
+            if i < len(detail) - 1:
+                x = 50
+                if comment_type == "cond-in-change":
+                    continue
+                and_surf, _ = self.font.render("AND" if ISENGLISH else "かつ", self.WHITE)
+                and_rect = and_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((and_surf, and_rect))
+                y = and_rect.bottom + 4
+            elif comment_type == "end":
+                x = 50
+                next_surf, _ = self.font.render("then, you can get in" if ISENGLISH else "この先に進むと次の処理に移行します", self.WHITE)
+                next_rect = next_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((next_surf, next_rect))
+                y = next_rect.bottom + 4
+            elif comment_type in ("cond-in", "cond-in-change"):
+                x = 50
+                end_surf, _ = self.font.render("then, you can get in" if ISENGLISH else "先に進みます", self.WHITE)
+                end_rect = end_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((end_surf, end_rect))
+                y = end_rect.bottom + 4        
+            elif comment_type == "cond-check":
+                x = 50
+                end_surf, _ = self.font.render("then, you can get in" if ISENGLISH else "ならこの先に進みます", self.WHITE)
+                end_rect = end_surf.get_rect(topleft=(x, y))
+                self.baseComment_info_list.append((end_surf, end_rect))
+                y = end_rect.bottom + 4
+
+        return y
+
+    def get_reference_hover_comment(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_str_to_show_by_id: dict[int, str]):
+        if expr_part["type"] == "scalar":
+            reference = expr_part["name"]
+        elif expr_part["type"] == "struct":
+            reference = ".".join([*self.get_reference_hover_comment(expr_part["parent"], expr_str_to_show_by_id), *expr_part["members"]])
+        else:
+            # 計算結果を含めていない、計算式の文字列
+            reference_str_base: list[str] = []
+            # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
+            for index_part in expr_part["indexes"]:
+                if "expr_id" in index_part:
+                    # expr_id
+                    reference_str_base.append(f"[{expr_str_to_show_by_id[index_part["expr_id"]]}]")
+                elif "text" in index_part:
+                    # text
+                    reference_str_base.append(f"[{index_part["text"]}]")
+                else:
+                    # reference
+                    reference_str_base.append(f"[{self.get_reference_hover_comment(index_part, expr_str_to_show_by_id)}]")
+            reference = ''.join([self.get_reference_hover_comment(expr_part["parent"], expr_str_to_show_by_id), *reference_str_base])
+
+        return reference
+
+    def get_hover_comment(self, expr_descriptions: list[ExprDescription]) -> list[HoverComment]:
+        # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
+        expr_str_base_by_id: dict[int, str] = {}
+        expr_description_str_to_show: list[HoverComment] = []
+        for middle_expr in expr_descriptions:
+            expr_str_base: list[str] = []
+            expr_description: list[str] = []
+            for expr_part in middle_expr["expr"]:
+                if "type" in expr_part:
+                    expr_str_base.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
+                elif "text" in expr_part:
+                    expr_str_base.append(expr_part["text"])
+                else: # expr_idなら、計算式の結果を動的に代入する
+                    expr_str_base.append(expr_str_base_by_id[expr_part["expr_id"]])
+
+            for expr_part in middle_expr["description"]: # "description": [{"name": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
+                if "type" in expr_part:
+                    expr_description.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
+                elif "text" in expr_part:
+                    expr_description.append(expr_part["text"])
+                else: # expr_id
+                    expr_description.append(expr_str_base_by_id[expr_part["expr_id"]])
+
+            expr_str_base_by_id[middle_expr["id"]] = " ".join(expr_str_base)
+            expr_description_str_to_show.append({"expr": ' '.join(expr_str_base), "description": ' '.join(expr_description)})
+        return expr_description_str_to_show
+
+    def draw_string(self, x, y, string, color, size=None):
+        """文字列出力"""
+        if size:
+            self.font.size = size
+        surf, rect = self.font.render(string, color)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+        if size:
+            self.font.size = self.FONT_SIZE
+
+    def draw_arrow(self, surface, color, start, end, width=3, arrow_size=10):
+        # 直線を描画
+        pygame.draw.line(surface, color, start, end, width)
+
+        # ベクトル計算
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        angle = math.atan2(dy, dx)
+
+        # 矢印の先端（三角形の座標）
+        x1 = end[0] - arrow_size * math.cos(angle - math.pi / 6)
+        y1 = end[1] - arrow_size * math.sin(angle - math.pi / 6)
+        x2 = end[0] - arrow_size * math.cos(angle + math.pi / 6)
+        y2 = end[1] - arrow_size * math.sin(angle + math.pi / 6)
+
+        pygame.draw.polygon(surface, color, [(end[0], end[1]), (x1, y1), (x2, y2)])
+
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        
+        Window.draw(self)
+        offset_x = self.offset_x
+        offset_y = self.offset_y
+        right_edge = self.offset_x
+        bottom_edge = self.offset_y
+
+        # 条件文や計算式の内容
+        for baseComment_info in self.baseComment_info_list:
+            self.surface.blit(baseComment_info[0], baseComment_info[1])
+        for hoverLink_info in self.hoverLink_info_list:
+            pygame.draw.rect(self.surface, self.HOVER_BG_COLOR, hoverLink_info[2], border_radius=10)
+            pygame.draw.rect(self.surface, self.HOVER_TEXT_COLOR, hoverLink_info[2], width=2, border_radius=10)
+            self.surface.blit(hoverLink_info[0], hoverLink_info[1])
+
+        checked_funcs = PLAYER.checked_funcs.get(self.location, [])
+        func_pos_list: list[tuple[int, int]] = []
+
+        if any(len(func_group) != 0 for func_group in self.func_groups):
+            self.draw_string(offset_x, offset_y, "FUNCTION" if ISENGLISH else "関数", self.CYAN, 20)
+            offset_y += 24
+
+        # class ArgInfo(TypedDict):
+        #     type: str
+        #     line: int
+
+        # ''' 
+        # nameは関数の名前, x,yはワープ先の位置, argsは引数の名前をキー、その引数の情報を値とする辞書, lineは遷移元の行番, 
+        # childrenは当関数に内包されている関数の数 (例: func1(func2+func3, func4)の場合は、引数に使われているfunc2~func4の総数の3になる) 
+        # '''
+        # class FuncWarp(TypedDict):
+        #     name: str
+        #     x: int
+        #     y: int
+        #     args: dict[str, ArgInfo]
+        #     line: int
+        #     children: int
+
+        func_index = 0
+        for i, func_groups in enumerate(self.func_groups):
+            self.draw_string(offset_x, offset_y, func_groups["name"], self.CYAN)
+            offset_y += self.FONT_SIZE
+            for func in func_groups["func_warps"]:
+                # text = f"{func['name']}: {checked_funcs[i]["return_value"]}" if i < len(checked_funcs) and checked_funcs[i]["checked"] else func["name"]
+                text = func['name']
+                # ハイライトにはパディングをつける
+                highlight_width = self.font.get_rect(text).width + 4
+                # 引数に関数が含まれる場合は段落をつけて関係を描画する
+                # 引数内の関数の描画位置に基づいて、現在描画しようとしている関数の描画位置を決める
+                x_pos_list: list[int] = []
+                y_pos_list: list[int] = []
+
+                for _ in range(func["children"]):
+                    func_pos = func_pos_list.pop(0)
+                    x_pos_list.append(func_pos[0])
+                    y_pos_list.append(func_pos[1])
+
+                x_pos = max(x_pos_list) + 60 if len(x_pos_list) else offset_x
+                y_pos = sum(y_pos_list) // len(y_pos_list) if len(y_pos_list) else offset_y
+
+                # 関数と関数(関数とその引数に含まれる関数)を繋げる矢印を描画する
+                for x_pos_index, x_pos_start in enumerate(x_pos_list):
+                    self.draw_arrow(self.surface, self.LINE_COLOR, (x_pos_start+10, y_pos_list[x_pos_index]+(self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
+
+                # 関数が遷移済みかどうかで背景色を変える
+                if i < len(checked_funcs):
+                    if checked_funcs[i]["checked"]:
+                        highlightColor = self.CHECKED_COLOR
+                    else:
+                        highlightColor = self.SKIPPED_CHECK_COLOR
+                else:
+                    highlightColor = self.NOT_CHECKED_COLOR
+                # 背景色をつける
+                pygame.draw.rect(self.surface, highlightColor, pygame.Rect(x_pos, y_pos, highlight_width, self.FONT_SIZE + 4))
+                
+                # 関数名を描画する
+                self.draw_string(x_pos+2, y_pos+2, text, self.TEXT_COLOR)
+                # 現在の関数と次の関数に矢印を繋げるために先に登録しておく
+                func_pos_list.append((x_pos+highlight_width, y_pos))
+                right_edge = max(right_edge, x_pos+highlight_width)
+                bottom_edge = max(bottom_edge, y_pos+self.FONT_SIZE)
+
+                # 引数に関数がない時は現在の関数の下に次の関数を描画する
+                if len(y_pos_list) == 0:
+                    offset_y += self.FONT_SIZE + 10
+
+                func_index += 1
+
+            offset_x = self.offset_x
+            offset_y = bottom_edge + 10
+
+        # 現在有効な要素ウィンドウが2個以上なら切り替え用の矢印ボタンを表示させる
+        if len(PLAYER.codeElementWindow_list) >= 2:
+            self.surface.blit(self.left_arrow, self.left_rect)
+            self.surface.blit(self.right_arrow, self.right_rect)
+
+        if not self.is_bottom_edge and offset_y <= self.rect[3]:
+            self.is_bottom_edge = True
+        else:
+            self.is_bottom_edge = False
+        if not self.is_right_edge and right_edge <= self.rect[2]:
+            self.is_right_edge = True
+        else:
+            self.is_right_edge = False
+
+        Window.blit(self, screen)
+
+    def is_cursor_in_window(self, pos: tuple[int, int]):
+        if MSGWND.is_visible:
+            return None
+            
+        local_pos = (pos[0] - self.x, pos[1] - self.y)
+        if self.left_rect.collidepoint(local_pos):
+            shift = -1
+        elif self.right_rect.collidepoint(local_pos):
+            shift = 1
+        else:
+            for i, hoverLink_info in enumerate(self.hoverLink_info_list):
+                if hoverLink_info[1].collidepoint(local_pos):
+                    # log_commentの内容は、プレイヤーが間違えた回数によって変える必要がある。
+                    log_comment = '\f'.join([f"{h["expr"]} : {h["description"]}" for h in self.hoverComment_list[i]])
+                    MSGWND.set(log_comment)
+                    return None
+            if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
+                return 'scroll'
+            return None
+
+        if len(PLAYER.codeElementWindow_list) >= 2:
+            PLAYER.codeElementWindow_index = (PLAYER.codeElementWindow_index + shift) % len(PLAYER.codeElementWindow_list)
+        else:
+            PLAYER.codeElementWindow_index = 0
+
+        return None
+
+#                                                                                                                                 
+# 88888888ba  88                                                               88888888888                                        
+# 88      "8b 88                                                         ,d    88                                          ,d     
+# 88      ,8P 88                                                         88    88                                          88     
+# 88aaaaaa8P' 88 ,adPPYYba,  ,adPPYba,  ,adPPYba, ,adPPYba,  ,adPPYba, MM88MMM 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM  
+# 88""""""'   88 ""     `Y8 a8"     "" a8P_____88 I8[    "" a8P_____88   88    88""""" `8b     d8' a8P_____88 88P'   `"8a  88     
+# 88          88 ,adPPPPP88 8b         8PP"""""""  `"Y8ba,  8PP"""""""   88    88       `8b   d8'  8PP""""""" 88       88  88     
+# 88          88 88,    ,88 "8a,   ,aa "8b,   ,aa aa    ]8I "8b,   ,aa   88,   88        `8b,d8'   "8b,   ,aa 88       88  88,    
+# 88          88 `"8bbdP"Y8  `"Ybbd8"'  `"Ybbd8"' `"YbbdP"'  `"Ybbd8"'   "Y888 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  
+#                                                                                                                                 
+#                                                                                                                                 
+# 
+
+class PlacesetEvent(Event):
+    """場所セットイベント"""
+
+    def __init__(self, pos: tuple[int, int], mapchip: int, place_label: str):
+        super().__init__(pos, mapchip)
+        self.place_label = place_label  # 移動先マップ名
+        self.image = Map.images[self.mapchip]
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してイベントを描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+
+#                                                                                       
+# 888888888888                                                                          
+#      88                                                                               
+#      88                                                                               
+#      88 8b,dPPYba,  ,adPPYba, ,adPPYYba, ,adPPYba, 88       88 8b,dPPYba,  ,adPPYba,  
+#      88 88P'   "Y8 a8P_____88 ""     `Y8 I8[    "" 88       88 88P'   "Y8 a8P_____88  
+#      88 88         8PP""""""" ,adPPPPP88  `"Y8ba,  88       88 88         8PP"""""""  
+#      88 88         "8b,   ,aa 88,    ,88 aa    ]8I "8a,   ,a88 88         "8b,   ,aa  
+#      88 88          `"Ybbd8"' `"8bbdP"Y8 `"YbbdP"'  `"YbbdP'Y8 88          `"Ybbd8"'  
+#                                                                                       
+#                                                                                       
+# 
+
+class Treasure(Event):
+    """宝箱"""
+    FONT_SIZE = 16
+
+    def __init__(self, pos: tuple[int, int], name: str, start: int, end: int, func: str, func_groups: list[FuncWarpGroup], mapname):
+        super().__init__(pos, 138)
+        self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
+        self.image = Map.images[self.mapchip]
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+        self.item = name  # アイテム名
+        self.start = start
+        self.end = end
+        self.func = func # 宝箱が位置するマップの関数名
+        comment_window_info: CommentWindowInfo = {"detail": [], "hover": [], "func_groups": func_groups, "type": ""}
+        self.codeElementWindow = CodeElementWindow(comment_window_info, (mapname, self.func, start, name))
+
+    def open(self, data: dict, line: int, comments: list[str]):
+        """宝箱をあける"""
+        SMANAGER.play_se("treasure_open")
+        # アイテムを追加する処理
+        item = Item(self.item, line, data, comments, self.vartype)
+        PLAYER.itembag.items[-1].append(item)
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してイベントを描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+
+        # アイテム名を描画（宝箱の上に）
+        if self.item and PLAYER.pos() == self.pos() or PLAYER.itemNameShow:
+            # 文字色（白）とアルファ付き背景（例: 半透明黒）
+            text_surface, text_rect = self.font.render(
+                self.item, 
+                fgcolor=(255, 255, 255),         # 文字色：白
+                bgcolor=(0, 0, 0, 128)           # 背景色：半透明黒（RGBA）
+            )
+
+            # パディング
+            padding = 4
+            # アイテム名表示枠の矩形
+            bg_rect = pygame.Rect(
+                text_rect.left - padding,
+                text_rect.top - padding,
+                text_rect.width + 2 * padding,
+                text_rect.height + 2 * padding
+            )
+
+            # アイテム名表示枠をアイテムに対して中央上に寄せる
+            bg_rect.centerx = self.rect.centerx - offset_x
+            bg_rect.bottom = self.rect.top - offset_y
+            # テキストを枠の中央に配置
+            text_rect.center = bg_rect.center
+
+            # 背景を描画（半透明黒）
+            pygame.draw.rect(screen, (0, 0, 0, 128), bg_rect)
+
+            # テキストを描画
+            screen.blit(text_surface, text_rect)
+
+#                                         
+#  ad88888ba  88                          
+# d8"     "8b ""                          
+# Y8,                                     
+# `Y8aaaaa,   88  ,adPPYb,d8 8b,dPPYba,   
+#   `"""""8b, 88 a8"    `Y88 88P'   `"8a  
+#         `8b 88 8b       88 88       88  
+# Y8a     a8P 88 "8a,   ,d88 88       88  
+#  "Y88888P"  88  `"YbbdP"Y8 88       88  
+#                 aa,    ,88              
+#                  "Y8bbdP"               
+# 
+
+class Sign(Event):
+    """看板"""
+    FONT_HEIGHT = 18
+    WHITE = Color(255, 255, 255, 255)
+
+    def __init__(self, pos: tuple[int, int], text: str):
+        super().__init__(pos, 691)
+        self.mapchip_left = 691
+        self.mapchip_right = 693
+        self.mapchip_center = 692
+        self.text = text  # アイテム名
+        self.myfont = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮して看板を描画"""
+        surf, rect = self.myfont.render(self.text, self.WHITE)
+        panels = rect.width // 32 - 1
+        # print(rect.width,panels)
+        panels = max(panels, 0)
+        self._draw(screen,offset,0,0,self.mapchip_left)
+        for i in range(panels):
+            self._draw(screen,offset,1 + i,0,self.mapchip_center)
+        self._draw(screen,offset,panels + 1,0,self.mapchip_right)
+        offset_x, offset_y = offset
+        rect = surf.get_rect(topleft=((self.x)*GS, (self.y)*GS))
+        px = rect.topleft[0]
+        py = rect.topleft[1] + 10
+        screen.blit(surf, (px-offset_x, py-offset_y))
+
+    def _draw(self, screen, offset, dx, dy, mchip):
+        """mchipで指定される看板部品をオフセットを考慮して描画"""
+        image = Map.images[mchip]
+        offset_x, offset_y = offset
+        rect = image.get_rect(topleft=((self.x+dx)*GS, (self.y+dy)*GS))
+        px = rect.topleft[0]
+        py = rect.topleft[1]
+        screen.blit(image, (px-offset_x, py-offset_y))
+
+#                                                   
+# 88888888ba,                                       
+# 88      `"8b                                      
+# 88        `8b                                     
+# 88         88  ,adPPYba,   ,adPPYba,  8b,dPPYba,  
+# 88         88 a8"     "8a a8"     "8a 88P'   "Y8  
+# 88         8P 8b       d8 8b       d8 88          
+# 88      .a8P  "8a,   ,a8" "8a,   ,a8" 88          
+# 88888888Y"'    `"YbbdP"'   `"YbbdP"'  88          
+#                                                   
+#                                                   
+# 
+
+class Door(Event):
+    """ドア"""
+    def __init__(self, pos: tuple[int, int], name: str):
+        super().__init__(pos, 678)
+        self.mapchip_list = [[678,678,679,680,681,682],[637,638,639,640,641,642]]
+        self.status = 0 # close
+        self.door_name = name  # アイテム名
+
+    def name(self):
+        """名前を返す"""
+        return self.door_name
+
+    def open(self):
+        """ドアをあける"""
+        self.status = 1 # open
+
+    def close(self):
+        """ドアを閉める"""
+        self.status = 0 # close
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してドアを描画"""
+        for i,mchip in enumerate(self.mapchip_list[self.status]):
+            self._draw(screen,offset,i%2,i//2,mchip)
+
+    def _draw(self, screen: pygame.Surface, offset: tuple[int, int], dx: int, dy: int, mchip: int):
+        """mchipで指定されるドア部品をオフセットを考慮して描画"""
+        image = Map.images[mchip]
+        offset_x, offset_y = offset
+        rect = image.get_rect(topleft=((self.x+dx)*GS, (self.y+dy)*GS))
+        px = rect.topleft[0]
+        py = rect.topleft[1]
+        screen.blit(image, (px-offset_x, py-offset_y))
+
+class SmallDoor(Door):
+    """小さいドアクラス"""
+    def __init__(self, pos: tuple[int, int], name: str, direction: Literal[0,1,2,3]):
+        self.mapchip = 27
+        self.mapchip_list = [27,688]
+        self.status = 0 # close
+        self.x, self.y = pos  # ドア座標
+        self.door_name = name  # ドア名
+        self.direction: Literal[0,1,2,3] = direction
+        self.key = ""
+
+    def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
+        """オフセットを考慮してイベントを描画"""
+        offset_x, offset_y = offset
+        image = Map.images[self.mapchip_list[self.status]]
+        rect = image.get_rect(topleft=(self.x*GS, self.y*GS))
+        px = rect.topleft[0]
+        py = rect.topleft[1]
+        screen.blit(image, (px-offset_x, py-offset_y))
+
+    def open(self):
+        """ドアをあける"""
+        SMANAGER.play_se("door_open")
+        self.status = 1 # open
+
+    def close(self):
+        """ドアを閉める"""
+        SMANAGER.play_se("door_close")
+        self.status = 0 # close
+
+#                                                
+# 88          88             88                  
+# 88          ""             88           ,d     
+# 88                         88           88     
+# 88          88  ,adPPYb,d8 88,dPPYba, MM88MMM  
+# 88          88 a8"    `Y88 88P'    "8a  88     
+# 88          88 8b       88 88       88  88     
+# 88          88 "8a,   ,d88 88       88  88,    
+# 88888888888 88  `"YbbdP"Y8 88       88  "Y888  
+#                 aa,    ,88                     
+#                  "Y8bbdP"                      
+# 
+
+class Light(Event):
+    """光源"""
+    def __init__(self, pos: tuple[int, int], room: str):
+        super().__init__(pos, 1)
+        self.surface = pygame.Surface((160, 160), pygame.SRCALPHA)
+        self.image = Map.images[self.mapchip]
+        self.rect = self.surface.get_rect(topleft=(self.x*GS-80, self.y*GS-80))
+        self.lightroom = room  # 部屋名
+        self.color = pygame.Color(255, 255, 255)
+
+    def room(self):
+        """部屋名"""
+        return self.lightroom
+
+    def set_color(self, color: pygame.Color):
+        self.color = color
+
+    def draw(self, screen, offset):
+        """オフセットを考慮し光を描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+#        screen.blit(self.image, (px-offset_x, py-offset_y))
+        pygame.draw.circle(self.surface,Color(self.color.r, self.color.g, self.color.b, self.color.a//6),
+                           (80,80),80,0)
+        pygame.draw.circle(self.surface,Color(self.color.r, self.color.g, self.color.b, self.color.a//4),
+                           (80,80),70,0)
+        pygame.draw.circle(self.surface,Color(self.color.r, self.color.g, self.color.b, self.color.a//2),
+                           (80,80),60,0)
+        pygame.draw.circle(self.surface,Color(0, 0, 0, self.color.a),(80, 80), 48, 0)
+        screen.blit(self.surface, (px-offset_x+15, py-offset_y+15), special_flags=BLEND_RGBA_SUB)
+
+#                                                                                                   
+#        db                                      88888888888                                        
+#       d88b                    ,d               88                                          ,d     
+#      d8'`8b                   88               88                                          88     
+#     d8'  `8b    88       88 MM88MMM ,adPPYba,  88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM  
+#    d8YaaaaY8b   88       88   88   a8"     "8a 88""""" `8b     d8' a8P_____88 88P'   `"8a  88     
+#   d8""""""""8b  88       88   88   8b       d8 88       `8b   d8'  8PP""""""" 88       88  88     
+#  d8'        `8b "8a,   ,a88   88,  "8a,   ,a8" 88        `8b,d8'   "8b,   ,aa 88       88  88,    
+# d8'          `8b `"YbbdP'Y8   "Y888 `"YbbdP"'  88888888888 "8"      `"Ybbd8"' 88       88  "Y888  
+#                                                                                                   
+#                                                                                                   
+# 
+
+class AutoEvent(Event):
+    """自動イベント"""
+    def __init__(self, pos: tuple[int, int], mapchip: int, sequence):
+        super().__init__(pos, mapchip)
+        self.sequence = sequence  # 移動シーケンス
+        self.image = Map.images[self.mapchip]
+        self.rect = self.image.get_rect(topleft=(self.x*GS, self.y*GS))
+
+    def draw(self, screen, offset):
+        """オフセットを考慮してイベントを描画"""
+        offset_x, offset_y = offset
+        px = self.rect.topleft[0]
+        py = self.rect.topleft[1]
+        screen.blit(self.image, (px-offset_x, py-offset_y))
+    
+#                                          
+# 88                                       
+# 88   ,d                                  
+# 88   88                                  
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,   
+# 88   88   a8P_____88 88P'   "88"    "8a  
+# 88   88   8PP""""""" 88      88      88  
+# 88   88,  "8b,   ,aa 88      88      88  
+# 88   "Y888 `"Ybbd8"' 88      88      88  
+#                                          
+#                                          
+#
+
+class Item:
+    """アイテム (配列や構造体、ポインタにも対応している)"""
+    def __init__(self, name: str, line: int, data: dict, comments: dict, vartype: dict):
+        self.name = name
+        self.line = line
+        self.index_comments = comments.get('indexes')
+        # アイテムの追加なのでitemwindowの属性の初期化は必要ない
+        ITEMWND.is_inAction = True
+        self.itemvalue: ItemValue = ItemValue.from_dict(data, comments=comments.get("values"))
+        self.vartype: dict = vartype
+
+    def get_value(self):
+        """値を返す"""
+        return self.itemvalue
+
+    def set_value(self, vals: dict):
+        """値をセット"""
+        path: list[str] = vals["path"].copy()
+        temp_itemvalue = self.itemvalue
+        while len(path) != 0:
+            temp_itemvalue = temp_itemvalue.children[path.pop(0)]
+        temp_itemvalue.value = vals["value"]
+
+    def set_comments(self, path: list[str], comments: list[str]):
+        """計算コメントをセット"""
+        temp_itemvalue = self.itemvalue
+        while len(path) != 0:
+            temp_itemvalue = temp_itemvalue.children[path.pop(0)]
+        temp_itemvalue.changed_comments = comments
+
+    def update_value(self, data: dict):
+        # 値を更新するだけなのでitemwindowの属性の初期化は必要ない
+        ITEMWND.is_inAction = True
+        self.itemvalue = ItemValue.from_dict(data)
+
+    def remove_itemvalue_comments(self):
+        self.index_comments = None
+        self.itemvalue.remove_comments()
+                                                                                  
+# 88                                   8b           d8          88                         
+# 88   ,d                              `8b         d8'          88                         
+# 88   88                               `8b       d8'           88                         
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba, `8b     d8' ,adPPYYba, 88 88       88  ,adPPYba,  
+# 88   88   a8P_____88 88P'   "88"    "8a `8b   d8'  ""     `Y8 88 88       88 a8P_____88  
+# 88   88   8PP""""""" 88      88      88  `8b d8'   ,adPPPPP88 88 88       88 8PP"""""""  
+# 88   88,  "8b,   ,aa 88      88      88   `888'    88,    ,88 88 "8a,   ,a88 "8b,   ,aa  
+# 88   "Y888 `"Ybbd8"' 88      88      88    `8'     `"8bbdP"Y8 88  `"YbbdP'Y8  `"Ybbd8"'  
+                                                                                         
+class ItemValue:
+    def __init__(self, value: str | None, comments: list[str] | None, children: dict[str | int, "ItemValue"]):
+        self.value = value
+        self.is_open = True if children else None
+        self.declared_comments = comments
+        self.changed_comments = None
+        self.children = children
+
+    @classmethod
+    def from_dict(cls, data: dict, comments: dict | list[str] | None = None) -> "ItemValue":
+        value: str | None = data["value"]
+        itemvalue_comments: list[str] = comments if isinstance(comments, list) else None
+        children_dict: dict[str | int, dict] = data["children"]
+        children = {index: cls.from_dict(v, comments=comments.get(f"\"{index}\"", None) if isinstance(comments, dict) else None) for index, v in children_dict.items()}
+        return cls(value, itemvalue_comments, children)
+    
+    def remove_comments(self):
+        self.declared_comments = None
+        self.changed_comments = None
+        for itemvalue in self.children.values():
+            itemvalue.remove_comments()
+
+#                                                                             
+# 88                                      88888888ba                          
+# 88   ,d                                 88      "8b                         
+# 88   88                                 88      ,8P                         
+# 88 MM88MMM ,adPPYba, 88,dPYba,,adPYba,  88aaaaaa8P' ,adPPYYba,  ,adPPYb,d8  
+# 88   88   a8P_____88 88P'   "88"    "8a 88""""""8b, ""     `Y8 a8"    `Y88  
+# 88   88   8PP""""""" 88      88      88 88      `8b ,adPPPPP88 8b       88  
+# 88   88,  "8b,   ,aa 88      88      88 88      a8P 88,    ,88 "8a,   ,d88  
+# 88   "Y888 `"Ybbd8"' 88      88      88 88888888P"  `"8bbdP"Y8  `"YbbdP"Y8  
+#                                                                 aa,    ,88  
+#                                                                  "Y8bbdP"   
+# 
+
+class ItemBag:
+    """アイテム袋(現在のマップによって中身を変える)"""
+    def __init__(self):
+        self.items: list[list[Item]] = [[]]
+
+    def add(self, item: Item):
+        """袋にアイテムを追加"""
+        self.items[-1].append(item)
+
+    def find(self, name: str, line: int) -> Item | None:
+        """袋からアイテムを探す"""
+        for i, n in enumerate(self.items[-1]):
+            if n.name == name and n.line == line:
+                return n
+        return None
+
+    def remove(self, name: str, line: int):
+        """袋からアイテムを取り除く"""
+        for i, n in enumerate(self.items[-1]):
+            if n.name == name and n.line == line:
+                return self.items[-1].pop(i)
+        return None
+    
+    def remove_item_comments(self):
+        for item in self.items[-1]:
+            item.remove_itemvalue_comments()
+                                                                                                                                                                                                     
+#  ad88888ba                                          88888888ba                                                   I8,        8        ,8I 88                      88                                 
+# d8"     "8b ,d                                      88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
+# Y8,         88                                      88      ,8P               88      88                          "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa, MM88MMM ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, 88    ""     `Y8 a8"    `Y88 a8P_____88 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 88    ,adPPPPP88 8b       88 8PP""""""" 88      `8b 88       88   88      88   8b       d8 88       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P 88,   88,    ,88 "8a,   ,d88 "8b,   ,aa 88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"  "Y888 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                               aa,    ,88                                                                                                                                                            
+#                                "Y8bbdP"                                                                                                                                                             
+
+class StageButtonWindow:
+    """ステージセレクトボタンウィンドウ"""
+    # code_names = ["01_int_variables", "02_scalar_operations", "03_complex_operators", "04_conditional_branch", "05_loops_and_break", "06_function_definition", "07_function_in_condition", "08_array_1d", "09_array_2d", "10_string_and_char_array", 
+    #               "11_string_operations", "12_struct", "13_modifiers", "14_recursion", "15_pointer", "16_array_pointer", "17_function_pointer", "18_stdio_input_output", "19_file_io", "20_memory_management"]
+    # code_explanations = ["スカラー変数の宣言", "スカラー変数の計算", "スカラー変数の計算(応用)", "if文とswitch文", "繰り返し文", "関数宣言と定義", "条件文の中に関数", "一次元配列", "二次元配列", "文字列と文字配列",
+    #                      "文字列の操作", "構造体", "変数の型と修飾子", "再帰関数", "ポインタ", "配列とポインタの組合せ", "関数の引数にポインタ", "標準入出力", "ファイルの入出力", "メモリ管理"]
+    # code_explanations = ["Variable Decl", "Variable Exp", "Variable Adv", "If, Switch", "Loop", "Function", "Func in Cond", "1D array", "2D array", "String",
+    #                      "Use of String", "Struct", "Var type, modifier", "Recursive func", "Pointer", "Array, Pointer", "Pointer in Func", "Std output", "file IO", "Memory"]
+    code_names = ["101_variables_expression", "102_functions_condition", "103_loops", "104_array_struct", "105_pointer"]
+    code_explanations = ["変数の宣言と計算", "条件文と関数", "繰り返し文", "配列と構造体", "ポインタ"]
+    code_explanations_en = ["Variable", "Cond, Func", "Loops", "Array, Struct", "Pointer"]
+
+    SB_WIDTH = (SBW_WIDTH - 60) // 5
+    SB_HEIGHT = SBW_HEIGHT // 2
+    FONT_SIZE = 32
+    MINI_BUTTON_FONT_SIZE = 12
+    FONT_COLOR = (255, 255, 255)
+
+    def __init__(self):
+        self.rect = pygame.Rect(0, 0, SBW_WIDTH , SBW_HEIGHT)
+        self.surface = pygame.Surface((self.rect[2], self.rect[3]))
+        self.surface.fill((185, 148, 39))
+        self.is_visible = False  # ウィンドウを表示中か？
+        self.button_stages: list[StageButton] = []
+        self.tutorial_button_rect = pygame.Rect(self.rect.width - 330, 10, 100, 30)
+        self.color_support_button_rect = pygame.Rect(self.rect.width - 220, 10, 100, 30)
+        self.checking_lldb_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
+        self.english_mode_button_rect = pygame.Rect(self.rect.width - 110, 10, 100, 30)
+        self.bg_image = load_image("data", "c_background.png", -1)
+        self.scrollX = 0
+        self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
+
+        try:
+            with open(f"{BASE_DIR}/score.json", 'r') as f:
+                self.scores_dict: dict[str, int] = json.load(f)
+        except:
+            print("error in reading a score file")
+            sys.exit(-1)
+
+        self.load_sb()
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.mini_button_font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.MINI_BUTTON_FONT_SIZE)
+        self.is_stage_selecting = True
+        self.color_support = False
+
+        self.sm_window = SoundManageWindow(pygame.Rect(SBW_WIDTH * 4/5 - 10, 50, SBW_WIDTH * 1/5, 90))
+
+    def show(self):
+        """ウィンドウを表示"""
+        self.is_visible = True
+    
+    def hide(self):
+        self.is_visible = False
+
+    def load_sb(self):
+        x = 10 - self.scrollX
+        y = SBW_HEIGHT // 4
+        self.button_stages = []
+        if ISENGLISH:
+            for i, code_name in enumerate(self.code_names):
+                self.button_stages.append(StageButton(code_name, self.code_explanations_en[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT, self.scores_dict.get(code_name, 0)))
+                x += self.SB_WIDTH + 10
+        else:
+            for i, code_name in enumerate(self.code_names):
+                self.button_stages.append(StageButton(code_name, self.code_explanations[i], i, x, y, self.SB_WIDTH, self.SB_HEIGHT, self.scores_dict.get(code_name, 0)))
+                x += self.SB_WIDTH + 10
+
+    def blit(self, screen):
+        """blit"""
+        screen.blit(self.surface, (self.rect[0], self.rect[1]))
+
+    def draw(self, screen: pygame.Surface):
+        if not self.is_visible:
+            return
+        
+        self.blit(screen)
+
+        screen.blit(self.bg_image, (0, 0))
+        self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), ("Stage Select" if ISENGLISH else "ステージ選択") if self.is_stage_selecting else ("LLDB check" if ISENGLISH else "LLDB　処理チェック"), self.FONT_COLOR)
+        for button in self.button_stages:
+            button.draw(screen)
+
+        # チュートリアルボタン
+        pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
+        tutorial_label_surf, _ = self.mini_button_font.render("Tutorial" if ISENGLISH else "チュートリアル", (0, 0, 0))
+        tutorial_label_rect = tutorial_label_surf.get_rect(center=self.tutorial_button_rect.center)
+        screen.blit(tutorial_label_surf, tutorial_label_rect)
+
+        # 色覚サポートのあり/なしボタン
+        pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
+        color_support_label_surf, _ = self.mini_button_font.render(("Color Support ON" if ISENGLISH else "色覚サポートあり") if self.color_support else ("Color Support OFF" if ISENGLISH else "色覚サポートなし"), (0, 0, 0) if self.color_support else (255, 255, 255))
+        color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
+        screen.blit(color_support_label_surf, color_support_label_rect)
+
+        # ゲームモード/デバッグモードのボタン
+        # pygame.draw.rect(screen, (0, 0, 255) if self.is_stage_selecting else (255, 0, 0), self.checking_lldb_button_rect)
+        # mode_change_label_surf, _ = self.mini_button_font.render("モード変更", (255, 255, 255))
+        # mode_change_label_rect = mode_change_label_surf.get_rect(center=self.checking_lldb_button_rect.center)
+        # screen.blit(mode_change_label_surf, mode_change_label_rect)
+
+        pygame.draw.rect(screen, (0, 0, 255) if ISENGLISH else (255, 0, 0), self.english_mode_button_rect)
+        english_mode_label_surf, _ = self.mini_button_font.render("English" if ISENGLISH else "Japanese", (255, 255, 255))
+        english_mode_label_rect = english_mode_label_surf.get_rect(center=self.english_mode_button_rect.center)
+        screen.blit(english_mode_label_surf, english_mode_label_rect)
+
+        self.sm_window.draw(screen)
+
+    def is_clicked(self, pos):
+        # ステージの内容と説明を両方code_namesリストに格納したいので、ステージボタンはインデックスで取得する
+        for i, button in enumerate(self.button_stages):
+            if button.rect.collidepoint(pos):
+                return i
+        if self.tutorial_button_rect.collidepoint(pos):
+            return "tutorial"
+        if self.color_support_button_rect.collidepoint(pos):
+            return "color_support"
+        # if self.checking_lldb_button_rect.collidepoint(pos):
+        #     return "check_lldb"
+        if self.english_mode_button_rect.collidepoint(pos):
+            return "switch_language"
+        
+        return self.sm_window.touchKnob(pos)
+    
+    def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
+        start = time.time()
+        last_error = None
+        while time.time() - start < wait_timeout:
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(timeout)
+                self.sock.connect((host, port))
+                print("[Client] 接続成功")
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                last_error = e
+                time.sleep(0.1)
+        else:
+            print(f"[Client] 接続失敗: {last_error}")
+            raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
+
+    def step_into(self):
+        self.sock.sendall(json.dumps({'step_into': True}).encode() + b'\n')  # 改行区切りで複数送信可能
+        return self.receive_json()
+
+    def receive_json(self):
+        buffer = ""
+        try:
+            while True:
+                data = self.sock.recv(1024)
+                if not data:
+                    break  # 接続が閉じられた
+                buffer += data.decode()
+                try:
+                    msg = json.loads(buffer)
+                    return msg["finished"]
+                except json.JSONDecodeError:
+                    continue  # JSONがまだ完全でないので続けて待つ
+        except socket.timeout:
+            print("ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+        except Exception as e:
+            print(f"受信エラー: {e}")
+        return False
+            
+    def close(self):
+        self.sock.close()
+        self.is_stage_selecting = True
+
+                                                                                                                     
+#  ad88888ba                                          88888888ba                                                      
+# d8"     "8b ,d                                      88      "8b               ,d      ,d                            
+# Y8,         88                                      88      ,8P               88      88                            
+# `Y8aaaaa, MM88MMM ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,   
+#   `"""""8b, 88    ""     `Y8 a8"    `Y88 a8P_____88 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a  
+#         `8b 88    ,adPPPPP88 8b       88 8PP""""""" 88      `8b 88       88   88      88   8b       d8 88       88  
+# Y8a     a8P 88,   88,    ,88 "8a,   ,d88 "8b,   ,aa 88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88  
+#  "Y88888P"  "Y888 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88  
+#                               aa,    ,88                                                                            
+#                                "Y8bbdP"                                                                             
+
+class StageButton:
+    """ボタン"""
+    BG_COLOR = (0, 255, 255)
+    STAGE_NAME_COLOR = (0, 0, 0)
+    STAGE_EXPLANTION_COLOR = (0, 31, 63)
+    STAR_COLOR = (254, 230, 0)
+
+    def __init__(self, code_name: str, code_explanation: str, stage_num: int, pos_x: int, pos_y: int, button_w: int, button_h: int, score: int):
+        self.rect = pygame.Rect(pos_x, pos_y, button_w, button_h)
+        self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
+        self.code_name: str = code_name
+        self.code_explanation: str = code_explanation
+        self.stage_num = stage_num + 1
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), 24)
+        self.star_image = pygame.image.load("star.png").convert_alpha()
+        self.score = score
+    
+    def draw(self, surface: pygame.Surface):
+        pygame.draw.rect(self.surface, self.BG_COLOR, self.surface.get_rect(), border_radius=12)
+        text_surf, _ = self.font.render(f"Stage {self.stage_num}" if ISENGLISH else f"ステージ　{self.stage_num}", self.STAGE_NAME_COLOR)
+        text_rect = text_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2))
+        self.surface.blit(text_surf, text_rect)
+
+        self.font.size = 12
+        explanation_surf, _ = self.font.render(self.code_explanation, self.STAGE_EXPLANTION_COLOR)
+        explanation_rect = explanation_surf.get_rect(center=(self.rect.width // 2, self.rect.height // 2 + 30))
+        self.surface.blit(explanation_surf, explanation_rect)
+        self.font.size = 24
+
+        self.surface.blit(self.star_image, self.star_image.get_rect(center=(self.rect.width // 4, self.rect.height * 3 // 4)))
+        score_surf, _ = self.font.render(f"× {self.score}/5", self.STAR_COLOR if self.score == 5 else self.STAGE_EXPLANTION_COLOR)
+        score_rect = score_surf.get_rect(center=(self.rect.width * 2 // 3, self.rect.height * 3 // 4))
+        self.surface.blit(score_surf, score_rect)
+
+        surface.blit(self.surface, self.rect)
+                                                                                                                                                    
+#        db                                                             88888888ba                                                   I8,        8        ,8I 88                      88                                 
+#       d88b                                                            88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
+#      d8'`8b                                                           88      ,8P               88      88                          "8,     ,8"8,     ,8"                          88                                 
+#     d8'  `8b     8b,dPPYba, 8b,dPPYba,  ,adPPYba,  8b      db      d8 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#    d8YaaaaY8b    88P'   "Y8 88P'   "Y8 a8"     "8a `8b    d88b    d8' 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#   d8""""""""8b   88         88         8b       d8  `8b  d8'`8b  d8'  88      `8b 88       88   88      88   8b       d8 88       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  d8'        `8b  88         88         "8a,   ,a8"   `8bd8'  `8bd8'   88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# d8'          `8b 88         88          `"YbbdP"'      YP      YP     88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                                                                                                                                                                                      
+class ArrowButtonWindow:
+    """矢印ボタンウィンドウ"""
+    def __init__(self):
+        self.rect = pygame.Rect(10, SCR_HEIGHT - BUTTON_WIDTH * 2 - 10, BUTTON_WIDTH, BUTTON_WIDTH)
+        self.surface = pygame.Surface((self.rect[2], self.rect[3]), pygame.SRCALPHA)
+        self.is_visible = False
+        self.button_list = [
+            Button("arrow.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + BUTTON_WIDTH, 0, "right"),
+            Button("arrow.png", self.rect[0] + 0, self.rect[1] + BUTTON_WIDTH, 180, "left"),
+            Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + 0, 90, "up"),
+            Button("arrow.png", self.rect[0] + BUTTON_WIDTH, self.rect[1] + BUTTON_WIDTH, -90, "down"),
+            Button("pause.png", self.rect[0] + 0, self.rect[1] + 0, 0, "pause"),
+            Button("forward.png", self.rect[0] + BUTTON_WIDTH*2, self.rect[1] + 0, 0, "action"),
+            Button("foot.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1], 0, "foot"),
+            Button("command.png", self.rect[0] + BUTTON_WIDTH*3, self.rect[1] + BUTTON_WIDTH, 0, "command"),
+        ]
+
+    def blit(self, screen: pygame.Surface):
+        """blit"""
+        screen.blit(self.surface, (self.rect[0], self.rect[1]))
+    
+    def show(self):
+        """ウィンドウを表示"""
+        self.is_visible = True
+    
+    def hide(self):
+        self.is_visible = False
+
+    def draw(self, screen: pygame.Surface):
+        for button in self.button_list:
+            button.draw(screen)
+        self.blit(screen)
+    
+    def is_clicked(self,pos):
+        for button in self.button_list:
+            if (button_name := button.get_clicked_button_name(pos)) is not None:
+                return button_name
+        return None
+                                                 
+# 88888888ba                                                      
+# 88      "8b               ,d      ,d                            
+# 88      ,8P               88      88                            
+# 88aaaaaa8P' 88       88 MM88MMM MM88MMM ,adPPYba,  8b,dPPYba,   
+# 88""""""8b, 88       88   88      88   a8"     "8a 88P'   `"8a  
+# 88      `8b 88       88   88      88   8b       d8 88       88  
+# 88      a8P "8a,   ,a88   88,     88,  "8a,   ,a8" 88       88  
+# 88888888P"   `"YbbdP'Y8   "Y888   "Y888 `"YbbdP"'  88       88  
+                                                                
+class Button:
+    """ボタン"""
+    def __init__(self, file_plase: str, pos_x: int, pos_y: int, angle: float, name: str):
+        self.button_image = pygame.image.load(resource_path(file_plase)).convert_alpha()
+        self.button_image = pygame.transform.scale(self.button_image, (BUTTON_WIDTH, BUTTON_WIDTH))
+        self.button_image = pygame.transform.rotate(self.button_image, angle)
+        self.rect = pygame.Rect(pos_x, pos_y, BUTTON_WIDTH, BUTTON_WIDTH)
+        self.name = name
+    
+    def draw(self, surface: pygame.Surface):
+        surface.blit(self.button_image, self.rect)
+
+    def get_clicked_button_name(self, pos: tuple[int, int]):
+        return self.name if self.rect.collidepoint(pos) else None
+                                                                                                                                                                   
+#   ,ad8888ba,                                                                                    88 I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                                                                                   88 `8b       d8b       d8' ""                      88                                 
+# d8'                                                                                             88  "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,  88,dPYba,,adPYba,  88,dPYba,,adPYba,  ,adPPYYba, 8b,dPPYba,   ,adPPYb,88   Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a 88P'   "88"    "8a 88P'   "88"    "8a ""     `Y8 88P'   `"8a a8"    `Y88   `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 88      88      88 88      88      88 ,adPPPPP88 88       88 8b       88    `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" 88      88      88 88      88      88 88,    ,88 88       88 "8a,   ,d88     `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'  88      88      88 88      88      88 `"8bbdP"Y8 88       88  `"8bbdP"Y8      `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+                                                                                                                                                                                                                                                                                                                                                                    
+class CommandWindow(Window):
+    """コマンドボックス"""
+    FONT_HEIGHT = 28
+    WHITE = Color(255, 255, 255, 255)
+    MAX_LEN = 20
+
+    def __init__(self, rect):
+        Window.__init__(self, rect)
+        self.myfont = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_HEIGHT)
+        self.color = self.WHITE
+        self.txt = ""
+        self.key_char_map = {
+            K_PERIOD: (".", ">"),
+            K_COMMA: (",", "<"),
+            K_MINUS: ("-", "_"),
+            K_EQUALS: ("=",  "+"),
+            K_1: ("1", "!"),
+            K_2: ("2", "@"),
+            K_3: ("3", "#"),
+            K_4: ("4", "$"),
+            K_5: ("5", "%"),
+            K_6: ("6", "^"),
+            K_7: ("7", "&"),
+            K_8: ("8", "*"),
+            K_9: ("9", "("),
+            K_0: ("0", ")"),
+        }
+
+    def read(self,screen,font):
+        self.txt = ""
+        is_end = False
+        while not is_end:
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    sys.exit()
+                elif event.type != KEYDOWN:
+                    continue
+
+                if event.key == K_RETURN:
+                    is_end = True
+                elif event.key == K_ESCAPE:
+                    self.txt = ""
+                    is_end = True
+                    SMANAGER.play_se("command_close")
+                elif event.key in (K_LEFT, K_BACKSPACE):
+                    self.txt = self.txt[:-1]
+                elif event.key == K_SPACE and len(self.txt) < self.MAX_LEN:
+                    self.txt += " "
+                elif event.key == K_TAB and len(self.txt) < self.MAX_LEN - 4:
+                    self.txt += "    "
+                elif len(self.txt) < self.MAX_LEN:
+                    shift_held = bool(pygame.key.get_mods() & (KMOD_LSHIFT | KMOD_RSHIFT))
+                    capslock_on = bool(event.mod & KMOD_CAPS)
+                    is_upper = shift_held | capslock_on
+
+                    # 数字・記号キーの入力処理
+                    if event.key in self.key_char_map:
+                        self.txt += self.key_char_map[event.key][is_upper]
+                    # アルファベットキー（大文字・小文字対応）
+                    elif K_a <= event.key <= K_z:
+                        char = chr(event.key)
+                        self.txt += char.upper() if is_upper else char
+
+            txtg = font.render(self.txt, True, (255,255,255))
+            self.blit(screen)
+            screen.blit(txtg, [5, SCR_HEIGHT-TXTBOX_HEIGHT+txtg.get_height() // 2])
+            pygame.display.update()  # 描画反映
+        return self.txt
+
+    def draw(self, screen, font):
+        Window.draw(self)
+        Window.blit(self, screen)
+        SMANAGER.play_se("command_open")
+        result = self.read(screen, font)
+        return result
+                                                                                                                                                                                                                                   
+#   ,ad8888ba,                                                        88 88                         ,ad8888ba,              88          88          I8,        8        ,8I 88                      88                                 
+#  d8"'    `"8b                          ,d                           88 88                        d8"'    `"8b             ""          88          `8b       d8b       d8' ""                      88                                 
+# d8'                                    88                           88 88                       d8'                                   88           "8,     ,8"8,     ,8"                          88                                 
+# 88             ,adPPYba,  8b,dPPYba, MM88MMM 8b,dPPYba,  ,adPPYba,  88 88  ,adPPYba, 8b,dPPYba, 88            88       88 88  ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88            a8"     "8a 88P'   `"8a  88    88P'   "Y8 a8"     "8a 88 88 a8P_____88 88P'   "Y8 88      88888 88       88 88 a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# Y8,           8b       d8 88       88  88    88         8b       d8 88 88 8PP""""""" 88         Y8,        88 88       88 88 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+#  Y8a.    .a8P "8a,   ,a8" 88       88  88,   88         "8a,   ,a8" 88 88 "8b,   ,aa 88          Y8a.    .a88 "8a,   ,a88 88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#   `"Y8888Y"'   `"YbbdP"'  88       88  "Y888 88          `"YbbdP"'  88 88  `"Ybbd8"' 88           `"Y88888P"   `"YbbdP'Y8 88  `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+
+class ControllerGuideWindow(ScrollableWindow):
+    FONT_SIZE = 12
+
+    def __init__(self, rect, mmapwnd: "MiniMapWindow", cmndwnd: "CommandWindow"):
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.mmapwnd = mmapwnd
+        self.cmndwnd = cmndwnd
+
+    def draw(self, screen: pygame.Surface, isSelectMsgText: bool):
+        if not self.is_visible:
+            return
+        
+        ScrollableWindow.draw(self)
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        if self.cmndwnd.is_visible:
+            self.draw_string(x, y, "escape:")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "close the Command Window" if ISENGLISH else "コマンドウィンドウを閉じる")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "space: execute command" if ISENGLISH else "space: コマンドを実行")
+            y += (self.FONT_SIZE + 4) * 2
+            self.draw_string(x, y, "input command:" if ISENGLISH else "入力コマンド:", Color(255, 0, 0, 255))
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "rollback: back to past" if ISENGLISH else "rollback: 過去に戻る")
+            y += self.FONT_SIZE + 4
+            # self.draw_string(x, y, "stdio A B...:")
+            # y += self.FONT_SIZE
+            # self.draw_string(x, y, "input A B..." if ISENGLISH else "A B...を標準入力")
+            # y += self.FONT_SIZE + 4
+        elif isSelectMsgText:
+            self.draw_string(x, y, "←/→: select" if ISENGLISH else "←/→: 選択")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "space: decide" if ISENGLISH else "space: 決定")
+            if PLAYER.sender.programCodeWindow.rollback_index is not None:
+                y += self.FONT_SIZE + 4
+                self.draw_string(x, y, "↑/↓: choose line" if ISENGLISH else "↑/↓: 行を選ぶ")
+            y += self.FONT_SIZE + 4
+        else:
+            self.draw_string(x, y, "cmd+q: quit game" if ISENGLISH else "cmd+q: ゲームを止める")
+            y += self.FONT_SIZE + 4
+            if PLAYER.isFootActionValid:
+                self.draw_string(x, y, "f: action on foot" if ISENGLISH else "f: 足元へのアクション")
+                y += self.FONT_SIZE + 4
+            if PLAYER.isFowardActionValid:
+                self.draw_string(x, y, "space: action to forward" if ISENGLISH else "space: 前方へのアクション")
+                y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "move with shift: dash" if ISENGLISH else "shift押下中に移動: ダッシュ")
+            y += self.FONT_SIZE + 4
+            self.draw_string(x, y, "cursor:" if ISENGLISH else "カーソル:")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "click on button" if ISENGLISH else "クリックでボタンを押す")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "or" if ISENGLISH else "または")
+            y += self.FONT_SIZE
+            self.draw_string(x, y, "scroll in a window" if ISENGLISH else "ウィンドウ内をスクロール")
+            y += (self.FONT_SIZE + 4) * 2
+            self.draw_string(x, y, "c: open the command window" if ISENGLISH else "c: コマンドウィンドウを開く")
+            y += self.FONT_SIZE + 4
+        
+        self.draw_base("INSTRUCTION" if ISENGLISH else "操作")
+        ScrollableWindow.blit(self, screen)
+
+    def is_cursor_in_window(self, pos : tuple[int, int]):
+        return self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.rect.height
+                                                                                                               
+# 88                               I8,        8        ,8I 88                      88                                 
+# 88                               `8b       d8b       d8' ""                      88                                 
+# 88                                "8,     ,8"8,     ,8"                          88                                 
+# 88          ,adPPYba,   ,adPPYb,d8 Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88         a8"     "8a a8"    `Y88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88         8b       d8 8b       88  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88         "8a,   ,a8" "8a,   ,d88   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88888888888 `"YbbdP"'   `"YbbdP"Y8    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                         aa,    ,88                                                                                  
+#                          "Y8bbdP"                                                                                   
+
+class LogWindow(ScrollableWindow):
+    FONT_SIZE = 12
+    TEXT_COLOR = Color(255, 255, 255, 255)
+    MISSION_LABEL_COLOR = Color(255, 0, 0, 255)
+    MISSION_COLOR = Color(100, 248, 248, 255)
+
+    def __init__(self, rect: pygame.Rect):
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
+
+    def draw(self, screen, isTutorial):
+        if not self.is_visible:
+            return
+        
+        Window.draw(self)
+
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        if isTutorial and PLAYER.sender.programCodeWindow.linenum in PLAYER.help_dict:
+            self.draw_string(x, y, "MISSION" if ISENGLISH else "ミッション", self.MISSION_LABEL_COLOR)
+            y += self.FONT_SIZE + 4
+
+            if ISENGLISH:
+                for help_message_part in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][1]:
+                    self.draw_string(x, y, help_message_part, self.MISSION_COLOR)
+                    y += self.FONT_SIZE + 4
+            else:
+                for help_message_part in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][1]:
+                    self.draw_string(x, y, help_message_part, self.MISSION_COLOR)
+                    y += self.FONT_SIZE + 4
+
+            y += self.FONT_SIZE + 4
+
+        for log_list in PLAYER.log_lists:
+            for log in log_list:
+                self.draw_string(x, y, log)
+                y += self.FONT_SIZE + 4
+            y += self.FONT_SIZE + 4
+
+        self.draw_base("LOG" if ISENGLISH else "ログ")
+        ScrollableWindow.blit(self, screen)
+
+    def is_cursor_in_window(self, pos : tuple[int, int]):
+        return self.x <= pos[0] <= self.x + self.rect.width and self.y + self.offset_y <= pos[1] <= self.y + self.rect.height
+    
+# 88b           d88 88             88 88b           d88                      I8,        8        ,8I 88                      88                                 
+# 888b         d888 ""             "" 888b         d888                      `8b       d8b       d8' ""                      88                                 
+# 88`8b       d8'88                   88`8b       d8'88                       "8,     ,8"8,     ,8"                          88                                 
+# 88 `8b     d8' 88 88 8b,dPPYba,  88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88  `8b   d8'  88 88 88P'   `"8a 88 88  `8b   d8'  88 ""     `Y8 88P'    "8a `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88   `8b d8'   88 88 88       88 88 88   `8b d8'   88 ,adPPPPP88 88       d8  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88    `888'    88 88 88       88 88 88    `888'    88 88,    ,88 88b,   ,a8"   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88     `8'     88 88 88       88 88 88     `8'     88 `"8bbdP"Y8 88`YbbdP"'     `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                  88                                                                                           
+#                                                                  88                                                                                           
+
+class MiniMapWindow(Window, Map):
+    """"ミニマップウィンドウ"""
+    # tile_num = 60
+    RED = (255, 0, 0)
+    BLUE = (0, 0, 255)
+    BLACK = (0, 0, 0)
+    GREEN = (0, 255, 0)
+    YELLOW = (255, 255, 0)
+    FONT_SIZE = 12
+
+    def __init__(self, rect, name):
+        Window.__init__(self, rect)
+        Map.__init__(self, name)
+        self.tile_num = max(self.row, self.col) if self.row <= 60 and self.col <= 60 else 60
+        self.tile_size = MIN_MAP_SIZE / self.tile_num
+        self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.x)
+        self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.y)
+        self.radius = MIN_MAP_SIZE // (self.tile_num+1)
+        self.is_auto_scroll = True
+        # 日本語対応フォントの指定
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.auto_scroll_button_rect = pygame.Rect(self.x + self.rect[2] - 110, self.y + self.rect[3] - 40, 100, 30)
+        self.hide()
+
+    def draw(self, screen, map : Map):
+        if not self.is_visible:
+            return
+        
+        Window.draw(self, False)
+        Window.blit(self, screen)
+
+        if self.is_auto_scroll:
+            self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 3 * 2, self.x)
+            self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 3 * 2, self.y)
+            # self.offset_x = min(self.x - PLAYER.x * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.x)
+            # self.offset_y = min(self.y - PLAYER.y * MIN_MAP_SIZE // self.tile_num + MIN_MAP_SIZE // 2, self.y)
+
+        for y in range(0, self.row):
+            if int(y * self.tile_size + self.offset_y) < self.y:
+                continue
+            elif int(y * self.tile_size + self.offset_y) > self.y + self.rect[3]:
+                break      
+            for x in range(0, self.col):
+                if int(x * self.tile_size + self.offset_x) < self.x:
+                    continue
+                elif int(x * self.tile_size + self.offset_x) > self.x + self.rect[2]:
+                    break
+                tile = self.map[y][x]
+                if tile not in [390, 43, 402, 31]:
+                    continue
+                scaled_size = int(self.tile_size) + 1  # 1px拡大
+                image = pygame.transform.smoothscale(self.images[426], (scaled_size, scaled_size))
+                image.set_alpha(128)
+                screen.blit(image, (int(x * self.tile_size + self.offset_x), int(y * self.tile_size + self.offset_y)))
+
+        # Treasureの場所を表示　青丸
+        for event in map.events:
+            if isinstance(event, Treasure):
+                tx = event.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num // 2
+                ty = event.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
+
+                if ty < self.y or ty > self.y + self.rect[3]:
+                    continue
+                if tx < self.x or tx > self.x + self.rect[2]:
+                    continue
+                pygame.draw.circle(screen, self.BLUE, (tx, ty), self.radius)
+            elif isinstance(event, MoveEvent):
+                mx = event.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num  // 2
+                my = event.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num  // 2
+
+                if my < self.y or my > self.y + self.rect[3]:
+                    continue
+                if mx < self.x or mx > self.x + self.rect[2]:
+                    continue
+                pygame.draw.circle(screen, self.GREEN, (mx, my), self.radius)
+
+        for chara in map.charas:
+            cx = chara.x * MIN_MAP_SIZE // self.tile_num + self.offset_x + MIN_MAP_SIZE // self.tile_num // 2
+            cy = chara.y * MIN_MAP_SIZE // self.tile_num + self.offset_y + MIN_MAP_SIZE // self.tile_num // 2
+            if not (self.y <= cy <= self.y + self.rect[3] and self.x <= cx <= self.x + self.rect[2]):
+                continue
+
+            # Playerの場所を表示　赤丸
+            if isinstance(chara, Player):
+                pygame.draw.circle(screen, self.RED, (cx, cy), self.radius)
+            # Player以外のCharacterの場所を表示　黒丸
+            else:
+                pygame.draw.circle(screen, self.YELLOW if chara.name == "15161" else self.BLACK, (cx, cy), self.radius)
+
+        if self.is_auto_scroll:
+            return
+        
+        pygame.draw.rect(screen, (100, 100, 100), self.auto_scroll_button_rect)  # グレーのボタン
+        label_surf, _ = self.font.render("auto scroll" if ISENGLISH else "自動スクロール", (255, 255, 255))
+        label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
+        screen.blit(label_surf, label_rect)
+                
+    def is_cursor_in_window(self, pos: tuple[int, int]):
+        # アイテムウィンドウの拡大
+        local_pos = (pos[0] - self.x, pos[1] - self.y)
+        
+        if 0 <= local_pos[0] <= self.rect[2] and 0 <= local_pos[1] <= self.rect[3]:
+            self.is_auto_scroll = False
+            return True
+        
+        return False
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+# 88888888ba                                                                                ,ad8888ba,                       88          I8,        8        ,8I 88                      88                                 
+# 88      "8b                                                                              d8"'    `"8b                      88          `8b       d8b       d8' ""                      88                                 
+# 88      ,8P                                                                             d8'                                88           "8,     ,8"8,     ,8"                          88                                 
+# 88aaaaaa8P' 8b,dPPYba,  ,adPPYba,   ,adPPYb,d8 8b,dPPYba, ,adPPYYba, 88,dPYba,,adPYba,  88             ,adPPYba,   ,adPPYb,88  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+# 88""""""'   88P'   "Y8 a8"     "8a a8"    `Y88 88P'   "Y8 ""     `Y8 88P'   "88"    "8a 88            a8"     "8a a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+# 88          88         8b       d8 8b       88 88         ,adPPPPP88 88      88      88 Y8,           8b       d8 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# 88          88         "8a,   ,a8" "8a,   ,d88 88         88,    ,88 88      88      88  Y8a.    .a8P "8a,   ,a8" "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+# 88          88          `"YbbdP"'   `"YbbdP"Y8 88         `"8bbdP"Y8 88      88      88   `"Y8888Y"'   `"YbbdP"'   `"8bbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                     aa,    ,88                                                                                                                                                                            
+#                                      "Y8bbdP"                                                                                                                                                                             
+
+class ProgramCodeWindow(ScrollableWindow):
+    """プログラムコードウィンドウ"""
+    FONT_SIZE = 12
+    HIGHLIGHT_COLOR = (0, 0, 255)
+    ROLLBACK_COLOR = Color(100, 248, 248, 255)
+    TEXT_COLOR = (255, 255, 255, 255)
+    CYAN = Color(100, 248, 248, 255)
+
+    def __init__(self, rect, name):
+        ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
+        
+        self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", name.lower(), name.lower() + ".c")
+        self.lines = self.load_code_lines()
+        self.maxY = len(self.lines) * (self.font_size + 4) + self.TITLE_FONT_SIZE + 4
+        self.linenum: int = 1
+        self.is_auto_scroll = True
+        self.history: list[tuple] = []
+        self.history_index_not_allowed_chosen_list = []
+        self.rollback_index: int | None = None
+        self.auto_scroll_button_rect = pygame.Rect(self.rect.width - 110, self.rect.height - 40, 100, 30)
+
+    def load_code_lines(self):
+        """Cファイルからコードを読み込む"""
+        if not os.path.exists(self.c_file_path):
+            return ["// File not found"]
+        with open(self.c_file_path, 'r', encoding="utf-8") as f:
+            return f.readlines()
+
+    def update_code_line(self, linenum: int):
+        self.linenum = linenum
+        # 行数が更新されたら、scrollYを更新する
+        if self.is_auto_scroll:
+            self.update_displayed_area(self.linenum)
+        
+    def draw(self, screen):
+        if not self.is_visible:
+            return
+        
+        ScrollableWindow.draw(self)
+        x = 0
+        y = self.TITLE_FONT_SIZE + 4
+
+        # コード表示の左端の行数の桁揃えのために、最終行の桁数を取得する
+        # 最終行が120の場合、一度'120'に変換して、その文字数をカウントすることで桁数である3を取得できる
+        digit_line = len(str(len(self.lines)))
+
+        for i, line in enumerate(self.lines):
+            if self.offset_y + y < 34:
+                y += self.FONT_SIZE + 4
+                continue
+            if self.offset_y + y > self.rect.height:
+                break
+
+            text = f"{str(i+1):>{digit_line}}  {line.rstrip()}"
+            if (i + 1) == self.linenum:
+                bg_rect = pygame.Rect(
+                    5,
+                    self.offset_y + y,
+                    self.rect.width - 10,
+                    self.FONT_SIZE + 4
+                )
+                pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
+            if self.rollback_index is not None and (i + 1) == self.history[self.rollback_index][1]:
+                bg_rect = pygame.Rect(
+                    5,
+                    self.offset_y + y,
+                    self.rect.width - 10,
+                    self.FONT_SIZE + 4
+                )
+                pygame.draw.rect(self.surface, self.ROLLBACK_COLOR, bg_rect)
+            
+            self.draw_string(x, y, text, self.TEXT_COLOR)
+            y += self.FONT_SIZE + 4
+
+        if not self.is_auto_scroll:
+            pygame.draw.rect(self.surface, (100, 100, 100), self.auto_scroll_button_rect)  # グレーのボタン
+            label_surf, _ = self.font.render("自動スクロール", (255, 255, 255))
+            label_rect = label_surf.get_rect(center=self.auto_scroll_button_rect.center)
+            self.surface.blit(label_surf, label_rect)
+        
+        self.draw_base("CODE" if ISENGLISH else "ソースコード", maxHeight=self.maxY)
+
+        ScrollableWindow.blit(self, screen)
+    
+    def is_cursor_in_window(self, pos : tuple[int, int]):
+        if self.x <= pos[0] <= self.x + self.rect.width and self.y <= pos[1] <= self.y + self.height:
+            self.is_auto_scroll = False
+            return True
+        else:
+            return False
+        
+    def set_rollback_mode(self):
+        self.rollback_index = len(self.history) - 1
+        while self.rollback_index in self.history_index_not_allowed_chosen_list:
+            self.rollback_index -= 1
+        self.is_auto_scroll = True
+
+        self.update_displayed_area(self.history[self.rollback_index][1])
+
+    def selectRollBackLine(self, dir: int):
+        if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
+            return
+
+        if dir == -1:
+            self.rollback_index -= 1
+            while self.rollback_index in self.history_index_not_allowed_chosen_list:
+                self.rollback_index -= 1
+        else:
+            crnt_rollback_index = self.rollback_index
+            self.rollback_index += 1
+            while self.rollback_index in self.history_index_not_allowed_chosen_list:
+                self.rollback_index += 1
+            if self.rollback_index >= len(self.history):
+                self.rollback_index = crnt_rollback_index
+        
+        SMANAGER.play_se("rollback_cursor")
+
+        if self.is_auto_scroll:
+            self.update_displayed_area(self.history[self.rollback_index][1])
+
+    # 自動更新の場合のコードの表示領域の調整
+    def update_displayed_area(self, linenum: int):
+        # もし、現在ロールバックしようとしている行数が13未満の場合、offset_yを10にして、ソースコードの表示を第1行から開始する
+        if linenum <= 13:
+            self.offset_y = 10
+        # もし、現在ロールバックしようとしている行数が後から12行以内の場合、ウィンドウの下端にプログラムの最終行が表示されるようにoffset_yを調整する
+        elif len(self.lines) - linenum < 12:
+            self.offset_y = 10 - (len(self.lines) - 25) * (self.font_size + 4)
+        # それ以外なら、現在ロールバックしようとしている行がウィンドウの真ん中に来るように調整する
+        else:
+            self.offset_y = 10 - (linenum - 12) * (self.font_size + 4)
+        self.offset_x = 10
+
+# 88888888888                                        ad88888ba                                  88                        
+# 88                                          ,d    d8"     "8b                                 88                        
+# 88                                          88    Y8,                                         88                        
+# 88aaaaa 8b       d8  ,adPPYba, 8b,dPPYba, MM88MMM `Y8aaaaa,    ,adPPYba, 8b,dPPYba,   ,adPPYb,88  ,adPPYba, 8b,dPPYba,  
+# 88""""" `8b     d8' a8P_____88 88P'   `"8a  88      `"""""8b, a8P_____88 88P'   `"8a a8"    `Y88 a8P_____88 88P'   "Y8  
+# 88       `8b   d8'  8PP""""""" 88       88  88            `8b 8PP""""""" 88       88 8b       88 8PP""""""" 88          
+# 88        `8b,d8'   "8b,   ,aa 88       88  88,   Y8a     a8P "8b,   ,aa 88       88 "8a,   ,d88 "8b,   ,aa 88          
+# 88888888888 "8"      `"Ybbd8"' 88       88  "Y888  "Y88888P"   `"Ybbd8"' 88       88  `"8bbdP"Y8  `"Ybbd8"' 88          
+
+class EventSender:
+    def __init__(self, programCodeWindow: ProgramCodeWindow, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
+        self.programCodeWindow = programCodeWindow
+        start = time.time()
+        last_error = None
+        while time.time() - start < wait_timeout:
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(timeout)
+                self.sock.connect((host, port))
+                print("[Client] connection succeeded" if ISENGLISH else "[Client]　接続成功")
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                last_error = e
+                time.sleep(0.1)
+        else:
+            print(f"[Client] 接続失敗: {last_error}")
+            raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
+
+    def send_event(self, event: dict):
+        self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
+
+    def receive_json(self):
+        while True:
+            try:
+                buffer = ""
+                while True:
+                    data = self.sock.recv(1024)
+                    if not data:
+                        raise ConnectionError("Connection closed by remote host.")
+                    buffer += data.decode()
+                    try:
+                        msg: SendEvent = json.loads(buffer)
+                        break  # 成功したら抜ける
+                    except json.JSONDecodeError:
+                        continue  # JSONがまだ途中なら続けて読む
+
+                if msg["status"] == "ng" and PLAYER.status["HP"] > 0:
+                    PLAYER.damage()
+                    # SMANAGER.play_se("incorrect_action")
+                    # PLAYER.status["HP"] -= 10
+                    # PLAYER.damage = "-10"
+                    # PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
+                    if "message" in msg:
+                        msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
+                    # if PLAYER.status["HP"] == 30:
+                    #     SMANAGER.play_se_loop("hp_warning")
+                    # elif PLAYER.status["HP"] == 0:
+                    #     SMANAGER.stop_se("hp_warning")
+                    return msg
+                
+                if msg["status"] == "rollback":
+                    self.programCodeWindow.set_rollback_mode()
+                    MSGWND.set("Will you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
+                    return msg
+                
+                if msg["status"] == "rollback_fail":
+                    return msg
+                
+                if msg["status"] == "ok" and not "first_func" in msg:
+                    gvar_dict = {}
+                    for gvar in PLAYER.commonItembag.items[-1]:
+                        gvar_dict[(gvar.name, gvar.line)] = gvar.vartype
+                    
+                    var_list = []
+                    for item_list in PLAYER.itembag.items:
+                        var_dict = {}
+                        for var in item_list:
+                            var_dict[(var.name, var.line)] = var.vartype
+                        var_list.append(var_dict)
+
+                    self.programCodeWindow.history.append(
+                        (
+                            msg["message"], 
+                            self.programCodeWindow.linenum, 
+                            {
+                                "x": PLAYER.x, 
+                                "y": PLAYER.y, 
+                                "door": PLAYER.door, 
+                                "ccchara": PLAYER.ccchara, 
+                                "checked_funcs": PLAYER.checked_funcs.copy(), 
+                                "func": PLAYER.func, 
+                                "gvars": gvar_dict, 
+                                "vars": var_list, 
+                                "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, 
+                                "logLists": PLAYER.log_lists.copy()
+                            }
+                        )
+                    )
+                    
+                    if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
+                        self.programCodeWindow.history_index_not_allowed_chosen_list.append(len(self.programCodeWindow.history))
+                    PLAYER.isLoopStatementInBefore = False
+
+                if "line" in msg:
+                    self.programCodeWindow.update_code_line(msg["line"])
+
+                if "removed" in msg:
+                    for item in msg["removed"]:
+                        PLAYER.itembag.remove(item["name"], item["line"])
+
+                if "vars_w_value_changed" in msg:
+                    PLAYER.remove_itemvalue()
+                    for itemvalues in msg["vars_w_value_changed"]:
+                        if (item := PLAYER.find_item_belong_to_player(itemvalues["item"]["name"], itemvalues["item"]["line"])) is not None:
+                            item.set_value(itemvalues)
+                    print("changed: ", msg["vars_w_value_changed"])
+                # if "vars_w_value_unchanged" in msg:
+
+                #     for var_w_value_unchanged in msg["vars_w_value_unchanged"]:
+                #         varname = var_w_value_unchanged["item"]["name"]
+                #         for path_element in var_w_value_unchanged["path"]:
+                #             if path_element[0] in ('[', '*'):
+                #                 varname += path_element
+                #             else:
+                #                 varname += '.' + path_element
+
+                #     # MSGWND.vars_for_questions = 
+                #     print("unchanged: ", msg["vars_w_value_unchanged"])
+
+                if "str" in msg:
+                    for str_info in msg["str"]:
+                        if str_info['value'] is None:
+                            MSGWND.str_messages.append(f"{str_info['original']}を{str_info['destination']}に代入しました!!")
+                        else:
+                            MSGWND.str_messages.append(f"{str_info['original']}({str_info['value'][1:-1]})を{str_info['destination']}に代入しました!!")
+                
+                if "std" in msg and len(msg["std"]) > len(PLAYER.std_messages):
+                    MSGWND.new_std_messages = msg["std"][len(PLAYER.std_messages):]
+                    PLAYER.std_messages = msg["std"]
+
+                if "files" in msg:
+                    for file_info in msg["files"]:
+                        if file_info["type"] == "fopen":
+                            PLAYER.address_to_fname[file_info["address"]] = file_info["filename"]
+                            MSGWND.file_message = f"{file_info['filename'][1:-1]}　を変数　{file_info['varname']}　で開きました!!"
+                        else:
+                            MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
+                            ITEMWND.file_window.filename = None
+                            ITEMWND.file_window.is_visible = False
+                            fname = PLAYER.address_to_fname.pop(file_info["address"], "")
+                            ITEMWND.file_buttons.pop(fname, None)
+
+                if "memory" in msg:
+                    for memory_info in msg["memory"]:
+                        if memory_info["type"] == "malloc":
+                            MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory by malloc" if ISENGLISH else f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                        elif memory_info["type"] == "realloc":
+                            MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory used {memory_info['source_address']} memory by realloc" if ISENGLISH else f"reallocにより、{memory_info['source_address']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                        else:
+                            MSGWND.memory_message = f"liberate {memory_info['address']} memory" if ISENGLISH else f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
+                            # PLAYER.address_to_size.pop(memory_info["address"], None)
+                
+                if "type" in msg:
+                    PLAYER.isLoopStatementInBefore = True
+
+                if ITEMWND:
+                    ITEMWND.file_window.read_filelines()
+
+                return msg
+            except json.JSONDecodeError:
+                continue  # JSONがまだ完全でないので続けて待つ
+            except socket.timeout:
+                if self.programCodeWindow.rollback_index is None:
+                    raise TimeoutError("timeout in socket connection. endless loop or length of exection may result in this problem." if ISENGLISH else "ソケットの受信がタイムアウトしました。プログラム内の無限ループ、または処理の長さが問題だと考えられます。")
+            except Exception as e:
+                print(f"受信エラー: {e}")
+                raise
+        
+    def close(self):
+        self.sock.close()
+                                                                                                                                                 
+#  ad88888ba                                               88 88b           d88                                                                      
+# d8"     "8b                                              88 888b         d888                                                                      
+# Y8,                                                      88 88`8b       d8'88                                                                      
+# `Y8aaaaa,    ,adPPYba,  88       88 8b,dPPYba,   ,adPPYb,88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba, 8b,dPPYba,  
+#   `"""""8b, a8"     "8a 88       88 88P'   `"8a a8"    `Y88 88  `8b   d8'  88 ""     `Y8 88P'   `"8a ""     `Y8 a8"    `Y88 a8P_____88 88P'   "Y8  
+#         `8b 8b       d8 88       88 88       88 8b       88 88   `8b d8'   88 ,adPPPPP88 88       88 ,adPPPPP88 8b       88 8PP""""""" 88          
+# Y8a     a8P "8a,   ,a8" "8a,   ,a88 88       88 "8a,   ,d88 88    `888'    88 88,    ,88 88       88 88,    ,88 "8a,   ,d88 "8b,   ,aa 88          
+#  "Y88888P"   `"YbbdP"'   `"YbbdP'Y8 88       88  `"8bbdP"Y8 88     `8'     88 `"8bbdP"Y8 88       88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"' 88          
+#                                                                                                                  aa,    ,88                        
+#                                                                                                                   "Y8bbdP"                         
+
+class SoundManager:
+    def __init__(self):
+        self.sounds: dict[str, pygame.mixer.Sound] = {}
+        self.load_initial()
+        self.bgm_volume: float = 1.0
+        self.crnt_bgm_volume: float = 0
+        self.se_volume: float = 1.0
+
+    def load_initial(self):
+        self.load("button_io")
+        self.load("scroll")
+        self.load("stage_entry")
+        self.load("pause_open")
+        self.load("pause_close")
+        self.load("game_over")
+        self.load("walk")
+        self.load("grass_walk")
+        self.load("sand_walk")
+        self.load("iron_walk")
+        self.load("steel_walk")
+        self.load("goal")
+        self.load("warp")
+        self.load("skip")
+        self.load("rollback")
+        self.load("message_window")
+        self.load("select_menu_cursor")
+        self.load("treasure_open")
+        self.load("door_open")
+        self.load("door_close")
+        self.load("command_open")
+        self.load("command_close")
+        self.load("rollback_cursor")
+        self.load("incorrect_action")
+        self.load("hp_warning")
+
+    def load(self, name: str):
+        self.sounds[name] = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", f"{name}.wav"))
+    
+    def set_all_se_volume(self, vol: float):
+        for s in self.sounds.values():
+            s.set_volume(vol)
+        self.se_volume = vol
+
+    def play_se(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].play()
+    
+    def play_se_loop(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].play(loops=-1)
+
+    def stop_se(self, name: str):
+        if name not in self.sounds:
+            return
+        self.sounds[name].stop()
+    
+    def play_bgm(self, name: str, vol: float = 1.0):
+        pygame.mixer.music.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", f"{name}.wav"))
+        self.crnt_bgm_volume = vol
+        pygame.mixer.music.set_volume(vol * self.bgm_volume)
+        pygame.mixer.music.play(-1)
+    
+    def set_bgm_volume(self):
+        pygame.mixer.music.set_volume(self.crnt_bgm_volume * self.bgm_volume)
+
+    def pause_bgm(self):
+        pygame.mixer.music.pause()
+
+    def unpause_bgm(self):
+        pygame.mixer.music.unpause()
+
+    def stop_bgm(self):
+        pygame.mixer.music.stop()
+                                                                                                                                                                                                                         
+#  ad88888ba                                               88 88b           d88                                                        I8,        8        ,8I 88                      88                                 
+# d8"     "8b                                              88 888b         d888                                                        `8b       d8b       d8' ""                      88                                 
+# Y8,                                                      88 88`8b       d8'88                                                         "8,     ,8"8,     ,8"                          88                                 
+# `Y8aaaaa,    ,adPPYba,  88       88 8b,dPPYba,   ,adPPYb,88 88 `8b     d8' 88 ,adPPYYba, 8b,dPPYba,  ,adPPYYba,  ,adPPYb,d8  ,adPPYba, Y8     8P Y8     8P   88 8b,dPPYba,   ,adPPYb,88  ,adPPYba,  8b      db      d8  
+#   `"""""8b, a8"     "8a 88       88 88P'   `"8a a8"    `Y88 88  `8b   d8'  88 ""     `Y8 88P'   `"8a ""     `Y8 a8"    `Y88 a8P_____88 `8b   d8' `8b   d8'   88 88P'   `"8a a8"    `Y88 a8"     "8a `8b    d88b    d8'  
+#         `8b 8b       d8 88       88 88       88 8b       88 88   `8b d8'   88 ,adPPPPP88 88       88 ,adPPPPP88 8b       88 8PP"""""""  `8a a8'   `8a a8'    88 88       88 8b       88 8b       d8  `8b  d8'`8b  d8'   
+# Y8a     a8P "8a,   ,a8" "8a,   ,a88 88       88 "8a,   ,d88 88    `888'    88 88,    ,88 88       88 88,    ,88 "8a,   ,d88 "8b,   ,aa   `8a8'     `8a8'     88 88       88 "8a,   ,d88 "8a,   ,a8"   `8bd8'  `8bd8'    
+#  "Y88888P"   `"YbbdP"'   `"YbbdP'Y8 88       88  `"8bbdP"Y8 88     `8'     88 `"8bbdP"Y8 88       88 `"8bbdP"Y8  `"YbbdP"Y8  `"Ybbd8"'    `8'       `8'      88 88       88  `"8bbdP"Y8  `"YbbdP"'      YP      YP      
+#                                                                                                                  aa,    ,88                                                                                             
+#       
+#                                                                                                             "Y8bbdP"                                                                                             
+
+class SoundManageWindow(Window):
+    KNOB_SIZE = 8
+    SLIDER_RECT_SIZE = 2
+    FONT_SIZE = 12
+    FONT_COLOR = Color(255, 0, 0, 255)
+    SLIDER_COVERED_COLOR = Color(255, 255, 0, 255)
+    SLIDER_NONCOVERED_COLOR = Color(0, 0, 0, 255)
+
+    def __init__(self, rect: pygame.Rect):
+        Window.__init__(self, rect)
+        # 1/3 ~ 8/9の範囲で音量調整ノブを調整する
+        self.knob_min_x = self.x + self.width * 1/3
+        self.knob_max_x = self.x + self.width * 8/9
+        self.bgm_knob_x: float = float(self.knob_min_x + self.width * 5/9 * SMANAGER.bgm_volume)
+        self.se_knob_x: float = float(self.knob_min_x + self.width * 5/9 * SMANAGER.se_volume)
+        self.bgm_knob_y: float = float(self.y + self.height * 1/3)
+        self.se_knob_y: float = float(self.y + self.height * 2/3)
+        self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.is_visible = True
+
+    def draw_string(self, x, y, string):
+        """文字列出力"""
+        surf, rect = self.font.render(string, self.FONT_COLOR)
+        self.surface.blit(surf, (x, y+(self.FONT_SIZE)-rect[3]))
+
+    def draw(self, screen: pygame.Surface):
+        if not self.is_visible:
+            return
+        
+        Window.draw(self)
+        
+        self.draw_string(10, self.bgm_knob_y - self.y - self.FONT_SIZE / 2, "BGM vol" if ISENGLISH else "BGM音量")
+        pygame.draw.rect(
+            self.surface, 
+            self.SLIDER_COVERED_COLOR, 
+            pygame.Rect(
+                self.knob_min_x - self.x, self.bgm_knob_y - self.y - self.SLIDER_RECT_SIZE, 
+                self.bgm_knob_x - self.knob_min_x, self.SLIDER_RECT_SIZE * 2
+            )
+        )
+        pygame.draw.circle(
+            self.surface, 
+            self.SLIDER_COVERED_COLOR,
+            (self.bgm_knob_x - self.x, self.bgm_knob_y - self.y), 
+            self.KNOB_SIZE
+        )
+        
+        self.draw_string(10, self.se_knob_y - self.y - self.FONT_SIZE / 2, "SE vol" if ISENGLISH else "SE音量")
+        pygame.draw.rect(
+            self.surface, 
+            self.SLIDER_COVERED_COLOR, 
+            pygame.Rect(
+                self.knob_min_x - self.x, self.se_knob_y - self.y - self.SLIDER_RECT_SIZE, 
+                self.se_knob_x - self.knob_min_x, self.SLIDER_RECT_SIZE * 2
+            )
+        )
+        pygame.draw.circle(
+            self.surface, 
+            self.SLIDER_COVERED_COLOR,
+            (self.se_knob_x - self.x, self.se_knob_y - self.y), 
+            self.KNOB_SIZE
+        )
+        
+        Window.blit(self, screen)
+
+    def touchKnob(self, pos: tuple[int, int]):
+        if (self.bgm_knob_x - self.KNOB_SIZE <= pos[0] <= self.bgm_knob_x + self.KNOB_SIZE
+            and self.bgm_knob_y - self.KNOB_SIZE <= pos[1] <= self.bgm_knob_y + self.KNOB_SIZE):
+            return "bgm slider"
+        elif (self.se_knob_x - self.KNOB_SIZE <= pos[0] <= self.se_knob_x + self.KNOB_SIZE
+              and self.se_knob_y - self.KNOB_SIZE <= pos[1] <= self.se_knob_y + self.KNOB_SIZE):
+            return "se slider"
+        return None
+
+if __name__ == "__main__":
+    main()

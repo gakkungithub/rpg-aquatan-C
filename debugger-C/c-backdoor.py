@@ -555,6 +555,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         continue
                     if (item := event.get('item', None)) is not None:
                         itemname = (item["name"], item["line"])
+                        # print(itemname)
                         if not itemname in skipped_varDecls or itemname[1] != int(line):
                             errorCnt += 1
                             # 複数回入力を間違えたらヒントをあげる
@@ -1611,6 +1612,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 debug_manager.analyze_frame()
 
         except Exception as e:
+            tb = e.__traceback__
+            error_lines_list = [tb.tb_lineno]
+            while tb.tb_next is not None:
+                tb = tb.tb_next
+                error_lines_list.append(tb.tb_lineno)
+            print("line:", error_lines_list)
+            
             if isinstance(e, RollBack):
                 stdout_r.close()
                 stderr_r.close()
@@ -1618,7 +1626,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 os.unlink(stderr_file.name)
                 rollback_index = 0
             else:
-                print(e, "サーバー終了")
+                print(e, "サーバ終了")
                 break
 
     stdout_r.close()
@@ -1639,7 +1647,7 @@ parser.add_argument('--english', action='store_true', help='Enable english mode'
 args = parser.parse_args()
 # endregion
 
-# region サーバーの開始メソッドは再利用性がないのでインライン展開する
+# region サーバの開始メソッドは再利用性がないのでインライン展開する
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     host='localhost'
     port=9999

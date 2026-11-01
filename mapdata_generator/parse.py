@@ -700,6 +700,7 @@ class ASTtoFlowChart:
                         fixed_arr_contents.append(arr_content[n])
                     # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
+                        # 構造体の配列に配列が含まれている場合、段違いになってしまうので、ここを修正する必要がある?
                         fixed_arr_contents.append({"label": f"[{n}]"})
                 fixed_arr_contents_list.append(fixed_arr_contents)
             return fixed_arr_contents_list

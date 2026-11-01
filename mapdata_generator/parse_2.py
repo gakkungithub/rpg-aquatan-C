@@ -77,6 +77,10 @@ class ExprDescription(TypedDict):
     description: list[ExprDescriptionPart]
     expr: list[ExprDescriptionPart]
 
+class IndexSize(TypedDict):
+    size: int
+    cursor: ci.Cursor
+
 class FuncInfo:
     def __init__(self, nodeID: str):
         self.start_nodeID: str = f'"{nodeID}"'
@@ -332,6 +336,7 @@ class ASTtoFlowChart:
         self.expr_node_info: dict[str, ExprNodeInfo] = {}
         self.condition_move : dict[str, tuple[str, list[int | dict[str, any]]]] = {}
         self.line_info_dict: dict[str, LineInfo] = {}
+        self.struct_info: dict[str, list[tuple[str, list[int]]]] = {}
         self.macro_pos = {}
 
         # 英語モードにする
@@ -342,9 +347,9 @@ class ASTtoFlowChart:
         self.dot.node(nodeID, nodeLabel, shape=shape)
         return nodeID
 
-    def createEdge(self, prevNodeID, crntNodeID, edgeName=""):
-        if prevNodeID and crntNodeID:
-            self.dot.edge(prevNodeID, crntNodeID, label=edgeName)
+    def createEdge(self, prev_nodeID, crnt_nodeID, edgeName=""):
+        if prev_nodeID and crnt_nodeID:
+            self.dot.edge(prev_nodeID, crnt_nodeID, label=edgeName)
 
     def createErrorInfo(self, diagnostics):
         for diag in diagnostics:
@@ -432,10 +437,10 @@ class ASTtoFlowChart:
                 #引数のノードを作る
                 for arg in arg_list:
                     argname, argtype, argline = arg
-                    argNodeID = self.createNode(f"{argname},{argline}", 'cylinder')
-                    self.varNode_info[f'"{argNodeID}"'] = self.get_var_type(argtype)
-                    self.createEdge(nodeID, argNodeID)
-                    nodeID = argNodeID
+                    arg_nodeID = self.createNode(f"{argname},{argline}", 'cylinder')
+                    self.varNode_info[f'"{arg_nodeID}"'] = self.get_var_type(argtype)
+                    self.createEdge(nodeID, arg_nodeID)
+                    nodeID = arg_nodeID
                 nodeID = self.parse_comp_stmt(cr, nodeID)
                 self.createRoomSizeEstimate(None)
                 # void型関数
@@ -445,8 +450,8 @@ class ASTtoFlowChart:
                     self.func_info_dict[self.scanning_func].setStart(cr.extent.end.line)
                     self.line_info_dict[self.scanning_func].setLine(cr.extent.end.line)
                     self.line_info_dict[self.scanning_func].setVoidReturn(cr.extent.end.line)
-                    returnNodeID = self.createNode(str(cr.extent.end.line), 'lpromoter')
-                    self.createEdge(nodeID, returnNodeID)
+                    return_nodeID = self.createNode(str(cr.extent.end.line), 'lpromoter')
+                    self.createEdge(nodeID, return_nodeID)
 
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor, nodeID, edgeName=""):
@@ -475,10 +480,10 @@ class ASTtoFlowChart:
                     edgeName = ""
                 else:
                     self.nextLines.append((cursor.extent.end.line, False))
-            nextNodeID = self.parse_stmt(cr, nodeID, edgeName)
+            next_nodeID = self.parse_stmt(cr, nodeID, edgeName)
             if i != 0 and f'"{nodeID}"' in self.varNode_info:
-                self.createRoomSizeEstimate(nextNodeID)
-            nodeID = nextNodeID
+                self.createRoomSizeEstimate(next_nodeID)
+            nodeID = next_nodeID
             edgeName = ""
             self.nextLines.pop(-1)
         return nodeID
@@ -549,12 +554,12 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             value_cursor = next(cr.get_children())
             self.check_cursor_error(value_cursor)
-            returnNodeID = self.get_expr(value_cursor, shape='lpromoter', label=f"{cr.location.line}")
+            return_nodeID = self.get_expr(value_cursor, shape='lpromoter', label=f"{cr.location.line}")
             # returnによる行確認は個別に行う (step in, step outを残り関数の違いによって区別するため) 関数の遷移履歴、現在のframe_num、現在の行数で確認
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expr_node_info[f'"{returnNodeID}"']["funcs"])
-            self.condition_move[f'"{returnNodeID}"'] = ('return', self.expr_node_info[f'"{returnNodeID}"']["funcs"])
-            self.createEdge(nodeID, returnNodeID, edgeName)
+            self.line_info_dict[self.scanning_func].setReturn(cr.location.line, self.expr_node_info[f'"{return_nodeID}"']["funcs"])
+            self.condition_move[f'"{return_nodeID}"'] = ('return', self.expr_node_info[f'"{return_nodeID}"']["funcs"])
+            self.createEdge(nodeID, return_nodeID, edgeName)
             return None
         elif cr.kind == ci.CursorKind.IF_STMT:
             # 最初行番を変更
@@ -582,15 +587,15 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             nodeID = self.parse_switch_stmt(cr, nodeID, edgeName)
         elif cr.kind == ci.CursorKind.BREAK_STMT:
-            breakNodeID = self.createNode("break", "hexagon")
-            self.createEdge(nodeID, breakNodeID, edgeName)
-            self.addLoopBreaker(breakNodeID, "break", cr.location.line)
+            break_nodeID = self.createNode("break", "hexagon")
+            self.createEdge(nodeID, break_nodeID, edgeName)
+            self.addLoopBreaker(break_nodeID, "break", cr.location.line)
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             return None
         elif cr.kind == ci.CursorKind.CONTINUE_STMT:
-            continueNodeID = self.createNode("continue", "hexagon")
-            self.createEdge(nodeID, continueNodeID, edgeName)
-            self.addLoopBreaker(continueNodeID, "continue", cr.location.line)
+            continue_nodeID = self.createNode("continue", "hexagon")
+            self.createEdge(nodeID, continue_nodeID, edgeName)
+            self.addLoopBreaker(continue_nodeID, "continue", cr.location.line)
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             return None
         elif cr.kind == ci.CursorKind.GOTO_STMT:
@@ -599,8 +604,8 @@ class ASTtoFlowChart:
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             cr = next(cr.get_children())
             self.check_cursor_error(cr)
-            fromNodeID = self.createNode(cr.spelling, 'cds')
-            self.createEdge(nodeID, fromNodeID, edgeName)
+            from_nodeID = self.createNode(cr.spelling, 'cds')
+            self.createEdge(nodeID, from_nodeID, edgeName)
             #ラベルが既出の場合
             if cr.spelling in self.gotoLabel_list:
                 self.gotoLabel_list[cr.spelling]["fromNodeID"].append(f'"{self.roomSizeEstimate[0]}"')
@@ -620,20 +625,20 @@ class ASTtoFlowChart:
                     return None
                 else:
                     self.findingLabel = None
-            toNodeID = self.createNode(cr.spelling, 'note')
-            self.createEdge(nodeID, toNodeID)
+            to_nodeID = self.createNode(cr.spelling, 'note')
+            self.createEdge(nodeID, to_nodeID)
             #gotoラベルが既出の場合
             if cr.spelling in self.gotoLabel_list:
                 self.gotoLabel_list[cr.spelling]["toNodeID"] = f'"{self.roomSizeEstimate[0]}"'
             #gotoラベルが既出でない場合
             else:
                 self.gotoLabel_list[cr.spelling] = {"toNodeID": f'"{self.roomSizeEstimate[0]}"', "fromNodeID": []}
-            nodeID = self.parse_stmt(exec_cr, toNodeID)
+            nodeID = self.parse_stmt(exec_cr, to_nodeID)
         elif cr.kind == ci.CursorKind.CALL_EXPR:
             expr_info = ExprInfo()
             expr_description = self.parse_call_expr(cr, expr_info)
-            exprNodeID = self.createNode("")
-            self.createEdge(nodeID, exprNodeID)
+            expr_nodeID = self.createNode("")
+            self.createEdge(nodeID, expr_nodeID)
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
@@ -642,22 +647,22 @@ class ASTtoFlowChart:
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             # expr_node_infoはparse_call_exprでは登録されていなのでここで登録しておく
-            self.expr_node_info[f'"{exprNodeID}"'] = {"vars": expr_info.var_references, "funcs": expr_info.func_references, "comments": expr_info.expr_descriptions, "line": cr.location.line}
+            self.expr_node_info[f'"{expr_nodeID}"'] = {"vars": expr_info.var_references, "funcs": expr_info.func_references, "comments": expr_info.expr_descriptions, "line": cr.location.line}
             next_line = self.get_next_line()
-            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"']["funcs"], next_line[0]] if len(self.expr_node_info[f'"{exprNodeID}"']["funcs"]) else [cr.location.line, next_line[0]])
-            nodeID = exprNodeID
+            self.condition_move[f'"{expr_nodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{expr_nodeID}"']["funcs"], next_line[0]] if len(self.expr_node_info[f'"{expr_nodeID}"']["funcs"]) else [cr.location.line, next_line[0]])
+            nodeID = expr_nodeID
         else:
             # 最初行番を変更 
             self.line_info_dict[self.scanning_func].setStart(cr.location.line)
             self.func_info_dict[self.scanning_func].setStart(cr.location.line)
             # ここの計算式は計算式キャラクターに登録する
-            exprNodeID = self.get_expr(cr, shape='rect')
+            expr_nodeID = self.get_expr(cr, shape='rect')
             # 関数に入る前で止まれるようにlineを登録しておく
             self.line_info_dict[self.scanning_func].setLine(cr.location.line)
             next_line = self.get_next_line()
-            self.condition_move[f'"{exprNodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{exprNodeID}"']["funcs"], next_line[0]])
-            self.createEdge(nodeID, exprNodeID, edgeName)
-            nodeID = exprNodeID
+            self.condition_move[f'"{expr_nodeID}"'] = ('exp', [cr.location.line, *self.expr_node_info[f'"{expr_nodeID}"']["funcs"], next_line[0]])
+            self.createEdge(nodeID, expr_nodeID, edgeName)
+            nodeID = expr_nodeID
         return nodeID
 
     # 変数の型を取得
@@ -668,6 +673,8 @@ class ASTtoFlowChart:
             return {"type": type.spelling, "children": self.get_var_type(pointee)}
         # 配列型なら要素型も
         elif type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
+            if type.kind != ci.TypeKind.CONSTANTARRAY:
+                sys.exit("our game system only receives constant array ( e.g. a[3] )")
             elem = type.get_array_element_type()
             return {"type": type.spelling, "children": self.get_var_type(elem)}
         # 構造体の場合はフィールド列挙
@@ -680,6 +687,178 @@ class ASTtoFlowChart:
         else:
             return {"type": type.spelling, "children": {}}
 
+    def get_var_type2(self, type: ci.Type) -> dict:
+        # typedef
+        if type.kind == ci.TypeKind.TYPEDEF:
+            return {
+                "kind": "typedef",
+                "type": type.spelling,
+            }
+
+        # ============================================================
+        # elaborated type
+        # ============================================================
+        elif type.kind == ci.TypeKind.ELABORATED:
+            named_type = type.get_named_type()
+
+            return self.get_var_type2(named_type)
+
+        # ============================================================
+        # pointer
+        # ============================================================
+        elif type.kind == ci.TypeKind.POINTER:
+            pointee = type.get_pointee()
+
+            return {
+                "kind": "pointer",
+                "type": type.spelling,
+                "pointee": self.get_var_type2(pointee),
+            }
+
+        # ============================================================
+        # array
+        # ============================================================
+        elif type.kind in (
+            ci.TypeKind.CONSTANTARRAY,
+            ci.TypeKind.INCOMPLETEARRAY,
+            ci.TypeKind.VARIABLEARRAY,
+            ci.TypeKind.DEPENDENTSIZEDARRAY,
+        ):
+            if type.kind != ci.TypeKind.CONSTANTARRAY:
+                sys.exit(
+                    "our game system only receives constant array "
+                    "(e.g. a[3])"
+                )
+
+            elem = type.get_array_element_type()
+
+            return {
+                "kind": "array",
+                "type": type.spelling,
+                "size": type.element_count,
+                "element": self.get_var_type2(elem),
+            }
+
+        # ============================================================
+        # struct / union
+        # ============================================================
+        elif type.kind == ci.TypeKind.RECORD:
+            decl = type.get_declaration()
+
+            members = {}
+
+            for field in type.get_fields():
+                members[field.spelling] = self.get_var_type2(field.type)
+
+            if decl.kind == ci.CursorKind.STRUCT_DECL:
+                return {
+                    "kind": "struct",
+                    "type": type.spelling,
+                    "members": members,
+                }
+
+            elif decl.kind == ci.CursorKind.UNION_DECL:
+                return {
+                    "kind": "union",
+                    "type": type.spelling,
+                    "members": members,
+                }
+
+        # ============================================================
+        # enum
+        # ============================================================
+        elif type.kind == ci.TypeKind.ENUM:
+            decl = type.get_declaration()
+
+            members = {}
+
+            for constant in decl.get_children():
+                if constant.kind == ci.CursorKind.ENUM_CONSTANT_DECL:
+                    members[constant.spelling] = constant.enum_value
+
+            return {
+                "kind": "enum",
+                "type": type.spelling,
+                "members": members,
+            }
+
+        # ============================================================
+        # void
+        # ============================================================
+        elif type.kind == ci.TypeKind.VOID:
+            return {
+                "kind": "builtin",
+                "type": "void",
+            }
+
+        # ============================================================
+        # bool
+        # ============================================================
+        elif type.kind == ci.TypeKind.BOOL:
+            return {
+                "kind": "builtin",
+                "type": type.spelling,
+            }
+
+        # ============================================================
+        # character
+        # ============================================================
+        elif type.kind in (
+            ci.TypeKind.CHAR_U,
+            ci.TypeKind.UCHAR,
+            ci.TypeKind.CHAR16,
+            ci.TypeKind.CHAR32,
+            ci.TypeKind.CHAR_S,
+            ci.TypeKind.SCHAR,
+        ):
+            return {
+                "kind": "builtin",
+                "type": type.spelling,
+            }
+
+        # ============================================================
+        # integer
+        # ============================================================
+        elif type.kind in (
+            ci.TypeKind.SHORT,
+            ci.TypeKind.USHORT,
+            ci.TypeKind.INT,
+            ci.TypeKind.UINT,
+            ci.TypeKind.LONG,
+            ci.TypeKind.ULONG,
+            ci.TypeKind.LONGLONG,
+            ci.TypeKind.ULONGLONG,
+            ci.TypeKind.INT128,
+            ci.TypeKind.UINT128,
+        ):
+            return {
+                "kind": "builtin",
+                "type": type.spelling,
+            }
+
+        # ============================================================
+        # floating point
+        # ============================================================
+        elif type.kind in (
+            ci.TypeKind.FLOAT,
+            ci.TypeKind.DOUBLE,
+            ci.TypeKind.LONGDOUBLE,
+            ci.TypeKind.FLOAT128,
+        ):
+            return {
+                "kind": "builtin",
+                "type": type.spelling,
+            }
+
+        # ============================================================
+        # その他
+        # ============================================================
+        else:
+            return {
+                "kind": "other",
+                "type": type.spelling,
+            }
+     
     # 変数の宣言 (まだ変数の情報をfopen, malloc, reallocにどう使うかを決められていない(ここで先にfopen/malloc/reallocかどうかを確かめてから使う))
     def parse_var_decl(self, cursor: ci.Cursor, nodeID, edgeName=""):
         #この条件は配列の添字のノードを変えるためにある
@@ -690,31 +869,35 @@ class ASTtoFlowChart:
             ci.TypeKind.DEPENDENTSIZEDARRAY
         ) else False
         #変数名を取得
-        varNodeID = self.createNode(cursor.spelling, 'signature')
+        var_nodeID = self.createNode(cursor.spelling, 'signature')
         # もしstatic変数であれば、self.line_infoやself.func_info_dictの最初の行番が0である場合でも変えない
         isStatic = cursor.storage_class == ci.StorageClass.STATIC
 
-        self.createEdge(nodeID, varNodeID, edgeName)
+        self.createEdge(nodeID, var_nodeID, edgeName)
 
         # 変数の型名はこのcursorで分かる
-        self.varNode_info[f'"{varNodeID}"'] = self.get_var_type(cursor.type)
+        self.varNode_info[f'"{var_nodeID}"'] = self.get_var_type(cursor.type)
 
         #配列
         if isArray:
+            if cursor.type.kind != ci.TypeKind.CONSTANTARRAY:
+                sys.exit("our system cannot receive variable-size array")
+            print(''.join(t.spelling for t in cursor.get_tokens()))
             # 念の為、添字と配列の中身のカーソルを分けて取得する
             cr_index_list: list[ci.Cursor | int] = []
-            cr_init_members = None
+            init_list_cursors = None
 
-            arrTopNodeID = self.createNode("", 'box3d')
-            self.createEdge(varNodeID, arrTopNodeID)
+            array_top_index_nodeID = self.createNode("", 'box3d')
+            self.createEdge(var_nodeID, array_top_index_nodeID)
 
             for cr in cursor.get_children():
                 if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                    cr_init_members = list(cr.get_children())
+                    init_list_cursors = list(cr.get_children())
+                    print("check", cr.type.kind, cr.type.spelling)
                 elif cr.kind == ci.CursorKind.STRING_LITERAL:
                     # 文字列を格納する配列の場合
-                    indexNodeID = self.createNode(cr.spelling, 'Mcircle')
-                    self.expr_node_info[f'"{indexNodeID}"'] = {
+                    index_nodeID = self.createNode(cr.spelling, 'Mcircle')
+                    self.expr_node_info[f'"{index_nodeID}"'] = {
                         "vars": [], "funcs": [],
                         "comments": [
                             {
@@ -739,30 +922,39 @@ class ASTtoFlowChart:
                         ],
                         "line": cursor.location.line
                     }
-                    self.createEdge(arrTopNodeID, indexNodeID, "strCont")
+                    self.createEdge(array_top_index_nodeID, index_nodeID, "strCont")
                 else:
+                    # 配列の添字のリスト
                     cr_index_list.append(cr)
 
+            t = cursor.type
+            array_size: list[int] = []
+            while t.kind == ci.TypeKind.CONSTANTARRAY:
+                array_size.append(t.element_count)
+                t = t.element_type
+            print(f"type = {cursor.type.kind}, children = {t.spelling}, size = {array_size}")
             arrCont_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
-            # 初期化する場合
-            if cr_init_members is not None:
-                # 一番上の添字ノードはこのメソッドで作りくっつける
-                arr_contents_list = self.get_arr_contents(cr_init_members, cr_index_list)
-                arrContNodeID_list = self.parse_arr_contents(arr_contents_list, [cursor.spelling], arrCont_condition_move, cursor.location.line)
-                for arrContNodeID in arrContNodeID_list:
-                    self.createEdge(arrTopNodeID, arrContNodeID, "arrCont")
-                # 一次元配列で添字がない場合
-                if len(cr_index_list) == 0:
-                    cr_index_list.append(len(arrContNodeID_list))
 
-            nodeID = arrTopNodeID
+
+            # 初期化する場合
+            if init_list_cursors is not None:
+                # 一番上の添字ノードはこのメソッドで作りくっつける
+                arr_contents_list = self.get_arr_contents(init_list_cursors, cr_index_list)
+                arrCont_nodeID_list = self.parse_arr_contents(arr_contents_list, [cursor.spelling], arrCont_condition_move, cursor.location.line)
+                for arrCont_nodeID in arrCont_nodeID_list:
+                    self.createEdge(array_top_index_nodeID, arrCont_nodeID, "arrCont")
+                # 一次元配列で添字がない場合は、その要素数をindexリストにくっつける
+                if len(cr_index_list) == 0:
+                    cr_index_list.append(len(arrCont_nodeID_list))
+
+            nodeID = array_top_index_nodeID
             index_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
 
             # Mcircleノードに添字の計算式または推定値を取得する
             for cr_index in cr_index_list:
                 if isinstance(cr_index, int):
-                    indexNodeID = self.createNode("", 'Mcircle')
-                    self.expr_node_info[f'"{indexNodeID}"'] = {
+                    index_nodeID = self.createNode("", 'Mcircle')
+                    self.expr_node_info[f'"{index_nodeID}"'] = {
                         "vars": [],
                         "funcs": [],
                         "comments": [
@@ -781,51 +973,54 @@ class ASTtoFlowChart:
                         "line": cursor.location.line
                     }
                 else:
-                    indexNodeID = self.get_expr(cr_index, shape="Mcircle")
-                    index_condition_move += self.expr_node_info[f'"{indexNodeID}"']["funcs"]
-                for func in self.expr_node_info[f'"{indexNodeID}"']["funcs"]:
+                    index_nodeID = self.get_expr(cr_index, shape="Mcircle")
+                    index_condition_move += self.expr_node_info[f'"{index_nodeID}"']["funcs"]
+                for func in self.expr_node_info[f'"{index_nodeID}"']["funcs"]:
                     # dictは標準関数
                     if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
                         sys.exit("array index cannot include a specific standard function")
-                self.createEdge(nodeID, indexNodeID)
-                nodeID = indexNodeID
+                self.createEdge(nodeID, index_nodeID)
+                nodeID = index_nodeID
 
             # self.line_infoの最初行番が0である場合、このcondition_moveを記録すると同時にself.line_infoを更新する
             # indexのcondition_moveがあるなら最初の添字の行数を取得する 
             if len(index_condition_move) != 0:
                 array_condition_move: list[int | tuple[str,int] | dict[str, any]] = [*index_condition_move, *arrCont_condition_move]
-                self.condition_move[f'"{arrTopNodeID}"'] = ('item', array_condition_move)
+                self.condition_move[f'"{array_top_index_nodeID}"'] = ('item', array_condition_move)
             # 中身のcondition_moveがあるなら中身の最初の行数を取得する
             elif len(arrCont_condition_move) != 0:
                 # 最初の行数がない場合は最初の行数を追加する
-                if arrCont_condition_move[0] != cr_init_members[0].location.line:
-                    array_condition_move = [cr_init_members[0].location.line, *arrCont_condition_move]
-                    self.condition_move[f'"{arrTopNodeID}"'] = ('item', array_condition_move)
+                if arrCont_condition_move[0] != init_list_cursors[0].location.line:
+                    array_condition_move = [init_list_cursors[0].location.line, *arrCont_condition_move]
+                    self.condition_move[f'"{array_top_index_nodeID}"'] = ('item', array_condition_move)
                 # なければ追加しない (構造体と同じ)
                 else:
                     array_condition_move = arrCont_condition_move
-                    self.condition_move[f'"{arrTopNodeID}"'] = ('item', array_condition_move)
+                    self.condition_move[f'"{array_top_index_nodeID}"'] = ('item', array_condition_move)
             # 関数が計算式に含まれていないなら変数名の行数を追加する
             else:
                 array_condition_move = [cursor.location.line]
-                self.condition_move[f'"{arrTopNodeID}"'] = ('item', array_condition_move)
+                self.condition_move[f'"{array_top_index_nodeID}"'] = ('item', array_condition_move)
 
             self.line_info_dict[self.scanning_func].setStart(array_condition_move[0], isStatic)
             self.func_info_dict[self.scanning_func].setStart(array_condition_move[0], isStatic)
 
         # 一つの変数/構造体系
         else:
-            not_array_cursors = list(cursor.get_children())
-            if len(not_array_cursors):
-                if len(not_array_cursors) == 2 and not_array_cursors[0].kind == ci.CursorKind.TYPE_REF and not_array_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
-                    not_array_cursors.pop(0)
-                for cr in not_array_cursors:
+            init_cursors = list(cursor.get_children())
+            print("typppe", cursor.type.get_canonical().kind)
+            if len(init_cursors):
+                if len(init_cursors) == 2:
+                    if init_cursors[0].kind == ci.CursorKind.TYPE_REF and init_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
+                        print(init_cursors[0].kind, self.unwrap_unexposed(init_cursors[1]).kind)
+                        init_cursors.pop(0)
+                for cr in init_cursors:
                     self.check_cursor_error(cr)
                     # 構造体の宣言でノードを作る
                     if cr.kind == ci.CursorKind.TYPE_REF:
                         nodeID = self.createNode("", 'tab')
-                        self.createEdge(varNodeID, nodeID)
-                        if len(not_array_cursors) == 1:
+                        self.createEdge(var_nodeID, nodeID)
+                        if len(init_cursors) == 1:
                             self.condition_move[f'"{nodeID}"'] = ('item', [cr.location.line])
                             self.line_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
                             self.func_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
@@ -848,60 +1043,62 @@ class ASTtoFlowChart:
                                     if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
                                         call_exp_cursor_list = list(casted_exp_cursor.get_children())
                                         if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                            memberNodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
-                                            # memberNodeID = self.get_expr(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
-                                            # self.expr_node_info[f'"{memberNodeID}"'] = {
-                                            #     "vars": self.expr_node_info[f'"{memberNodeID}"']["vars"],
-                                            #     "funcs": self.expr_node_info[f'"{memberNodeID}"']["funcs"],
+                                            member_nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # member_nodeID = self.get_expr(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # self.expr_node_info[f'"{member_nodeID}"'] = {
+                                            #     "vars": self.expr_node_info[f'"{member_nodeID}"']["vars"],
+                                            #     "funcs": self.expr_node_info[f'"{member_nodeID}"']["funcs"],
                                             #     "comments": [
-                                            #         *self.expr_node_info[f'"{memberNodeID}"']["comments"],
+                                            #         *self.expr_node_info[f'"{member_nodeID}"']["comments"],
                                             #         {
-                                            #             "id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"] + 1,
+                                            #             "id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"] + 1,
                                             #             "description": 
                                             #             [
                                             #                 {"text": "cast type of"}, 
-                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]}, 
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]}, 
                                             #                 {"text": f"to {value_cr.type.spelling}"},
                                             #             ] if self.is_english else
                                             #             [
-                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]},
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]},
                                             #                 {"text": f"の型を {value_cr.type.spelling} に変換します"}
                                             #             ],
                                             #             "expr": 
                                             #             [
                                             #                 {"text": f"({value_cr.type.spelling})"},
-                                            #                 {"expr_id": self.expr_node_info[f'"{memberNodeID}"']["comments"][-1]["id"]}
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]}
                                             #             ]
                                             #         }
                                             #     ],
-                                            #     "line": self.expr_node_info[f'"{memberNodeID}"']["line"]
+                                            #     "line": self.expr_node_info[f'"{member_nodeID}"']["line"]
                                             # }
-                                            # self.expr_node_info[f'"{memberNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{memberNodeID}"'][0], *self.expr_node_info[f'"{memberNodeID}"'][1:5])
+                                            # self.expr_node_info[f'"{member_nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{member_nodeID}"'][0], *self.expr_node_info[f'"{member_nodeID}"'][1:5])
                                 elif value_cr.kind == ci.CursorKind.CALL_EXPR:
                                     call_exp_cursor_list = list(value_cr.get_children())
                                     if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                        memberNodeID = self.get_expr(value_cr, var={"vartype": member[1]})
+                                        member_nodeID = self.get_expr(value_cr, var={"vartype": member[1]})
                                     elif call_exp_cursor_list[0].spelling == "fopen":
                                         sys.exit("struct member cannot include fopen")
+                                
                                 if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
-                                    memberNodeID = self.get_expr(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
-                                self.createEdge(nodeID, memberNodeID)
+                                    member_nodeID = self.get_expr(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
+                                
+                                self.createEdge(nodeID, member_nodeID)
 
-                                if len(self.expr_node_info[f'"{memberNodeID}"']["funcs"]) != 0:
-                                    for func in self.expr_node_info[f'"{memberNodeID}"']["funcs"]:
+                                if len(self.expr_node_info[f'"{member_nodeID}"']["funcs"]) != 0:
+                                    for func in self.expr_node_info[f'"{member_nodeID}"']["funcs"]:
                                         if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
                                             sys.exit("struct member cannot include some standard functions")
-                                    member_condition_move += self.expr_node_info[f'"{memberNodeID}"']["funcs"]
+                                    member_condition_move += self.expr_node_info[f'"{member_nodeID}"']["funcs"]
                                     isFunc = True
                             else:
-                                memberNodeID = self.createNode(member[0], 'square')
-                                self.expr_node_info[f'"{memberNodeID}"'] = {
+                                member_nodeID = self.createNode(member[0], 'square')
+                                self.expr_node_info[f'"{member_nodeID}"'] = {
                                     "vars": [],
                                     "funcs": [],
                                     "comments": [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}],
                                     "line": cursor.location.line
                                 }
-                                self.createEdge(nodeID, memberNodeID)
+                                self.createEdge(nodeID, member_nodeID)
                         if isFunc:
                             # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
                             if member_condition_move[0] != member_crs[0].location.line:
@@ -940,7 +1137,7 @@ class ASTtoFlowChart:
                         self.condition_move[f'"{nodeID}"'] = ('item', var_condition_move)
                         self.line_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
                         self.func_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
-                        self.createEdge(varNodeID, nodeID)
+                        self.createEdge(var_nodeID, nodeID)
             else:
                 # 変数の初期値が無い場合
                 nodeID = self.createNode("", 'square')
@@ -952,46 +1149,455 @@ class ASTtoFlowChart:
                 self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
                 self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
                 self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
-                self.createEdge(varNodeID, nodeID)
+                self.createEdge(var_nodeID, nodeID)
         
-        return varNodeID
+        return var_nodeID
     
+    def parse_var_decl2(self, cursor: ci.Cursor, nodeID, edgeName=""):
+        #変数名を取得
+        var_nodeID = self.createNode(cursor.spelling, 'signature')
+        # もしstatic変数であれば、self.line_infoやself.func_info_dictの最初の行番が0である場合でも変えない
+        isStatic = cursor.storage_class == ci.StorageClass.STATIC
+
+        self.createEdge(nodeID, var_nodeID, edgeName)
+
+        # 変数の型名はこのcursorで分かる
+        self.varNode_info[f'"{var_nodeID}"'] = self.get_var_type(cursor.type)
+
+        if cursor.type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
+            #配列の場合
+            if cursor.type.kind != ci.TypeKind.CONSTANTARRAY:
+                sys.exit("our system cannot receive variable-size array")
+
+            # 念の為、添字と配列の中身のカーソルを分けて取得する
+            cr_index_list: list[ci.Cursor | int] = []
+
+            array_nodeID = self.createNode("", 'box3d')
+            self.createEdge(var_nodeID, array_nodeID)
+
+            content_cursors: list[ci.Cursor] = list(cursor.get_children())
+            if len(content_cursors) == 0:
+                sys.exit("error in array contents")
+            
+            # 文字列か配列かで処理を分ける
+            if content_cursors[0].kind == ci.CursorKind.STRING_LITERAL:
+                # 文字列の場合
+                index_nodeID = self.createNode(cr.spelling, 'Mcircle')
+                self.expr_node_info[f'"{index_nodeID}"'] = {
+                    "vars": [], "funcs": [],
+                    "comments": [
+                        {
+                            "id": 1, 
+                            "description": [
+                                {
+                                    "text": f"store each character of {cr.spelling} into the array in increasing index order, array size is automatically set to {len(cr.spelling)-2}"
+                                }
+                            ],
+                            "expr": []
+                        } 
+                        if self.is_english else 
+                        {
+                            "id": 1,
+                            "description": [
+                                {
+                                    "text": f"文字列 {cr.spelling} の各文字が添字の小さい順に配列へ格納されます。配列サイズは {len(cr.spelling)-2} に自動的に設定されます。"
+                                }
+                            ],
+                            "expr": []
+                        }
+                    ],
+                    "line": cursor.location.line
+                }
+                self.createEdge(array_nodeID, index_nodeID, "strCont")
+            else:
+                # 配列のサイズを取得する
+                index_size_list: list[IndexSize] = []
+                t = cursor.type
+                # 動的に長さが決まる配列は除外しているので、添字のカーソルを辿っていくループにより配列のサイズは取得できる
+                while t.kind == ci.TypeKind.CONSTANTARRAY:
+                    '''
+                    content_cursorsは、[*(配列の添字を決める計算式のカーソルのリスト), 初期化要素リスト]で、
+                    長さはindex_size_listと必ず等しくなるので、この分岐でOK
+                    このループの後、content_cursorsの中身は、初期化があるならINIT_LIST_EXPRのカーソルが含まれており、無いならそのカーソルが含まれていない空リストになる
+                    ゆえに、その長さで初期化子があるかを判別できる
+                    '''
+
+                    # 想定通りでない場合は処理を終了する
+                    if len(content_cursors) == 0:
+                        sys.exit("error in number of array-index cursors in AST")
+
+                    if content_cursors[0].kind != ci.CursorKind.INIT_LIST_EXPR:
+                        index_size_list.append({"size": t.element_count, "cursor": content_cursors.pop(0)})
+                    else:
+                        index_size_list.append({"size": t.element_count})
+                    t = t.element_type
+                    # t.spellingは配列の一成分の型 (int a[2][3]ならint)
+                    print(f"type = {cursor.type.kind}, children = {t.spelling}")
+
+                if len(content_cursors):
+                    # 念のために、ここまでの想定通り初期化子だけを含むリストかを確認する
+                    if len(content_cursors) != 1 or content_cursors[0].kind != ci.CursorKind.INIT_LIST_EXPR:
+                        sys.exit("error in an array AST")
+
+                    # 初期化子がある場合
+                    # 一番上の添字ノードはこのメソッドで作りくっつける
+                    arr_contents_list = self.get_arr_contents2(content_cursors[0], index_size_list)
+                    arrCont_nodeID_list = self.parse_arr_contents(arr_contents_list, [cursor.spelling], arrCont_condition_move, cursor.location.line)
+                    for arrCont_nodeID in arrCont_nodeID_list:
+                        self.createEdge(array_nodeID, arrCont_nodeID, "arrCont")
+                    # 一次元配列で添字がない場合は、その要素数をindexリストにくっつける
+                    if len(cr_index_list) == 0:
+                        cr_index_list.append(len(arrCont_nodeID_list))
+
+            nodeID = array_nodeID
+            index_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
+
+            # Mcircleノードに添字の計算式または推定値を取得する
+            for cr_index in cr_index_list:
+                if isinstance(cr_index, int):
+                    index_nodeID = self.createNode("", 'Mcircle')
+                    self.expr_node_info[f'"{index_nodeID}"'] = {
+                        "vars": [],
+                        "funcs": [],
+                        "comments": [
+                            {
+                                "id": 1, 
+                                "description": [{"text": f"array size is automatically set to {cr_index}"}],
+                                "expr": []
+                            } 
+                            if self.is_english else 
+                            {
+                                "id": 1,
+                                "description": [{"text": f"添字は {cr_index} が自動的に設定されます"}],
+                                "expr": []
+                            }
+                        ],
+                        "line": cursor.location.line
+                    }
+                else:
+                    index_nodeID = self.get_expr(cr_index, shape="Mcircle")
+                    index_condition_move += self.expr_node_info[f'"{index_nodeID}"']["funcs"]
+                
+                for func in self.expr_node_info[f'"{index_nodeID}"']["funcs"]:
+                    # dictは標準関数
+                    if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                        sys.exit("array index cannot include a specific standard function")
+                self.createEdge(nodeID, index_nodeID)
+                nodeID = index_nodeID
+
+            # self.line_infoの最初行番が0である場合、このcondition_moveを記録すると同時にself.line_infoを更新する
+            # indexのcondition_moveがあるなら最初の添字の行数を取得する 
+            if len(index_condition_move) != 0:
+                array_condition_move: list[int | tuple[str,int] | dict[str, any]] = [*index_condition_move, *arrCont_condition_move]
+                self.condition_move[f'"{array_nodeID}"'] = ('item', array_condition_move)
+            # 中身のcondition_moveがあるなら中身の最初の行数を取得する
+            elif len(arrCont_condition_move) != 0:
+                # 最初の行数がない場合は最初の行数を追加する
+                if arrCont_condition_move[0] != init_list_cursors[0].location.line:
+                    array_condition_move = [init_list_cursors[0].location.line, *arrCont_condition_move]
+                    self.condition_move[f'"{array_nodeID}"'] = ('item', array_condition_move)
+                # なければ追加しない (構造体と同じ)
+                else:
+                    array_condition_move = arrCont_condition_move
+                    self.condition_move[f'"{array_nodeID}"'] = ('item', array_condition_move)
+            # 関数が計算式に含まれていないなら変数名の行数を追加する
+            else:
+                array_condition_move = [cursor.location.line]
+                self.condition_move[f'"{array_nodeID}"'] = ('item', array_condition_move)
+
+            self.line_info_dict[self.scanning_func].setStart(array_condition_move[0], isStatic)
+            self.func_info_dict[self.scanning_func].setStart(array_condition_move[0], isStatic)
+        elif cursor.type.get_canonical().kind == ci.TypeKind.RECORD:
+            # 構造体や共用体
+            record_kind = cursor.type.get_declaration().kind
+            if record_kind == ci.CursorKind.STRUCT_DECL:
+                # 構造体
+                struct_cursors: list[ci.Cursor] = list(cursor.get_children())
+                if len(struct_cursors) not in (1,2):
+                    sys.exit("number of children cursors in struct variable has to be 1 of 2")
+
+                if struct_cursors[0].kind != ci.CursorKind.TYPE_REF:
+                    sys.exit("the first children cursor of struct variable has to be a TYPE_REF cursor")
+
+                # 構造体の宣言の初期化が初期化子によるものなのか、他の構造体の代入によるものなのかでTYPE_REFを削るかどうかを決める
+                if len(struct_cursors) == 2 and struct_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
+                    struct_cursors.pop(0)
+
+                if struct_cursors[0].kind == ci.CursorKind.TYPE_REF:
+                    # initがある場合は、型をくっつける
+                    self.check_cursor_error(struct_cursors[0])
+                    nodeID = self.createNode("", 'tab')
+                    self.createEdge(var_nodeID, nodeID)
+                    if len(struct_cursors) == 1:
+                        # 未初期化の構造体宣言の場合 (struct_cursorsがTYPE_REFのカーソルのみを持つ)
+                        self.expr_node_info[f'"{nodeID}"'] = {
+                            "vars": [],
+                            "funcs": [],
+                            "comments": [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}],
+                            "line": cursor.location.line
+                        }
+                        self.condition_move[f'"{nodeID}"'] = ('item', [struct_cursors[0].location.line])
+                        self.line_info_dict[self.scanning_func].setStart(struct_cursors[0].location.line, isStatic)
+                        self.func_info_dict[self.scanning_func].setStart(struct_cursors[0].location.line, isStatic)
+                        # これ以上は分析することはないので変数宣言ノードのIDを返して本メソッドを終了する
+                        return var_nodeID
+
+                '''
+                構造体の初期化
+                struct Student student = {"Alice", {1,2}, 0}; のような初期化子を用いた場合は前者、
+                struct Student student = student1; のような代入を用いた場合は後者に分別される
+                '''
+                if struct_cursors[-1].kind == ci.CursorKind.INIT_LIST_EXPR:
+                    # 初期化子の場合
+                    members = list((f.spelling, f.type.spelling) for f in cursor.type.get_fields())
+                    member_crs = list(struct_cursors[-1].get_children())
+                    memberNum = len(member_crs)
+                    member_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
+                    isFunc = False
+                    for i, member in enumerate(members):
+                        if i < memberNum:
+                            # 初期化されている構造体メンバの確認
+                            self.check_cursor_error(member_crs[i])
+                            # varnameとvartype(メンバーの)をget_exprの引数に設定する
+                            call_exp_cursor_list = None
+                            value_cr = self.unwrap_unexposed(member_crs[i])
+                            if value_cr.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
+                                casted_exp_cursor = next(value_cr.get_children())
+                                casted_exp_cursor = self.unwrap_unexposed(casted_exp_cursor)
+                                if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
+                                    call_exp_cursor_list = list(casted_exp_cursor.get_children())
+                                    if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                        member_nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                            elif value_cr.kind == ci.CursorKind.CALL_EXPR:
+                                call_exp_cursor_list = list(value_cr.get_children())
+                                if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                    member_nodeID = self.get_expr(value_cr, var={"vartype": member[1]})
+                                elif call_exp_cursor_list[0].spelling == "fopen":
+                                    sys.exit("struct member cannot include fopen")
+                            
+                            if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
+                                member_nodeID = self.get_expr(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
+                            
+                            self.createEdge(nodeID, member_nodeID)
+
+                            if len(self.expr_node_info[f'"{member_nodeID}"']["funcs"]) != 0:
+                                for func in self.expr_node_info[f'"{member_nodeID}"']["funcs"]:
+                                    if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                                        sys.exit("struct member cannot include some standard functions")
+                                member_condition_move += self.expr_node_info[f'"{member_nodeID}"']["funcs"]
+                                isFunc = True
+                        else:
+                            member_nodeID = self.createNode(member[0], 'square')
+                            self.expr_node_info[f'"{member_nodeID}"'] = {
+                                "vars": [],
+                                "funcs": [],
+                                "comments": [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}],
+                                "line": cursor.location.line
+                            }
+                            self.createEdge(nodeID, member_nodeID)
+                    if isFunc:
+                        # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
+                        if member_condition_move[0] != member_crs[0].location.line:
+                            member_condition_move.insert(0, member_crs[0].location.line)
+                    else:
+                        member_condition_move.append(cursor.location.line)
+                    # self.line_infoの最初行番をmember_condition_moveの最初の行番で変更する
+                    self.condition_move[f'"{nodeID}"'] = ('item', member_condition_move)
+                    self.line_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
+                    self.func_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
+                else:
+                    # 代入の場合
+                    value_nodeID = self.get_expr(struct_cursors[-1])
+                    self.createEdge(nodeID, value_nodeID)
+            
+            elif record_kind == ci.CursorKind.UNION_DECL:
+                # 共用体 (まだ未実装)
+                pass
+            else:
+                # struct, union以外typekindでRECORDを持つことはないが、念のため
+                sys.exit("error in AST cursor of RECORD")
+        # スカラー変数
+        else:
+            init_cursors = list(cursor.get_children())
+            if len(init_cursors):
+                if len(init_cursors) == 2 and init_cursors[0].kind == ci.CursorKind.TYPE_REF and init_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
+                    init_cursors.pop(0)
+
+                for cr in init_cursors:
+                    self.check_cursor_error(cr)
+                    # 構造体の宣言でノードを作る
+                    if cr.kind == ci.CursorKind.TYPE_REF:
+                        nodeID = self.createNode("", 'tab')
+                        self.createEdge(var_nodeID, nodeID)
+                        if len(init_cursors) == 1:
+                            self.condition_move[f'"{nodeID}"'] = ('item', [cr.location.line])
+                            self.line_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
+                            self.func_info_dict[self.scanning_func].setStart(cr.location.line, isStatic)
+                    # 構造体系の初期化
+                    elif cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                        members = list((f.spelling, f.type.spelling) for f in cursor.type.get_fields())
+                        member_crs = list(cr.get_children())
+                        memberNum = len(member_crs)
+                        member_condition_move: list[int | tuple[str,int] | dict[str, any]] = []
+                        isFunc = False
+                        for i, member in enumerate(members):
+                            if i < memberNum:
+                                # 初期化されている構造体メンバの確認
+                                self.check_cursor_error(member_crs[i])
+                                # varnameとvartype(メンバーの)をget_exprの引数に設定する
+                                call_exp_cursor_list = None
+                                value_cr = self.unwrap_unexposed(member_crs[i])
+                                if value_cr.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
+                                    casted_exp_cursor = next(value_cr.get_children())
+                                    casted_exp_cursor = self.unwrap_unexposed(casted_exp_cursor)
+                                    if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
+                                        call_exp_cursor_list = list(casted_exp_cursor.get_children())
+                                        if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                            member_nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # member_nodeID = self.get_expr(casted_exp_cursor, var={"vartype": value_cr.type.spelling[:-1]})
+                                            # self.expr_node_info[f'"{member_nodeID}"'] = {
+                                            #     "vars": self.expr_node_info[f'"{member_nodeID}"']["vars"],
+                                            #     "funcs": self.expr_node_info[f'"{member_nodeID}"']["funcs"],
+                                            #     "comments": [
+                                            #         *self.expr_node_info[f'"{member_nodeID}"']["comments"],
+                                            #         {
+                                            #             "id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"] + 1,
+                                            #             "description": 
+                                            #             [
+                                            #                 {"text": "cast type of"}, 
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]}, 
+                                            #                 {"text": f"to {value_cr.type.spelling}"},
+                                            #             ] if self.is_english else
+                                            #             [
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]},
+                                            #                 {"text": f"の型を {value_cr.type.spelling} に変換します"}
+                                            #             ],
+                                            #             "expr": 
+                                            #             [
+                                            #                 {"text": f"({value_cr.type.spelling})"},
+                                            #                 {"expr_id": self.expr_node_info[f'"{member_nodeID}"']["comments"][-1]["id"]}
+                                            #             ]
+                                            #         }
+                                            #     ],
+                                            #     "line": self.expr_node_info[f'"{member_nodeID}"']["line"]
+                                            # }
+                                            # self.expr_node_info[f'"{member_nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{member_nodeID}"'][0], *self.expr_node_info[f'"{member_nodeID}"'][1:5])
+                                elif value_cr.kind == ci.CursorKind.CALL_EXPR:
+                                    call_exp_cursor_list = list(value_cr.get_children())
+                                    if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                        member_nodeID = self.get_expr(value_cr, var={"vartype": member[1]})
+                                    elif call_exp_cursor_list[0].spelling == "fopen":
+                                        sys.exit("struct member cannot include fopen")
+                                
+                                if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
+                                    member_nodeID = self.get_expr(member_crs[i], label=member[0], var={"vartype": member[1], "varname": cursor.spelling})
+                                
+                                self.createEdge(nodeID, member_nodeID)
+
+                                if len(self.expr_node_info[f'"{member_nodeID}"']["funcs"]) != 0:
+                                    for func in self.expr_node_info[f'"{member_nodeID}"']["funcs"]:
+                                        if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
+                                            sys.exit("struct member cannot include some standard functions")
+                                    member_condition_move += self.expr_node_info[f'"{member_nodeID}"']["funcs"]
+                                    isFunc = True
+                            else:
+                                member_nodeID = self.createNode(member[0], 'square')
+                                self.expr_node_info[f'"{member_nodeID}"'] = {
+                                    "vars": [],
+                                    "funcs": [],
+                                    "comments": [{"id": 1, "description": [{"text": "this is an uninitialized part" if self.is_english else "初期化されていない要素です"}], "expr": []}],
+                                    "line": cursor.location.line
+                                }
+                                self.createEdge(nodeID, member_nodeID)
+                        if isFunc:
+                            # 計算式に関数が含まれていて、なおかつ最初の関数が最初のメンバと同じ行番にない場合は最初のメンバの行数を追加する
+                            if member_condition_move[0] != member_crs[0].location.line:
+                                member_condition_move.insert(0, member_crs[0].location.line)
+                        else:
+                            member_condition_move.append(cursor.location.line)
+                        # self.line_infoの最初行番をmember_condition_moveの最初の行番で変更する
+                        self.condition_move[f'"{nodeID}"'] = ('item', member_condition_move)
+                        self.line_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
+                        self.func_info_dict[self.scanning_func].setStart(member_condition_move[0], isStatic)
+                    # スカラー変数とポインタ
+                    else:
+                        call_exp_cursor_list = None
+                        value_cr = self.unwrap_unexposed(cr)
+                        if value_cr.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
+                            casted_exp_cursor = next(value_cr.get_children())
+                            casted_exp_cursor = self.unwrap_unexposed(casted_exp_cursor)
+                            if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
+                                call_exp_cursor_list = list(casted_exp_cursor.get_children())
+                                if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                    nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                    # self.expr_node_info[f'"{nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{nodeID}"'][0], *self.expr_node_info[f'"{nodeID}"'][1:5])
+                        elif value_cr.kind == ci.CursorKind.CALL_EXPR:
+                            call_exp_cursor_list = list(value_cr.get_children())
+                            if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
+                                nodeID = self.get_expr(value_cr, var={"vartype": cursor.type.spelling[:-1]})
+                            elif call_exp_cursor_list[0].spelling == "fopen":
+                                nodeID = self.get_expr(value_cr, var={"varname": cursor.spelling})
+                        if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc", "fopen"]:
+                            nodeID = self.get_expr(cr)
+
+                        # 今は一行だが、複数行になる場合、関数の遷移前の行番を取得する必要がある。(関数がない場合は変数名の行数になる)
+                        # -> expr_node_info[2]には関数だけでなくその行番も含めて追加する必要がある
+                        # ここでもstaticでなければself.line_infoの最初行番を変更する
+                        var_condition_move: list[int | tuple[str,int] | dict[str, any]] = [cr.location.line, *self.expr_node_info[f'"{nodeID}"']["funcs"]] if len(self.expr_node_info[f'"{nodeID}"']["funcs"]) else [cursor.location.line]
+                        self.condition_move[f'"{nodeID}"'] = ('item', var_condition_move)
+                        self.line_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
+                        self.func_info_dict[self.scanning_func].setStart(var_condition_move[0], isStatic)
+                        self.createEdge(var_nodeID, nodeID)
+            else:
+                # 変数の初期値が無い場合
+                nodeID = self.createNode("", 'square')
+                self.expr_node_info[f'"{nodeID}"'] = {
+                    "vars": [], "funcs": [], 
+                    "comments": [{"id": 1, "description": [{"text": "this is an uninitialized item" if self.is_english else "初期化されていないアイテムです"}], "expr": []}],
+                    "line": cursor.location.line
+                }
+                self.condition_move[f'"{nodeID}"'] = ('item', [cursor.location.line])
+                self.line_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
+                self.func_info_dict[self.scanning_func].setStart(cursor.location.line, isStatic)
+                self.createEdge(var_nodeID, nodeID)
+        
+        return var_nodeID
+    
+
     def get_arr_contents(self, cr_iter: list[ci.Cursor], cr_index_list: list[ci.Cursor | int], depth: int = 1):
-        not_init_list_expr = True
+        init_list_expr = any([cr.kind == ci.CursorKind.INIT_LIST_EXPR for cr in cr_iter])
         arr_content_list = []
-        for i, cr in enumerate(cr_iter):
-            if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
-                # {3, 4, {2, 5}}となる場合、{{3,0}, {4,0}, {2,5}}}にする必要があるので、
-                # まずはInit_list_expr = {}があるかどうかを確認して、そのチェックを後で行えるようにする
-                not_init_list_expr = False
-                break
 
         for i, cr in enumerate(cr_iter):
             self.check_cursor_error(cr)
             if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
                 # {}の場合は、その中の配列の要素を確かめる
+                print("here")
+                print(cr.type.kind, cr.type.spelling)
                 arr_content_list.append(self.get_arr_contents(list(cr.get_children()), cr_index_list, depth+1))
             # 子要素の中の要素が1つだけ
             else:
-                arr_content_list.append([{"label": f"[{i}]" if not_init_list_expr else "[0]", "cursor": cr}])
+                print("here1", self.unwrap_unexposed(cr).kind)
+                arr_content_list.append([{"label": "[0]" if init_list_expr else f"[{i}]", "cursor": cr}])
         
         # 配列の子要素が全て1なら、その1つの要素を抽出する
-        if (maxNum := len(max(arr_content_list, key=len))) == 1:
+        if (max_num := len(max(arr_content_list, key=len))) == 1:
             return [arr_index[0] for arr_index in arr_content_list]
         # 配列の中に配列(子配列)がある場合は、子配列のノードを配列のノードにくっつけていく
         else:
             fixed_arr_contents_list = []
             # 未定の添字があったら配列の要素数を添字に設定する
             if depth > len(cr_index_list):
-                cr_index_list.append(maxNum)
+                cr_index_list.append(max_num)
             for i, arr_content in enumerate(arr_content_list):
                 fixed_arr_contents = []
                 # 子要素の中にある要素数を取得する
-                contNum = len(arr_content)
+                count_num = len(arr_content)
+                print(cr_index_list[0].spelling, count_num, max_num)
                 # 子要素を一つずつ作っていく
-                for n in range(maxNum):
+                for n in range(max_num):
                     # 初期化されている子要素はそのノードをくっつける
-                    if contNum > n:
+                    if count_num > n:
                         fixed_arr_contents.append(arr_content[n])
                     # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
                     else:
@@ -999,24 +1605,80 @@ class ASTtoFlowChart:
                 fixed_arr_contents_list.append(fixed_arr_contents)
             return fixed_arr_contents_list
 
+    def get_arr_contents2(self, init_list_cursor: ci.Cursor, index_size_list: list[IndexSize], depth: int = 1):
+        arr_content_list = []
+        ''' 
+        配列にて、現在確認している階層が「要素の階層」から何階層分離れているかを確認する
+        例えば、a[3][2]の[3]の階層を確認しているときは、2 - 1 = 1となる
+        現在確認している階層が「要素の階層」なら0となる
+        '''
+        phase_from_array_elements = len(index_size_list) - depth
+
+        # 初期化子 {} の中身を確認する
+        for i, cr in enumerate(list(init_list_cursor.get_children())):
+            self.check_cursor_error(cr)
+            if phase_from_array_elements:
+                # 次の階層がまだ配列の最下層ではない場合
+                if cr.kind == ci.CursorKind.INIT_LIST_EXPR:
+                    # {}の場合は、その中の配列の要素を確かめる
+                    arr_content_list.append(self.get_arr_contents2(cr, index_size_list, depth+1))
+                else:
+                    # 子要素の中の要素が1つだけ
+                    # 本来はOKだが、全てに対応する場合は本プログラムが複雑になるのと、初学者は使う場面が少ない(ほぼ無い)ので、今はエラーを出して終了とする
+                    # 将来発展させて対応させる余地はある
+                    sys.exit("error in array structure (all the elements of array have to be initialized)")
+            else:
+                # 配列の中の要素(例: a[2][3] = {{1,2,3}, {4,5,6}, {7,8,9}}の数字の部分)を確認する
+                # 要素がスカラー変数の場合
+
+                # 要素が構造体の場合
+
+                pass
+        
+        # 配列の子要素が全て1なら、その1つの要素を抽出する
+        if (max_num := len(max(arr_content_list, key=len))) == 1:
+            return [arr_index[0] for arr_index in arr_content_list]
+        # 配列の中に配列(子配列)がある場合は、子配列のノードを配列のノードにくっつけていく
+        else:
+            fixed_arr_contents_list = []
+            # 未定の添字があったら配列の要素数を添字に設定する
+            if depth > len(cr_index_list):
+                cr_index_list.append(max_num)
+            for i, arr_content in enumerate(arr_content_list):
+                fixed_arr_contents = []
+                # 子要素の中にある要素数を取得する
+                count_num = len(arr_content)
+                print(cr_index_list[0].spelling, count_num, max_num)
+                # 子要素を一つずつ作っていく
+                for n in range(max_num):
+                    # 初期化されている子要素はそのノードをくっつける
+                    if count_num > n:
+                        fixed_arr_contents.append(arr_content[n])
+                    # 初期化されていない子要素は「値がない」ことを明示するノードを作ってくっつける
+                    else:
+                        fixed_arr_contents.append({"label": f"[{n}]"})
+                fixed_arr_contents_list.append(fixed_arr_contents)
+            return fixed_arr_contents_list
+
+
     # 配列(多次元も含む)の要素を取得する
     def parse_arr_contents(self, arr_content_list: list[list] | list[dict], index_list: list[str], arr_condition_move: list[int | tuple[str,int] | dict[str, any]], line: int):
-        # ここに来るということは「配列の初期化要素がある = arr_content_listの要素数が0ではない」はずなので、0であるならエラーとなる
         if len(arr_content_list) == 0:
+            # ここに来るということは「配列の初期化要素がある = arr_content_listの要素数が0ではない」はずなので、0であるならエラーとなる
             sys.exit("here you come, zero array content is impossible")
         
         if isinstance(arr_content_list[0], list):
-            indexNodeID_list = []
+            index_nodeID_list = []
             for i, arr_content in enumerate(arr_content_list):
-                indexNodeID = self.createNode(f"[{i}]", "box3d")
-                for contentNodeID in self.parse_arr_contents(arr_content, [*index_list, f"[{i}]"], arr_condition_move, line):
-                    self.createEdge(indexNodeID, contentNodeID)
-                indexNodeID_list.append(indexNodeID)
-            return indexNodeID_list
-                
+                index_nodeID = self.createNode(f"[{i}]", "box3d")
+                for content_nodeID in self.parse_arr_contents(arr_content, [*index_list, f"[{i}]"], arr_condition_move, line):
+                    self.createEdge(index_nodeID, content_nodeID)
+                index_nodeID_list.append(index_nodeID)
+            return index_nodeID_list
         else:
-            contentNodeID_list = []
+            content_nodeID_list = []
             for arr_content in arr_content_list:
+                print("check:", arr_content)
                 if "cursor" in arr_content:
                     # varnameとvartypeをget_exprの引数に設定する
                     # [*index_list, arr_content["label"]]
@@ -1029,54 +1691,62 @@ class ASTtoFlowChart:
                         if casted_exp_cursor.kind == ci.CursorKind.CALL_EXPR:
                             call_exp_cursor_list = list(casted_exp_cursor.get_children())
                             if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                                contentNodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
-                                # self.expr_node_info[f'"{contentNodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{contentNodeID}"'][0], *self.expr_node_info[f'"{contentNodeID}"'][1:5])
+                                content_nodeID = self.get_expr(value_cr, var={"vartype": value_cr.type.spelling[:-1]})
+                                # self.expr_node_info[f'"{content_nodeID}"'] = (f"({value_cr.type.spelling}) " + self.expr_node_info[f'"{content_nodeID}"'][0], *self.expr_node_info[f'"{content_nodeID}"'][1:5])
                     elif value_cr.kind == ci.CursorKind.CALL_EXPR:
                         call_exp_cursor_list = list(value_cr.get_children())
                         if call_exp_cursor_list[0].spelling in ["malloc", "realloc"]:
-                            contentNodeID = self.get_expr(value_cr, var={"vartype": arr_content["cursor"].type.spelling})
+                            content_nodeID = self.get_expr(value_cr, var={"vartype": arr_content["cursor"].type.spelling})
                         elif call_exp_cursor_list[0].spelling == "fopen":
                             sys.exit("array content cannot include fopen")
                     if call_exp_cursor_list is None or call_exp_cursor_list[0].spelling not in ["malloc", "realloc"]:
-                        contentNodeID = self.get_expr(arr_content["cursor"], shape="square", label=arr_content["label"], var={"vartype": arr_content["cursor"].type.spelling, "varname": index_list[0]})
+                        content_nodeID = self.get_expr(arr_content["cursor"], shape="square", label=arr_content["label"], var={"vartype": arr_content["cursor"].type.spelling, "varname": index_list[0]})
                     
-                    for func in self.expr_node_info[f'"{contentNodeID}"']["funcs"]:
+                    for func in self.expr_node_info[f'"{content_nodeID}"']["funcs"]:
                         if isinstance(func, dict) and func["name"] in ["malloc", "realloc", "fopen"]:
                             sys.exit("array content cannot include some standard functions")
                     
-                    arr_condition_move = ([*arr_condition_move, *self.expr_node_info[f'"{contentNodeID}"']["funcs"]] 
+                    arr_condition_move = ([*arr_condition_move, *self.expr_node_info[f'"{content_nodeID}"']["funcs"]] 
                                           if line == arr_content["cursor"].location.line else 
-                                          [*arr_condition_move, arr_content["cursor"].location.line, *self.expr_node_info[f'"{contentNodeID}"']["funcs"]])
-
+                                          [*arr_condition_move, arr_content["cursor"].location.line, *self.expr_node_info[f'"{content_nodeID}"']["funcs"]])
                 else:
-                    contentNodeID = self.createNode(arr_content["label"], "square")
+                    content_nodeID = self.createNode(arr_content["label"], "square")
                     # ExprDescription
                     # id: int
                     # description: list[ExprDescriptionPart]
                     # expr: list[ExprDescriptionPart]
                     # list[ExprDescription]
-                    self.expr_node_info[f'"{contentNodeID}"'] = {
+                    self.expr_node_info[f'"{content_nodeID}"'] = {
                         "vars": [],
                         "funcs": [],
                         "comments": [{"id": 1, "description": [{"text": "random value is set here" if self.is_english else "ランダムな値が設定されてます"}], "expr": []}],
                         "line": line
                     }
-                contentNodeID_list.append(contentNodeID)
-            return contentNodeID_list
+                content_nodeID_list.append(content_nodeID)
+            print("")
+            return content_nodeID_list
+
+    # 構造体の要素を取得する
+    def parse_struct_contents(self, cursor: ci.Cursor):
+        # まずメンバーを取得して
+        members: list[tuple[str, str]] = list((f.spelling, f.type.spelling) for f in cursor.type.get_fields())
+        for i, (member_name, member_type) in enumerate(members):
+
+            pass
 
     #式(一つのノードexpNodeに内容をまとめる)
     def get_expr(self, cursor, shape='square', label="", var: dict | None = None) -> str:
-        exprNodeID = self.createNode(label, shape)
+        expr_nodeID = self.createNode(label, shape)
         expr_info = ExprInfo()
         # ここのexpr_descriptionを変える必要がある(そのままだとexpr_idを含む辞書になってしまう)
-        expr_description = self.parse_expr(cursor, expr_info, var=var)
-        self.expr_node_info[f'"{exprNodeID}"'] = {
+        self.parse_expr(cursor, expr_info, var=var)
+        self.expr_node_info[f'"{expr_nodeID}"'] = {
             "vars": expr_info.var_references,
             "funcs": expr_info.func_references,
             "comments": expr_info.expr_descriptions,
             "line": cursor.location.line
         }
-        return exprNodeID
+        return expr_nodeID
 
     def unwrap_unexposed(self, cursor: ci.Cursor) -> ci.Cursor:
         self.check_cursor_error(cursor)
@@ -1102,6 +1772,7 @@ class ASTtoFlowChart:
                 description=[{"text": "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します"}], 
                 expr=[{"text": "("}, inside_expr_description, {"text": ")"}]
             )
+        
         # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind == ci.CursorKind.INTEGER_LITERAL:
             expr_description = {"text": next(cursor.get_tokens()).spelling}
@@ -1111,6 +1782,7 @@ class ASTtoFlowChart:
             expr_description = {"text": next(cursor.get_tokens()).spelling}
         elif cursor.kind == ci.CursorKind.CHARACTER_LITERAL:
             expr_description = {"text": next(cursor.get_tokens()).spelling}
+        
         # スカラー変数の呼び出し
         elif cursor.kind == ci.CursorKind.DECL_REF_EXPR:
             ref_expr_tokens = list(cursor.get_tokens())
@@ -1123,6 +1795,7 @@ class ASTtoFlowChart:
             else:
                 expr_description = {"reference": cursor.spelling, "type": "scalar"}
             expr_info.add_var_reference(expr_description["reference"], cursor.referenced.location.line)
+        
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             index_list: list[dict[str, any]] = []
@@ -1148,6 +1821,7 @@ class ASTtoFlowChart:
 
             # expr_info.add_var_reference(name_spell, array_children_cursors[0].referenced.location.line)
             expr_description = {"reference": self.parse_expr(array_children_cursors[0], expr_info), "indexes": list(reversed(index_list)), "type": "array"}
+        
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
             member_chain: list[str] = []
@@ -1169,6 +1843,7 @@ class ASTtoFlowChart:
             # else:
             #     # sys.exit("") ?
             #     pass
+        
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
             expr_description = self.parse_call_expr(cursor, expr_info, var=var)
@@ -1361,7 +2036,6 @@ class ASTtoFlowChart:
 
         # --- 関数名ノードの処理 ---
         func_cursor = self.unwrap_unexposed(children[0])
-        self.check_cursor_error(func_cursor)
 
         ref_spell: str = func_cursor.spelling
         self.func_info_dict[self.scanning_func].setRef(ref_spell)
@@ -1493,12 +2167,32 @@ class ASTtoFlowChart:
     def parse_typedef(self, cursor):
         print(f"{cursor.underlying_typedef_type.spelling} {cursor.spelling}")
 
-    # 構造体の解析(フローチャートには含めないが、アイテムには必要なので解析)
-    def parse_struct(self, cursor):
+    # 構造体の解析 (メンバの型を取得しておいて、解析に用いる)
+    def parse_struct(self, cursor: ci.Cursor):
         print(f"struct {cursor.spelling}")
+        self.struct_info[f"struct {cursor.spelling}"] = []
         for cr in cursor.get_children():
             self.check_cursor_error(cr)
             print(f"    {cr.type.spelling} {cr.spelling}")
+            t = cr.type
+            if t.kind in (ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY):
+                sys.exit("our system cannot receive variable array member of a struct variable")
+            
+            array_size: list[int] = []
+            if t.kind == ci.TypeKind.CONSTANTARRAY:
+                while t.kind == ci.TypeKind.CONSTANTARRAY:
+                    array_size.append(t.element_count)
+                    t = t.element_type
+                print(f"    length = {array_size}")
+                print(f"    type = {t.kind}")
+            else:
+                print("    length = 1")
+                print(f"    type = {t.kind}")
+
+            
+
+            self.struct_info[f"struct {cursor.spelling}"].append((cr.spelling, array_size))
+
 
     # 共用体の解析(フローチャートには含めないが、アイテムには必要なので解析)
     def parse_union(self, cursor):
@@ -1547,29 +2241,29 @@ class ASTtoFlowChart:
     #その関数の戻り値は条件先の最後の処理を示すノードとし、この戻り値→出口ノードとなる矢印をつける
     #リファクタリング後はchildrenがない場合nodeIDを返すことになっている。これで支障をきたす場合、少し変えることを考える
     def parse_if_stmt(self, cursor, nodeID, edgeName=""):
-        termNodeIDs = self.parse_if_branch(cursor, nodeID, [], edgeName)
-        endNodeID = self.createNode("", 'circle')
-        self.createRoomSizeEstimate(endNodeID)
+        term_nodeIDs = self.parse_if_branch(cursor, nodeID, [], edgeName)
+        end_nodeID = self.createNode("", 'circle')
+        self.createRoomSizeEstimate(end_nodeID)
 
-        for termNodeID in termNodeIDs:
-            self.createEdge(termNodeID, endNodeID)
+        for term_nodeID in term_nodeIDs:
+            self.createEdge(term_nodeID, end_nodeID)
 
-        return endNodeID
+        return end_nodeID
 
     def parse_if_branch(self, cursor: ci.Cursor, nodeID, line_track: list[int | tuple[str,int] | dict[str, any]], edgeName=""):
-        def parse_if_branch_start(cursor: ci.Cursor, parentNodeID, line_track: list[int | tuple[str,int] | dict[str, any]], type: str):
+        def parse_if_branch_start(cursor: ci.Cursor, parent_nodeID, line_track: list[int | tuple[str,int] | dict[str, any]], type: str):
             """if / else の本体（複合文または単一文）を処理する"""
             children = list(cursor.get_children())
             if cursor.kind == ci.CursorKind.COMPOUND_STMT:
                 if len(children):
-                    self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [children[0].location.line])
+                    self.condition_move[f'"{parent_nodeID}"'] = (type, line_track + [children[0].location.line])
                 else:
-                    self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [cursor.extent.end.line])
-                return self.parse_comp_stmt(cursor, parentNodeID, type)
+                    self.condition_move[f'"{parent_nodeID}"'] = (type, line_track + [cursor.extent.end.line])
+                return self.parse_comp_stmt(cursor, parent_nodeID, type)
             # 混合文がない = {} で囲まれない単体文
             else:
-                self.condition_move[f'"{parentNodeID}"'] = (type, line_track + [cursor.location.line])
-                return self.parse_stmt(cursor, parentNodeID)
+                self.condition_move[f'"{parent_nodeID}"'] = (type, line_track + [cursor.location.line])
+                return self.parse_stmt(cursor, parent_nodeID)
             
         # くっつけるノードをどんどん追加して返す。ifしかなくてもfalseのルートにノードを作ってtrue, falseの二つを追加して返す
         children = list(cursor.get_children())
@@ -1577,11 +2271,11 @@ class ASTtoFlowChart:
         # --- 条件式処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
-        condNodeID = self.get_expr(cond_cursor, shape='diamond', label='if')
-        self.createEdge(nodeID, condNodeID, edgeName)
+        cond_nodeID = self.get_expr(cond_cursor, shape='diamond', label='if')
+        self.createEdge(nodeID, cond_nodeID, edgeName)
 
         line_track.append(cond_cursor.location.line)
-        line_track += self.expr_node_info[f'"{condNodeID}"']["funcs"]
+        line_track += self.expr_node_info[f'"{cond_nodeID}"']["funcs"]
 
         if edgeName != "False":
             self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
@@ -1590,24 +2284,24 @@ class ASTtoFlowChart:
         then_cursor = children[1]
         self.check_cursor_error(then_cursor)
 
-        trueNodeID = self.createNode("", 'circle')
+        true_nodeID = self.createNode("", 'circle')
 
-        self.createEdge(condNodeID, trueNodeID, "True")
-        self.createRoomSizeEstimate(trueNodeID)
+        self.createEdge(cond_nodeID, true_nodeID, "True")
+        self.createRoomSizeEstimate(true_nodeID)
 
-        # 後々 condNodeID による演算内容を設定する
-        then_end = parse_if_branch_start(then_cursor, trueNodeID, line_track, 'if')
+        # 後々 cond_nodeID による演算内容を設定する
+        then_end = parse_if_branch_start(then_cursor, true_nodeID, line_track, 'if')
 
         # trueの後の処理の終点を作る (後でif構文の終点をまとめる)
-        trueEndNodeID = self.createNode("", 'terminator')
+        trueEnd_nodeID = self.createNode("", 'terminator')
         end_line = then_cursor.extent.end.line
 
         next_line = self.get_next_line()
 
         # if len(list(then_cursor.get_children())):
-        #     self.condition_move[f'"{trueEndNodeID}"'] = ('ifEnd',  [end_line, next_line[0]])
+        #     self.condition_move[f'"{trueEnd_nodeID}"'] = ('ifEnd',  [end_line, next_line[0]])
 
-        self.createEdge(then_end, trueEndNodeID)
+        self.createEdge(then_end, trueEnd_nodeID)
 
         # else節の処理がある場合
         if len(children) > 2:
@@ -1616,35 +2310,35 @@ class ASTtoFlowChart:
 
             if else_cursor.kind == ci.CursorKind.IF_STMT:
                 # else if の再帰処理
-                nodeIDs = [trueEndNodeID] + self.parse_if_branch(else_cursor, condNodeID, line_track, edgeName="False")
+                nodeIDs = [trueEnd_nodeID] + self.parse_if_branch(else_cursor, cond_nodeID, line_track, edgeName="False")
             else:
                 # else
-                falseEndNodeID = self.createNode("", 'terminator')
+                falseEnd_nodeID = self.createNode("", 'terminator')
                 in_else_cursor = list(else_cursor.get_children())
                 if len(in_else_cursor):
-                    # 後々 condNodeID による演算内容を設定する
-                    falseNodeID = self.createNode("", 'doublecircle')
-                    self.createEdge(condNodeID, falseNodeID, "False")
-                    self.createRoomSizeEstimate(falseNodeID)
-                    nodeID = parse_if_branch_start(else_cursor, falseNodeID, line_track, 'else')
+                    # 後々 cond_nodeID による演算内容を設定する
+                    false_nodeID = self.createNode("", 'doublecircle')
+                    self.createEdge(cond_nodeID, false_nodeID, "False")
+                    self.createRoomSizeEstimate(false_nodeID)
+                    nodeID = parse_if_branch_start(else_cursor, false_nodeID, line_track, 'else')
                     end_line = in_else_cursor[-1].location.line
                     self.line_info_dict[self.scanning_func].setLine(end_line)
-                    self.createEdge(nodeID, falseEndNodeID)
+                    self.createEdge(nodeID, falseEnd_nodeID)
                 else:
-                    nodeID = condNodeID
+                    nodeID = cond_nodeID
                     self.line_info_dict[self.scanning_func].setLine(else_cursor.location.line)
-                    self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', [*line_track, next_line[0]])
-                    self.createEdge(nodeID, falseEndNodeID, "False")
-                nodeIDs = [trueEndNodeID, falseEndNodeID]
+                    self.condition_move[f'"{falseEnd_nodeID}"'] = ('ifAllFalse', [*line_track, next_line[0]])
+                    self.createEdge(nodeID, falseEnd_nodeID, "False")
+                nodeIDs = [trueEnd_nodeID, falseEnd_nodeID]
         else:
             # elseがなくても終点を作る
-            falseEndNodeID = self.createNode("", 'terminator')
+            falseEnd_nodeID = self.createNode("", 'terminator')
             # elseがない場合は仮ifとしてcondition_moveを取得する
-            self.condition_move[f'"{falseEndNodeID}"'] = ('ifAllFalse', [*line_track, cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else [*line_track, next_line[0]])
+            self.condition_move[f'"{falseEnd_nodeID}"'] = ('ifAllFalse', [*line_track, cond_cursor.location.line, next_line[0]] if isinstance(line_track[-1], tuple) else [*line_track, next_line[0]])
             # print(end_line)
             # self.line_info_dict[self.scanning_func].setLine(end_line)
-            self.createEdge(condNodeID, falseEndNodeID, "False")
-            nodeIDs = [trueEndNodeID, falseEndNodeID]
+            self.createEdge(cond_nodeID, falseEnd_nodeID, "False")
+            nodeIDs = [trueEnd_nodeID, falseEnd_nodeID]
         
         return nodeIDs
     
@@ -1663,55 +2357,55 @@ class ASTtoFlowChart:
         # --- 条件処理 ---
         cond_cursor = children[0]
         self.check_cursor_error(cond_cursor)
-        condNodeID = self.get_expr(cond_cursor, shape='pentagon', label='while')
-        self.createRoomSizeEstimate(condNodeID)
+        cond_nodeID = self.get_expr(cond_cursor, shape='pentagon', label='while')
+        self.createRoomSizeEstimate(cond_nodeID)
 
-        self.createEdge(nodeID, condNodeID, edgeName)
+        self.createEdge(nodeID, cond_nodeID, edgeName)
 
         # --- 条件True時の処理ノード ---
-        trueNodeID = self.createNode("", 'circle')
-        self.condition_move[f'"{condNodeID}"'] = ('whileIn', [cond_cursor.location.line])
+        true_nodeID = self.createNode("", 'circle')
+        self.condition_move[f'"{cond_nodeID}"'] = ('whileIn', [cond_cursor.location.line])
         self.line_info_dict[self.scanning_func].setLine(cond_cursor.location.line)
         
         # 次のノードがwhileのtrueかを確認するためにエッジにラベルをつけておく(falseも同じ)
-        self.createEdge(condNodeID, trueNodeID, "true")
-        self.createRoomSizeEstimate(trueNodeID)
+        self.createEdge(cond_nodeID, true_nodeID, "true")
+        self.createRoomSizeEstimate(true_nodeID)
 
         # --- 本体処理 ---
-        body_end = trueNodeID
+        body_end = true_nodeID
         content_cursor = children[1]
         self.check_cursor_error(content_cursor)
         if content_cursor.kind == ci.CursorKind.COMPOUND_STMT:
             cr_true = list(content_cursor.get_children())
             if len(cr_true):
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_true[0].location.line])
+                self.condition_move[f'"{true_nodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cr_true[0].location.line])
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cond_cursor.location.line])
-            body_end = self.parse_comp_stmt(content_cursor, trueNodeID, "while")
+                self.condition_move[f'"{true_nodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cond_cursor.location.line])
+            body_end = self.parse_comp_stmt(content_cursor, true_nodeID, "while")
         else:
-            self.condition_move[f'"{trueNodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], content_cursor.location.line])
+            self.condition_move[f'"{true_nodeID}"'] = ('whileTrue', [cond_cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], content_cursor.location.line])
             self.nextLines.append((cond_cursor.location.line, True))
-            body_end = self.parse_stmt(content_cursor, trueNodeID)
+            body_end = self.parse_stmt(content_cursor, true_nodeID)
             self.nextLines.pop(-1)
 
         # --- ループを閉じる処理 ---
         loop_back_node = self.createNode("", 'parallelogram')  # 再評価への中継点
 
         self.createEdge(body_end, loop_back_node)
-        self.createEdge(loop_back_node, condNodeID)
+        self.createEdge(loop_back_node, cond_nodeID)
 
         # --- 条件False時の処理（脱出） ---
-        endNodeID = self.createNode("", 'doublecircle')
-        self.createEdge(condNodeID, endNodeID, "false")
-        self.createRoomSizeEstimate(endNodeID)
+        end_nodeID = self.createNode("", 'doublecircle')
+        self.createEdge(cond_nodeID, end_nodeID, "false")
+        self.createRoomSizeEstimate(end_nodeID)
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{endNodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]])
+        self.condition_move[f'"{end_nodeID}"'] = ('whileFalse', [cond_cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], next_line[0]])
 
-        self.createEdgeForLoop(endNodeID, loop_back_node, [cursor.location.line] if isFinalStmtInSwitch else [], [cond_cursor.location.line])
+        self.createEdgeForLoop(end_nodeID, loop_back_node, [cursor.location.line] if isFinalStmtInSwitch else [], [cond_cursor.location.line])
 
         self.downSwitchBreakerLevel()
-        return endNodeID
+        return end_nodeID
 
     #do-while文
     #まずは最初の処理を示す子ノードと現在ノードを接続する
@@ -1720,16 +2414,16 @@ class ASTtoFlowChart:
     def parse_do_stmt(self, cursor: ci.Cursor, nodeID, edgeName="", isFinalStmtInSwitch=False):
         self.createLoopBreakerInfo()
 
-        initNodeID = self.createNode(f"{cursor.location.line}", 'invtrapezium')
-        self.createEdge(nodeID, initNodeID, edgeName)
+        init_nodeID = self.createNode(f"{cursor.location.line}", 'invtrapezium')
+        self.createEdge(nodeID, init_nodeID, edgeName)
 
-        trueNodeID = self.createNode("", 'circle')
-        self.createEdge(initNodeID, trueNodeID)
+        true_nodeID = self.createNode("", 'circle')
+        self.createEdge(init_nodeID, true_nodeID)
 
         #ここで部屋情報を作る
-        self.createRoomSizeEstimate(trueNodeID)
+        self.createRoomSizeEstimate(true_nodeID)
         
-        falseNodeID = self.createNode("", 'doublecircle')
+        false_nodeID = self.createNode("", 'doublecircle')
 
         self.line_info_dict[self.scanning_func].setLoop(cursor.extent.end.line, cursor.extent.start.line)
 
@@ -1738,36 +2432,36 @@ class ASTtoFlowChart:
             if cr.kind == ci.CursorKind.COMPOUND_STMT:
                 cr_in = list(cr.get_children())
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-                nodeID = self.parse_comp_stmt(cr, trueNodeID, edgeName="do_while")
+                nodeID = self.parse_comp_stmt(cr, true_nodeID, edgeName="do_while")
             else:
                 if nodeID is None:
                     return None
-                condNodeID = self.get_expr(cr, shape='diamond', label='do')
+                cond_nodeID = self.get_expr(cr, shape='diamond', label='do')
                 # 今まではdo_whileだけ条件分岐の部屋を作っていなかったが、continueにも対応させるために作ることにする
-                self.createRoomSizeEstimate(condNodeID)
-                self.condition_move[f'"{condNodeID}"'] = ('doWhileIn', [cr.location.line])
+                self.createRoomSizeEstimate(cond_nodeID)
+                self.condition_move[f'"{cond_nodeID}"'] = ('doWhileIn', [cr.location.line])
                 self.line_info_dict[self.scanning_func].setLine(cr.location.line)
-                self.createEdgeForLoop(falseNodeID, condNodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cr.location.line])
-                self.createEdge(nodeID, condNodeID)
-                self.createEdge(condNodeID, trueNodeID, "True")
-                self.createEdge(condNodeID, falseNodeID, "False")
+                self.createEdgeForLoop(false_nodeID, cond_nodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cr.location.line])
+                self.createEdge(nodeID, cond_nodeID)
+                self.createEdge(cond_nodeID, true_nodeID, "True")
+                self.createEdge(cond_nodeID, false_nodeID, "False")
         if len(cr_in):
-            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cr_in[0].location.line])
-            # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_in[0].location.line])
+            self.condition_move[f'"{init_nodeID}"'] = ('doWhileInit', [cursor.location.line, cr_in[0].location.line])
+            # self.condition_move[f'"{init_nodeID}"'] = ('doWhileInit', [None, cr_in[0].location.line])
+            self.condition_move[f'"{true_nodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cr_in[0].location.line])
         else:
-            self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [cursor.location.line, cursor.location.line])
-            # self.condition_move[f'"{initNodeID}"'] = ('doWhileInit', [None, cursor.location.line])
-            self.condition_move[f'"{trueNodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.location.line])
+            self.condition_move[f'"{init_nodeID}"'] = ('doWhileInit', [cursor.location.line, cursor.location.line])
+            # self.condition_move[f'"{init_nodeID}"'] = ('doWhileInit', [None, cursor.location.line])
+            self.condition_move[f'"{true_nodeID}"'] = ('doWhileTrue', [cursor.extent.end.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cursor.location.line])
 
         next_line = self.get_next_line()
 
-        self.condition_move[f'"{falseNodeID}"'] = ('doWhileFalse', [cursor.extent.end.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]])
+        self.condition_move[f'"{false_nodeID}"'] = ('doWhileFalse', [cursor.extent.end.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], next_line[0]])
         #ここでdo_whileを抜けた後の部屋情報を作る
-        self.createRoomSizeEstimate(falseNodeID)
+        self.createRoomSizeEstimate(false_nodeID)
 
         self.downSwitchBreakerLevel()
-        return falseNodeID
+        return false_nodeID
 
     #for文
     #まずは式1に対するノードを作成(for(式1; 式2; 式3))
@@ -1777,11 +2471,11 @@ class ASTtoFlowChart:
         #cursor.get_childrenの最後の要素は必ず処理部の最初のカーソルであるから、それ以外のカーソルが式1~式3の候補となる。
         self.createLoopBreakerInfo()
 
-        initNodeID = None
-        condNodeID = None
-        changeNodeID = None
+        init_nodeID = None
+        cond_nodeID = None
+        change_nodeID = None
         changeExpr_cursor = None
-        endNodeID = self.createNode("", 'doublecircle')
+        end_nodeID = self.createNode("", 'doublecircle')
         *expr_cursors, exec_cursor = list(cursor.get_children())
         semi_offset = [token.location.offset for token in list(cursor.get_tokens()) if token.spelling == ';'][:2]
 
@@ -1792,81 +2486,81 @@ class ASTtoFlowChart:
                 # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する
                 if cr.kind == ci.CursorKind.DECL_STMT:
                     var_cr_list = list(cr.get_children())
-                    initNodeID = self.createNode(str(len(var_cr_list)), 'invhouse')
-                    varNodeID = initNodeID
-                    self.createRoomSizeEstimate(varNodeID)
+                    init_nodeID = self.createNode(str(len(var_cr_list)), 'invhouse')
+                    var_nodeID = init_nodeID
+                    self.createRoomSizeEstimate(var_nodeID)
                     for var_cr in var_cr_list:
                         self.check_cursor_error(var_cr)
-                        varNodeID = self.parse_var_decl(var_cr, varNodeID, "")
+                        var_nodeID = self.parse_var_decl(var_cr, var_nodeID, "")
                 else:
-                    initNodeID = self.get_expr(cr, shape='invhouse')
-                self.createEdge(nodeID, initNodeID, edgeName)
+                    init_nodeID = self.get_expr(cr, shape='invhouse')
+                self.createEdge(nodeID, init_nodeID, edgeName)
                 edgeName = ""
             elif semi_offset[0] < cr.location.offset < semi_offset[1]:
-                condNodeID = self.get_expr(cr, shape='pentagon', label='for')
-                self.createRoomSizeEstimate(condNodeID)
-                if initNodeID:
-                    self.createEdge(initNodeID, condNodeID)
+                cond_nodeID = self.get_expr(cr, shape='pentagon', label='for')
+                self.createRoomSizeEstimate(cond_nodeID)
+                if init_nodeID:
+                    self.createEdge(init_nodeID, cond_nodeID)
                 else:
-                    self.createEdge(nodeID, condNodeID, edgeName)
+                    self.createEdge(nodeID, cond_nodeID, edgeName)
                     edgeName = ""
             elif semi_offset[1] < cr.location.offset:
                 changeExpr_cursor = cr
 
-        if condNodeID is None:
-            condNodeID = self.createNode("for", 'pentagon')
-            self.createRoomSizeEstimate(condNodeID)
-            if initNodeID:
-                self.createEdge(initNodeID, condNodeID)
+        if cond_nodeID is None:
+            cond_nodeID = self.createNode("for", 'pentagon')
+            self.createRoomSizeEstimate(cond_nodeID)
+            if init_nodeID:
+                self.createEdge(init_nodeID, cond_nodeID)
             else:
-                self.createEdge(nodeID, condNodeID, edgeName)
+                self.createEdge(nodeID, cond_nodeID, edgeName)
                 
-        self.condition_move[f'"{condNodeID}"'] = ('forIn', [cursor.location.line])
+        self.condition_move[f'"{cond_nodeID}"'] = ('forIn', [cursor.location.line])
         self.line_info_dict[self.scanning_func].setLine(cursor.location.line)
         self.check_cursor_error(exec_cursor)
 
-        trueNodeID = self.createNode("", 'circle')
-        self.createEdge(condNodeID, trueNodeID, "True")
+        true_nodeID = self.createNode("", 'circle')
+        self.createEdge(cond_nodeID, true_nodeID, "True")
         #ここで部屋情報を作る
-        self.createRoomSizeEstimate(trueNodeID)
+        self.createRoomSizeEstimate(true_nodeID)
 
         if exec_cursor.kind == ci.CursorKind.COMPOUND_STMT:
             cr_true = list(exec_cursor.get_children())
             if len(cr_true):
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cr_true[0].location.line])
+                self.condition_move[f'"{true_nodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cr_true[0].location.line])
             else:
-                self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.location.line])
-            nodeID = self.parse_comp_stmt(exec_cursor, trueNodeID, "for_w_change" if changeExpr_cursor else "for_wo_change")
+                self.condition_move[f'"{true_nodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cursor.location.line])
+            nodeID = self.parse_comp_stmt(exec_cursor, true_nodeID, "for_w_change" if changeExpr_cursor else "for_wo_change")
         else:
-            self.condition_move[f'"{trueNodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], exec_cursor.location.line])
+            self.condition_move[f'"{true_nodeID}"'] = ('forTrue', [cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], exec_cursor.location.line])
             self.nextLines.append((cursor.location.line, True))
-            nodeID = self.parse_stmt(exec_cursor, trueNodeID)
+            nodeID = self.parse_stmt(exec_cursor, true_nodeID)
             self.nextLines.pop(-1)
 
         #changeノードがある条件
         if self.loopBreaker_list[-1]["continue"] or nodeID:
             if changeExpr_cursor:
-                changeNodeID = self.get_expr(changeExpr_cursor, shape='parallelogram', label=str(exec_cursor.extent.end.line))
+                change_nodeID = self.get_expr(changeExpr_cursor, shape='parallelogram', label=str(exec_cursor.extent.end.line))
             else:
-                changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
+                change_nodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
         else:
-            changeNodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
+            change_nodeID = self.createNode(str(cursor.location.line), shape='parallelogram')
 
-        self.createEdge(nodeID, changeNodeID)
-        self.createEdge(changeNodeID, condNodeID)
-        self.createEdgeForLoop(endNodeID, changeNodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cursor.location.line])
+        self.createEdge(nodeID, change_nodeID)
+        self.createEdge(change_nodeID, cond_nodeID)
+        self.createEdgeForLoop(end_nodeID, change_nodeID, [cursor.extent.end.line] if isFinalStmtInSwitch else [], [cursor.location.line])
         
-        self.createEdge(condNodeID, endNodeID, "False")
+        self.createEdge(cond_nodeID, end_nodeID, "False")
         #ここでforを抜けた後の部屋情報を作る
-        self.createRoomSizeEstimate(endNodeID)
+        self.createRoomSizeEstimate(end_nodeID)
 
         next_line = self.get_next_line()
 
-        forFalse_condition_move = [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], cursor.extent.end.line, next_line[0]] if isFinalStmtInSwitch else [cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line[0]]
-        self.condition_move[f'"{endNodeID}"'] = ('forFalse', forFalse_condition_move)
+        forFalse_condition_move = [cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], cursor.extent.end.line, next_line[0]] if isFinalStmtInSwitch else [cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], next_line[0]]
+        self.condition_move[f'"{end_nodeID}"'] = ('forFalse', forFalse_condition_move)
         
         self.downSwitchBreakerLevel()
-        return endNodeID
+        return end_nodeID
 
     # switch文
     # caseノード(invtriangle型)は、次に遷移する行番を取得
@@ -1880,13 +2574,13 @@ class ASTtoFlowChart:
             self.switchBreaker_list.append({"level": 0, "break":[]})
 
         #switchのcaseのbreakノードを追加する。
-        def createSwitchBreakerEdge(endNodeID):
+        def createSwitchBreakerEdge(end_nodeID):
             switchBreaker = self.switchBreaker_list.pop(-1)
             break_list = switchBreaker["break"]
             next_line = self.get_next_line()
-            for breakNodeID, line in break_list:
-                self.createEdge(breakNodeID, endNodeID)
-                self.condition_move[f'"{breakNodeID}"'] = ('switchEnd', [line, next_line[0]])
+            for break_nodeID, line in break_list:
+                self.createEdge(break_nodeID, end_nodeID)
+                self.condition_move[f'"{break_nodeID}"'] = ('switchEnd', [line, next_line[0]])
 
         cond_cursor, comp_exec_cursor = [cr for cr in cursor.get_children() if self.check_cursor_error(cr)]
 
@@ -1894,13 +2588,13 @@ class ASTtoFlowChart:
         self.roomSizeEstimate = None
 
         #switchの構造はswitch(A)のようにAは必ず必要
-        condNodeID = self.get_expr(cond_cursor, shape='diamond', label='switch')
-        self.createEdge(nodeID, condNodeID, edgeName)
+        cond_nodeID = self.get_expr(cond_cursor, shape='diamond', label='switch')
+        self.createEdge(nodeID, cond_nodeID, edgeName)
         nodeID = None
 
         createSwitchBreakerInfo()
 
-        endNodeID = self.createNode(f"end", 'invtriangle')
+        end_nodeID = self.createNode(f"end", 'invtriangle')
 
         isDefault = False
         #switch(A){ B }の場合
@@ -2000,29 +2694,29 @@ class ASTtoFlowChart:
 
             for i, (case_cursor_list, stmt_cursor_list_in_case) in enumerate(cursor_list_by_case):
                 # まずはcaseノードをくっつけていく
-                prevNodeID = condNodeID
+                prev_nodeID = cond_nodeID
                 for j, (case_cursor, case_value_cursor) in enumerate(case_cursor_list):
                     if case_cursor.kind == ci.CursorKind.CASE_STMT:
-                        caseNodeID = self.get_expr(case_value_cursor, shape='invtriangle', label='case')
+                        case_nodeID = self.get_expr(case_value_cursor, shape='invtriangle', label='case')
                     else:
-                        caseNodeID = self.createNode('default', shape='invtriangle')
+                        case_nodeID = self.createNode('default', shape='invtriangle')
                     
-                    self.createEdge(prevNodeID, caseNodeID)
+                    self.createEdge(prev_nodeID, case_nodeID)
                     if j == 0 and nodeID:
-                        middleCaseNodeID = self.createNode('switchMiddleCase', 'triangle')
-                        self.createEdge(nodeID, middleCaseNodeID)
-                        self.createEdge(middleCaseNodeID, caseNodeID)
-                        self.condition_move[f'"{middleCaseNodeID}"'] = ('switchMiddleCase', [begin_line_list[i]])
-                    prevNodeID = caseNodeID
+                        middleCase_nodeID = self.createNode('switchMiddleCase', 'triangle')
+                        self.createEdge(nodeID, middleCase_nodeID)
+                        self.createEdge(middleCase_nodeID, case_nodeID)
+                        self.condition_move[f'"{middleCase_nodeID}"'] = ('switchMiddleCase', [begin_line_list[i]])
+                    prev_nodeID = case_nodeID
 
                 # switchの元の部屋のサイズを+1する
                 switchRoomSizeEstimate[1] += 1
                 # ここで一つのcaseの部屋情報を作る
-                self.createRoomSizeEstimate(caseNodeID)
+                self.createRoomSizeEstimate(case_nodeID)
                 # switchの条件式からcase直下の最初の行への遷移情報を登録する
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], begin_line_list[i]])
+                self.condition_move[f'"{case_nodeID}"'] = ('switchCase', [comp_exec_cursor.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], begin_line_list[i]])
                 
-                nodeID = caseNodeID
+                nodeID = case_nodeID
                 begin_line_list_by_stmt: list[int | None] = []
 
                 for j, stmt_cursor in enumerate(stmt_cursor_list_in_case):
@@ -2104,51 +2798,51 @@ class ASTtoFlowChart:
             if comp_exec_cursor.kind == ci.CursorKind.DEFAULT_STMT:
                 isDefault = True
 
-            caseNodeID = self.get_expr(caseValue_cursor, shape='invtriangle')
-            self.createEdge(condNodeID, caseNodeID)
+            case_nodeID = self.get_expr(caseValue_cursor, shape='invtriangle')
+            self.createEdge(cond_nodeID, case_nodeID)
             createSwitchBreakerInfo()
             #switchの元の部屋のサイズを+1する
             switchRoomSizeEstimate[1] += 1
             #ここでDのための部屋情報を作る
-            self.createRoomSizeEstimate(caseNodeID)
+            self.createRoomSizeEstimate(case_nodeID)
             if (next_line := self.get_next_line_in_comp([exec_cursor])):
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], next_line])
+                self.condition_move[f'"{case_nodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], next_line])
             else:
-                self.condition_move[f'"{caseNodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{condNodeID}"']["funcs"], self.get_next_line()[0]])
-            nodeID = self.parse_stmt(exec_cursor, caseNodeID)
+                self.condition_move[f'"{case_nodeID}"'] = ('switchCase', [cr.location.line, *self.expr_node_info[f'"{cond_nodeID}"']["funcs"], self.get_next_line()[0]])
+            nodeID = self.parse_stmt(exec_cursor, case_nodeID)
              
             self.line_info_dict[self.scanning_func].setLine(exec_cursor.location.line)
-            self.createEdge(nodeID, endNodeID)
+            self.createEdge(nodeID, end_nodeID)
 
             end_line = exec_cursor.location.line
 
-        self.createEdge(nodeID, endNodeID)
+        self.createEdge(nodeID, end_nodeID)
         if not isDefault:
-            self.createEdge(condNodeID, endNodeID)
+            self.createEdge(cond_nodeID, end_nodeID)
 
-        createSwitchBreakerEdge(endNodeID)
+        createSwitchBreakerEdge(end_nodeID)
         #ここでswitchを抜けた後の部屋情報を作る
-        self.createRoomSizeEstimate(endNodeID)
+        self.createRoomSizeEstimate(end_nodeID)
         next_line = self.get_next_line()
         
-        self.condition_move[f'"{endNodeID}"'] = ('switchEnd', [end_line, next_line[0]])
+        self.condition_move[f'"{end_nodeID}"'] = ('switchEnd', [end_line, next_line[0]])
 
         self.roomSize_info[self.scanning_func][f'"{switchRoomSizeEstimate[0]}"'] = switchRoomSizeEstimate[1]
-        return endNodeID 
+        return end_nodeID 
 
     # ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
-    def createEdgeForLoop(self, breakToNodeID: str, continueToNodeID: str, break_line_track: list[int], continue_line_track: list[int]):
+    def createEdgeForLoop(self, breakTo_nodeID: str, continueTo_nodeID: str, break_line_track: list[int], continue_line_track: list[int]):
         loopBreaker = self.loopBreaker_list.pop(-1)
         break_list = loopBreaker["break"]
         continue_list  = loopBreaker["continue"]
         next_line = self.get_next_line()
         break_line_track.append(next_line[0])
 
-        for breakNodeID, breakLine in break_list:
-            self.createEdge(breakNodeID, breakToNodeID)
-            self.condition_move[f'"{breakNodeID}"'] = ('break', [breakLine] + break_line_track)
+        for break_nodeID, breakLine in break_list:
+            self.createEdge(break_nodeID, breakTo_nodeID)
+            self.condition_move[f'"{break_nodeID}"'] = ('break', [breakLine] + break_line_track)
             self.line_info_dict[self.scanning_func].setLine(breakLine)
-        for continueNodeID, continueLine in continue_list:
-            self.createEdge(continueNodeID, continueToNodeID)
-            self.condition_move[f'"{continueNodeID}"'] = ('continue', [continueLine] + continue_line_track)
+        for continue_nodeID, continueLine in continue_list:
+            self.createEdge(continue_nodeID, continueTo_nodeID)
+            self.condition_move[f'"{continue_nodeID}"'] = ('continue', [continueLine] + continue_line_track)
             self.line_info_dict[self.scanning_func].setLine(continueLine)

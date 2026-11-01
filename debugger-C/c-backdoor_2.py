@@ -152,7 +152,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if "values" in expr_list:
                         # 配列や構造体の値ならSubOjectExprCommentなのでコメントに辿り着くまで再帰的に要素を取得していく
                         # それ以外ならlist[ExprDescription]なので、ここでコメントを取得する
-                        # print(type(expr_list["values"]) is SubObjectExprComment)
                         expr_description_to_show_by_id = self.analyze_subObject_expr_comments(expr_list["values"], frame) if isinstance(expr_list["values"], dict) else self.get_expr_comments(expr_list["values"], frame)
                     elif "indexes" in expr_list:
                         expr_description_to_show_by_id = self.get_expr_comments(expr_list["indexes"], frame)
@@ -163,7 +162,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.expr_descriptions_by_line[line_number].append(expr_description_to_show_by_id)
                     else:
                         self.expr_descriptions_by_line[line_number] = [expr_description_to_show_by_id]
-                # print("results:", self.expr_descriptions_by_line)
+                print("results:", self.expr_descriptions_by_line)
 
         def analyze_subObject_expr_comments(self, subObject_expr_comment: SubObjectExprComment, frame: lldb.SBFrame):
             dynamic_subObject_expr_comment: DynamicSubObjectExprComment = {}
@@ -222,7 +221,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 "expr": [{"reference": "day"}, {"text": "*"}, {"text": "1.2f"}]
                 }
                 '''
-                # TASK: descriptionに動的解析結果を挿入して構築できるようにする
                 expr_str_for_evaluation: list[str] = []
                 expr_str_to_show: list[str] = []
                 expr_description_to_show: list[str] = []
@@ -973,7 +971,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             for line in new_lines:
                 self.vars_tracker.analyze_expr_comments(line, self.frame)
 
-
         def vars_checker(self, isForFalse: bool = False) -> None:
             if self.isEnd:
                 return
@@ -1506,7 +1503,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         line_number_track.append(crntFromTo.pop(0))
 
         def analyze_frame(self, backToLine: int | None = None) -> int: # Literal[PROGRESS, CONTINUE]
-
             skipStart = None
             skipEnd = None
 
@@ -1818,6 +1814,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 debug_manager.analyze_frame()
 
         except Exception as e:
+            # エラーの行番をトラックするためのコード
+            tb = e.__traceback__
+            error_lines_list = [tb.tb_lineno]
+            while tb.tb_next is not None:
+                tb = tb.tb_next
+                error_lines_list.append(tb.tb_lineno)
+            print("line:", error_lines_list)
+
             if isinstance(e, RollBack):
                 stdout_r.close()
                 stderr_r.close()
@@ -1825,7 +1829,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 os.unlink(stderr_file.name)
                 rollback_index = 0
             else:
-                print(e, "サーバー終了")
+                print(e, "サーバ終了")
                 break
 
     stdout_r.close()
@@ -1846,7 +1850,7 @@ parser.add_argument('--english', action='store_true', help='Enable english mode'
 args = parser.parse_args()
 # endregion
 
-# region サーバーの開始メソッドは再利用性がないのでインライン展開する
+# region サーバの開始メソッドは再利用性がないのでインライン展開する
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     host='localhost'
     port=9999
