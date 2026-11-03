@@ -141,6 +141,7 @@ class SendEvent(TypedDict):
     memory: NotRequired[list[MemoryAllocation | MemoryFree]]
     str: NotRequired[list[StrcpyInfo]]
     removed: list[VariableDeclarationInfo]
+    execution_and_result_str_list: list[ExecutionAndResultStr]
 
 class DeclaredVariableInfo(TypedDict):
     value: VariableValue
@@ -178,6 +179,10 @@ class FunctionReturnInfo(TypedDict):
     func_name: str
     index: int
     return_value: str
+
+class ExecutionAndResultStr(TypedDict):
+    execution: str
+    result: str | None
 
 class FileInfo(TypedDict):
     address: str

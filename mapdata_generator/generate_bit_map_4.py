@@ -50,6 +50,10 @@ class TempExpressionDetail(TypedDict):
     expr: TempCommentWindowInfo
     vars: set[tuple[str, int]]
     execution_info: ExecutionInfo
+
+class TempIfConditionsComment(TypedDict):
+    type: Literal["if"]
+    conditions: dict[int, list[Comment]]
     
 class MoveEvent:
     def __init__(self, from_pos: tuple[int, int], to_pos: tuple[int, int], comment_window_info: TempCommentWindowInfo | None, mapchip: int, execution_info: ExecutionInfo | None, func_name: str):
@@ -107,7 +111,7 @@ class CharaExpression:
 class ExecutionCommentHandler:
     def __init__(self):
         self.variable_comments: dict[int, list[VarInfo]] = {}
-        self.if_condition_comments: dict[int, IfConditionComment] = {}
+        self.if_condition_comments: dict[int, TempIfConditionsComment] = {}
         self.while_condition_comments: dict[int, WhileConditionComment] = {}
         self.do_while_condition_comments: dict[int, DoWhileConditionComment] = {}
         self.for_comments: dict[int, ForComment] = {}
@@ -129,13 +133,13 @@ class ExecutionCommentHandler:
         if line in self.if_condition_comments:
             if self.if_condition_comments[line]["type"] != "if":
                 sys.exit("type of if condition comments has to be \"if\"")
-            if condition_line in self.if_condition_comments[line]["condition"]:
+            if condition_line in self.if_condition_comments[line]["conditions"]:
                 sys.exit("different conditions of same if statement cannot be in same condition_line")
-            self.if_condition_comments[line]["condition"][condition_line] = condition_comment
+            self.if_condition_comments[line]["conditions"][condition_line] = condition_comment
         else:
-            self.if_condition_comments[line] = IfConditionComment(
+            self.if_condition_comments[line] = TempIfConditionsComment(
                 type="if", 
-                condition={
+                conditions={
                     condition_line: condition_comment
                 }
             )
@@ -225,32 +229,34 @@ class ExecutionCommentHandler:
                 case_exprs=[]
             )
 
-    def register_case_comment(self, line: int, case_index: int, condition_comments: list[list[Comment]]):
-        if line <= 0 or case_index <= -1:
-            sys.exit("line has to be 1 or bigger integer, and case index have to be 0 or bigger integer")
+    def register_case_comment(self, line: int, case_expr_node_info_list: list[ExprNodeInfo]):
+        if line <= 0:
+            sys.exit("line has to be 1 or bigger integer")
 
         if not line in self.switch_condition_comments or self.switch_condition_comments[line]["type"] != "switch":
             sys.exit("switch condition comment has to be already registered")
 
-        if case_index >= len(self.switch_condition_comments[line]["case_exprs"]):
-            none_list = [None]*(case_index-len(self.switch_condition_comments[line]["case_exprs"]))
-            self.switch_condition_comments[line]["case_exprs"] = [*self.switch_condition_comments[line]["case_exprs"], *none_list, condition_comments]
-        else:
-            if self.switch_condition_comments[line]["case_exprs"][case_index] is not None:
-                sys.exit("different condition comments of same switch statement cannot be in same case-index data")
-            self.switch_condition_comments[line]["case_exprs"][case_index] = condition_comments
+        self.switch_condition_comments[line]["case_exprs"].append(
+            [
+                SwitchCaseComment(
+                    comments = case_expr_node_info["comments"],
+                    line = case_expr_node_info["line"]
+                )
+                for case_expr_node_info in case_expr_node_info_list
+            ]
+        )
 
-    # デバッグ用の条件データが正しいかの確認
-    def check_is_valid_switch_comments(self, line: int):
-        if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+    def register_default_index(self, line: int, index: int):
+        if line <= 0 or index <= -1:
+            sys.exit("line has to be 1 or bigger integer, and default index have to be 0 or bigger integer")
 
-        if not line in self.switch_condition_comments:
-            sys.exit(f"swtich condition comments of the line {line} are not registered")
-        if self.switch_condition_comments[line]["type"] != "switch":
-            sys.exit(f"other-type condition comments are registered in the line {line}")
-        if len(self.switch_condition_comments[line]["case_exprs"]) == 0 or any(comments is None for comments in self.switch_condition_comments[line]["case_exprs"]):
-            sys.exit(f"switch condition comments of {line} is not complete")
+        if not line in self.switch_condition_comments or self.switch_condition_comments[line]["type"] != "switch":
+            sys.exit("switch condition comment has to be already registered")
+
+        if "default_index" in self.switch_condition_comments[line]:
+            sys.exit("default index of switch statement cannot be overlapped")
+
+        self.switch_condition_comments[line]["default_index"] = index
 
     def register_control_flow_comment(self, line: int, type: Literal["break"] | Literal["continue"]):
         if line <= 0:
@@ -293,8 +299,19 @@ class ExecutionCommentHandler:
 
     def create_non_varialble_execution_comments(self) -> dict[int, NonVarComment]:
         execution_comments: dict[int, NonVarComment] = {}
-        for line, if_condition_comment in self.if_condition_comments.items():
-            self.register_non_variable_comments(line, if_condition_comment, execution_comments)
+        for line, if_conditions_comment in self.if_condition_comments.items():
+            if line in execution_comments:
+                sys.exit("two or more comments cannot be registered to execution_comments dictionary")
+            execution_comments[line] = IfConditionsComment(
+                line = line,
+                conditions = [
+                    IfConditionComment(
+                        line = condition_line,
+                        comments = if_condition_comment
+                    )
+                    for condition_line, if_condition_comment in sorted(if_conditions_comment["conditions"].items())
+                ]
+            )
 
         for line, while_condition_comment in self.while_condition_comments.items():
             self.register_non_variable_comments(line, while_condition_comment, execution_comments)
@@ -1312,6 +1329,9 @@ class GenBitMap:
                 
                 to_nodeID_info = self.getNextNodeInfo(nodeID)
 
+                if len(to_nodeID_info) == 0:
+                    return
+
                 if any(self.getNodeShape(to_nodeID) != "invtriangle" for to_nodeID, _ in to_nodeID_info):
                     sys.exit("wrong type nodes are connected from a switch condition node")
 
@@ -1325,106 +1345,159 @@ class GenBitMap:
                     func = switch_expr_node_info["funcs"]
                 )
 
-                #エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
-                for toNodeID, edgeLabel in to_nodeID_info:
+                end_nodeID: str | None = None
+
+                has_default = False
+                # caseラベルをグループごとに格納するリスト
+                case_group_list: list[tuple[str, list[ExprNodeInfo], int | None]] = []
+                for to_nodeID, _ in to_nodeID_info:
+                    if self.getNodeLabel(to_nodeID) == "end":
+                        end_nodeID = to_nodeID
+                        continue
+
+                    default_line: int | None = None
                     case_expr_node_info_list: list[ExprNodeInfo] = []
                     while True:
-                        if (tempNode_info := self.nextNodeInfo.get(toNodeID, None)) is None:
+                        if (temp_node_info := self.nextNodeInfo.get(to_nodeID, None)) is None:
                             break
-                        tempNodeID, _ = tempNode_info[0]
-                        expr_node_info = self.getExprNodeInfo(toNodeID)
-                        
+                        temp_nodeID, _ = temp_node_info[0]
+                        expr_node_info = self.getExprNodeInfo(to_nodeID)
+
+                        # caseラベルノード
                         if expr_node_info is not None:
                             case_expr_node_info_list.append(expr_node_info)
+                        # defaultラベルノード
                         else:
-                            case_expr_node_info_list = []
+                            if has_default:
+                                sys.exit("default label cannot be overlapped")
+                            split_label_str = self.getNodeLabel(to_nodeID).split(',')
+                            if len(split_label_str) != 2 or split_label_str[0] != "default":
+                                sys.exit("unknown node is found for switch default label")
+                            try:
+                                default_line = int(split_label_str)
+                            except:
+                                sys.exit("line of default label is not found")
+                            has_default = True
 
-                        if self.getNodeShape(tempNodeID) != 'invtriangle':
+                        if self.getNodeShape(temp_nodeID) != 'invtriangle':
                             break
 
-                        toNodeID = tempNodeID
+                        to_nodeID = temp_nodeID
 
-                    self.createRoom(toNodeID, crntRoomID)
+                    if to_nodeID not in self.mapInfo.execution_info:
+                        sys.exit("execution info for a case label is not found")
 
-                    if len(case_expr_node_info_list):
-                        condition_detail_list = [
-                            [f"switch condition of line {switch_expr_node_info["line"]}", "matches"]
-                            if self.is_english else 
-                            [f"{switch_expr_node_info["line"]}行目のswitch文の", "が"]
-                        ]
-                        condition_hover_list = [
-                            switch_expr_node_info["comments"]
-                        ]
+                    case_group_list.append((to_nodeID, case_expr_node_info, default_line))
 
-                        while len(case_expr_node_info_list):
-                            case_expr_node_info = case_expr_node_info_list.pop(0)
-                            condition_detail = [f"case of line {case_expr_node_info["line"]}" if self.is_english else f"{case_expr_node_info["line"]}行のcase"]
-                            if len(case_expr_node_info_list):
-                                condition_detail.append("OR" if self.is_english else "または")
-                            else:
-                                condition_detail.append("" if self.is_english else "に合致する")
+                if len(case_group_list) == 0:
+                    sys.exit("switch statement has to have one or more case labels")
 
-                            condition_detail_list.append(condition_detail)
-                            condition_hover_list.append(case_expr_node_info["comments"])
+                case_group_list.sort(
+                    key=lambda case_group: self.mapInfo.execution_info[case_group[0]]["true_case_index"]
+                )
 
-                        self.mapInfo.execution_comment_handler.register_case_comment(
+                for case_index, (to_nodeID, case_expr_node_info_list, default_line) in enumerate(case_group_list):
+                    if case_index != self.mapInfo.execution_info[to_nodeID]["true_case_index"]:
+                        sys.exit("true case index does not match the order of case label groups")
+
+                    condition_detail_list = [
+                        [f"switch condition of line {switch_expr_node_info["line"]}", "matches"]
+                        if self.is_english else 
+                        [f"{switch_expr_node_info["line"]}行目のswitch文の", "が"]
+                    ]
+
+                    final_case_index = len(case_expr_node_info_list) - 1
+
+                    for i, case_expr_node_info in enumerate(case_expr_node_info_list):
+                        condition_detail = [f"case of line {case_expr_node_info["line"]}" if self.is_english else f"{case_expr_node_info["line"]}行のcase"]
+                        condition_detail.append(
+                            (
+                                "" 
+                                if self.is_english else 
+                                "に合致する"
+                            )
+                            if i == final_case_index else
+                            (
+                                "OR" 
+                                if self.is_english else 
+                                "または"
+                            )
+                        )
+
+                        condition_detail_list.append(condition_detail)
+
+                    if default_line is not None:
+                        if len(condition_detail_list) == 1:
+                            condition_detail_list.append(
+                                [
+                                    f"default of line {default_line}\n(unmatches any case labels)" 
+                                    if self.is_english else 
+                                    f"{default_line}行目のdefaultに合致する\n(他のいずれのcaseにも合致しない)"
+                                ]
+                            )
+                        else: # 他のcaseがある場合、それに続く文にする
+                            condition_detail_list.append(
+                                [
+                                    f"OR ALTENATIVELY, matches default of line {default_line}\n(unmatches any case labels)"
+                                    if self.is_english else 
+                                    f"もしくは、{default_line}行目のdefaultに合致する\n(他のいずれのcaseにも合致しない)"
+                                ]
+                            )
+                            
+                        self.mapInfo.execution_comment_handler.register_default_index(
                             switch_expr_node_info["line"],
-                            self.mapInfo.execution_info[toNodeID]["true_case_index"], 
-                            condition_hover_list
+                            case_index
                         )
 
-                        comment_window_info = self.create_comment_window_info(
-                            "cond-check",
-                            detail = condition_detail_list, 
-                            hover = condition_hover_list,
-                            func_reference_group = func_reference_group
-                        )
-                    elif self.getNodeLabel(toNodeID) == 'default':
-                        comment_window_info = self.create_comment_window_info(
-                            "cond-check",
-                            detail = [
-                                ["switch", f"of line {switch_expr_node_info["line"]} is true for default"]
-                            ] 
-                            if self.is_english else 
-                            [
-                                [f"{switch_expr_node_info["line"]}行目のswitch文条件の", "はdefaultに該当します"]
-                            ], 
-                            hover = [
-                                switch_expr_node_info["comments"]
-                            ],
-                            func_reference_group=func_reference_group,
-                        )
-                        self.mapInfo.execution_comment_handler.register_case_comment(
-                            switch_expr_node_info["line"],
-                            self.mapInfo.execution_info[toNodeID]["true_case_index"], 
-                            []
-                        )
-                    else:
-                        comment_window_info = self.create_comment_window_info(
-                            "cond-check",
-                            detail = [
-                                ["switch condition", f"of line {switch_expr_node_info["line"]} is not true for any cases"]
-                            ] 
-                            if self.is_english else 
-                            [
-                                [f"{switch_expr_node_info["line"]}行目のswitch文条件の", "がいずれのcaseにも該当しない"]
-                            ], 
-                            hover = [
-                                switch_expr_node_info["comments"]
-                            ],
-                            func_reference_group=func_reference_group,
-                        )
-                    
+                    self.mapInfo.execution_comment_handler.register_case_comment(
+                        switch_expr_node_info["line"], 
+                        case_expr_node_info_list
+                    )
+
+                    hover = [switch_expr_node_info["comments"], *[case_expr_node_info["comments"] for case_expr_node_info in case_expr_node_info_list]]
+                    if default_line is not None:
+                        hover.append([])
+
+                    comment_window_info = self.create_comment_window_info(
+                        "cond-check",
+                        detail = condition_detail_list, 
+                        hover = hover,
+                        func_reference_group = func_reference_group
+                    )
+
                     self.mapInfo.setWarpZone(
                         crntRoomID, 
-                        toNodeID, 
+                        to_nodeID, 
+                        comment_window_info, 
+                        self.func_name, 
+                    )
+
+                    next_track_list.insert(0, (toNodeID, toNodeID, None))
+
+                if end_nodeID is not None:
+                    comment_window_info = self.create_comment_window_info(
+                        "cond-check",
+                        detail = [
+                            ["switch condition", f"of line {switch_expr_node_info["line"]} is not true for any cases"]
+                        ] 
+                        if self.is_english else 
+                        [
+                            [f"{switch_expr_node_info["line"]}行目のswitch文条件の", "がいずれのcaseにも該当しない"]
+                        ], 
+                        hover = [
+                            switch_expr_node_info["comments"]
+                        ],
+                        func_reference_group=func_reference_group,
+                    )
+
+                    self.mapInfo.setWarpZone(
+                        crntRoomID, 
+                        end_nodeID, 
                         comment_window_info, 
                         self.func_name, 
                     )
                     
-                    next_track_list.insert(0, (toNodeID, toNodeID, None))
-
-                self.mapInfo.execution_comment_handler.check_is_valid_switch_comments(switch_expr_node_info["line"])
+                    next_track_list.insert(0, (end_nodeID, end_nodeID, None))
 
             for next_track in next_track_list:
                 self.trackAST(*next_track)
@@ -1923,7 +1996,7 @@ class GenBitMap:
                     case_expr_node_info_list.append(expr_node_info["comments"])
                 else:
                     case_expr_node_info_list = []
-                if self.getNodeShape(tempNodeID) != 'invtriangle' or self.getNodeLabel(toNodeID) == 'caseEnd':
+                if self.getNodeShape(tempNodeID) != 'invtriangle' or self.getNodeLabel(toNodeID) == 'end':
                     break
                 toNodeID = tempNodeID
             self.createRoom(toNodeID, crntRoomID)

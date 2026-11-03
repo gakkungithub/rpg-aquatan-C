@@ -95,7 +95,7 @@ class ExprNodeInfo(TypedDict):
     line: int
 
 type NonVarComment = (
-    IfConditionComment
+    IfConditionsComment
     | WhileConditionComment
     | DoWhileConditionComment
     | ForComment
@@ -110,9 +110,13 @@ type NonVarComment = (
 # # 条件式を値として登録する
 # # condition A ~ condition B の行情報も登録しておく
 # # その行番内にあればスキップしない ( {} の最後の } で止まらないようにする )
-class IfConditionComment(TypedDict):
+class IfConditionsComment(TypedDict):
     type: Literal["if"]
-    condition: dict[int, list[Comment]]
+    conditions: list[IfConditionComment]
+
+class IfConditionComment(TypedDict):
+    line: int
+    comments: list[Comment]
 
 # # WhileExecutionInfo
 # # condition A の行をキーとして登録する 条件式を値として登録する?
@@ -141,7 +145,12 @@ class ForComment(TypedDict):
 class SwitchConditionComment(TypedDict):
     type: Literal["switch"]
     condition: list[Comment]
-    case_exprs: list[list[list[Comment]] | None]
+    case_exprs: list[list[SwitchCaseComment]]
+    default_index: NotRequired[int]
+
+class SwitchCaseComment(TypedDict):
+    comments: list[Comment]
+    line: int
 
 # # ControlFlowInfo
 # # break, continueまたはgotoラベルの行番をキーとして登録する (gotoラベルはまだ対応していない。今後余裕があれば対応する)

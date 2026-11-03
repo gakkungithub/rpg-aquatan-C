@@ -40,44 +40,359 @@ class DynamicVarNode(TypedDict):
     comments: DynamicCommentHandler
     initialized: bool
 
-type DynamicNonVarStatus = (
-    IfStatus
-    | WhileStatus
-    | DoWhileStatus
-    | ForStatus
-    | SwitchStatus
-    | ControlFlowStatus
-    | ExpressionStatus
-    | ReturnStatus
-)
+class DynamicNonVarStatusHandler:
+    def __init__(self, line: int, is_english: bool):
+        self.line = line
+        self.is_english = is_english
 
-class IfStatus(TypedDict):
-    type: Literal["if"]
-    line: str
-    conditions: list[list[Comment]]
-    dynamic_conditions: list[DynamicCommentHandler]
-    results: list[bool]
+    def analyze_comment(self, frame: lldb.SBFrame):
+        pass
 
-class WhileStatus(TypedDict):
-    type: Literal["while"]
-    line: str
-    condition: list[Comment]
-    dynamic_condition: DynamicCommentHandler
-    result: bool | None
+    def get_next_function(self) -> tuple[DynamicCommentHandler, int] | None:
+        return None
+    
+    def get_skipped_functions(self) -> list[list[str]] | None:
+        return None
 
-class DoWhileStatus(TypedDict):
-    type: Literal["do_while"]
-    line: str
-    condition: list[Comment]
-    dynamic_condition: DynamicCommentHandler
-    result: bool | None
+
+class IfStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, conditions: list[IfConditionComment], is_english: bool):
+        super().__init__(line, is_english)
+        self.conditions = conditions
+        self.dynamic_conditions = [
+            DynamicCommentHandler(comments = if_condition_comment["comments"]) 
+            for if_condition_comment in conditions
+        ]
+        self.results: list[bool] = []
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        num_of_results = len(self.results)
+        if num_of_results == len(self.conditions):
+            return
+
+        for dynamic_comment_handler in self.dynamic_conditions[num_of_results:]:
+            # まずは解析
+            if dynamic_comment_handler.set_expr_comments(frame):
+                # 解析が途中で終了する = 自作関数が現れた → ひとまずは解析を終了する
+                break
+            
+            # 解析終了 → 本条件の値の真偽値を取得し、その結果をresultsに格納する
+            result = dynamic_comment_handler.get_result_bool(frame)
+            self.results.append(result)
+
+            # 条件がTrueならそれ以降の条件は確認しないので
+            if result is True:
+                break
+
+    def get_next_function(self):
+        num_of_results = len(self.results)
+        if True in self.results or num_of_results == len(self.conditions):
+            sys.exit("this if statement is already completely scanned")
+
+        return self.dynamic_conditions[num_of_results], num_of_results
+
+    def get_skipped_functions(self):
+        return [dynamic_comment_handler.skipped_function_list for dynamic_comment_handler in self.dynamic_conditions]
+    
+    def check_conditions(self, send_event: SendEvent, true_condition_index: int):
+        if true_condition_index < -1 or len(self.conditions) <= true_condition_index:
+            sys.exit(f"a given true condition index has to between -1 and {len(self.conditions)}")
+
+        if true_condition_index == -1:
+            if True in self.results:
+                return "incorrect"
+            
+            # まだ解析できていない条件がある
+            if len(self.results) != len(self.conditions):
+                # self.analyze_next_function(current_expr_status)
+                return "next_function"
+
+            # 全ての条件がFalse → どの条件にも該当しない = true_case_indexは-1で正しい
+            send_event["execution_and_result_str_list"] = [
+                ExecutionAndResultStr(
+                    execution = dynamic_comment_handler.get_str_after_analysis_completed(),
+                    result = f"so, the {i+1}th condition is False" if self.is_english else f"ゆえに、{i+1}番目の条件は偽です"
+                )
+                for i, dynamic_comment_handler in enumerate(self.dynamic_conditions)
+            ]
+        else:
+            # 今回選んだ条件より前の条件が正しい = 間違った条件を選んだ
+            if True in self.results[:true_condition_index]:
+                return "incorrect"
+            
+            # まだ探索中であれば(どこかしらの自作関数で止まっているなら)、その関数を確かめる方向に行く
+            if len(self.results) <= true_condition_index:
+                return "next_function"
+
+            # 間違った条件を選んだ
+            if self.results[true_condition_index] is False:
+                return "incorrect"
+            
+            # executioin_info["true_condition_index"]番目の条件が正しい → 正しい条件を選んだ
+            execution_and_result_str_list: list[ExecutionAndResultStr] = []
+            for i, dynamic_comment_handler in enumerate(self.dynamic_conditions):
+                is_true = i == true_condition_index
+                execution_and_result_str_list.append(
+                    ExecutionAndResultStr(
+                        execution = dynamic_comment_handler.get_str_after_analysis_completed(),
+                        result = f"so, the {i+1}th condition is {"True" if is_true else "False"}" if self.is_english else f"ゆえに、{i+1}番目の条件は{"真" if is_true else "偽"}です"
+                    )
+                )
+                if is_true:
+                    break
+
+            send_event["execution_and_result_str_list"] = execution_and_result_str_list
+
+        return "correct"
+
+
+class WhileStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, condition: list[Comment], is_english: bool):
+        super().__init__(line, is_english)
+        self.condition = condition
+        self.dynamic_condition = DynamicCommentHandler(comments = condition)
+        self.result: bool | None = None
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        if self.result is not None:
+            return
+
+        dynamic_comment_handler = self.dynamic_condition
+        if dynamic_comment_handler.set_expr_comments(frame):
+            return
+
+        self.result = dynamic_comment_handler.get_result_bool(frame)
+
+    def get_next_function(self):
+        return self.dynamic_condition, 0
+
+    def get_skipped_functions(self):
+        return [self.dynamic_condition.skipped_function_list]
+    
+    def check_condition(self, send_event: SendEvent, condition: bool):
+        if self.result is None:
+            return "next_function"
+
+        if self.result is not condition:
+            return "incorrect"
+
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = self.dynamic_condition.get_str_after_analysis_completed(),
+                result = f"so, the condition is {"True" if self.result else "False"}" if self.is_english else f"ゆえに、{"真" if self.result else "偽"}です"
+            )
+        ]
+
+        return "correct"
+
+class DoWhileStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, condition: list[Comment], is_english: bool):
+        super().__init__(line, is_english)
+        self.condition = condition
+        self.dynamic_condition = DynamicCommentHandler(comments = condition)
+        self.result: bool | None = None
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        if self.result is not None:
+            return
+
+        dynamic_comment_handler = self.dynamic_condition
+        if dynamic_comment_handler.set_expr_comments(frame):
+            return
+
+        self.result = dynamic_comment_handler.get_result_bool(frame)
+
+    def get_next_function(self):
+        return self.dynamic_condition
+
+    def get_skipped_functions(self):
+        return [self.dynamic_condition.skipped_function_list]
+    
+    def check_condition(self, send_event: SendEvent, condition: bool):
+        if self.result is None:
+            return "next_function"
+
+        if self.result is not condition:
+            return "incorrect"
+
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = self.dynamic_condition.get_str_after_analysis_completed(),
+                result = f"so, the condition is {"True" if self.result else "False"}" if self.is_english else f"ゆえに、{"真" if self.result else "偽"}です"
+            )
+        ]
+
+        return "correct"
+
+
+class ForStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, expr: ForComment, is_english: bool):
+        super().__init__(line, is_english)
+        
+        self.initializer = ForInitializerStatus(
+            expr = initializer,
+            dynamic_expr = DynamicCommentHandler(comments = initializer),
+        ) if (initializer := expr.get("initializer", None)) is not None else None
+        
+        self.required_var_list = [
+            (var_info["varNode"]["name"], line) 
+            for var_info in var_initializer
+        ] if (var_initializer := expr.get("var_initializer", None)) is not None else None
+        
+        self.condition = ForConditionStatus(
+            expr = condition,
+            dynamic_expr = DynamicCommentHandler(comments = condition), 
+            result = None
+        ) if (condition := expr["condition"]) is not None else None
+
+        self.change = ForChangeStatus(
+            expr = change,
+            # 一回目のループ直前には変更式に到達することはないのでDynamicCommentHandlerは生成しない
+            dynamic_expr = None,
+            is_not_completed = True
+        ) if (change := expr.get("change", None)) is not None else None
+
+        self.is_first = True
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        # is_firstがTrue = まだ初期化が済んでいない
+        if self.is_first:
+            # 初期化部があるならその解析を行う
+            if self.initializer is not None:
+                if self.required_var_list is not None:
+                    sys.exit("variable initializer cannot be mixed with normal initializer")
+                
+                dynamic_comment_handler = self.initializer["dynamic_expr"]
+                if (dynamic_comment_handler.set_expr_comments(frame)):
+                    return
+            elif self.required_var_list is not None:
+                if self.initializer is not None:
+                    sys.exit("normal initializer cannot be mixed with variable initializer")
+                return
+            
+            # 条件がない = 常に条件がTrue → 解析しない
+            if self.condition is None:
+                return
+            
+            dynamic_comment_handler = self.condition["dynamic_expr"]
+            if dynamic_comment_handler.set_expr_comments(self.frame):
+                return
+            
+            self.is_first = True
+        else:
+            if self.initializer is not None or self.required_var_list is not None:
+                sys.exit("initializer or var_initializer have to be already done")
+            
+            # is_initializer is True = 条件部に戻ってきた → その前に変更式の解析を行う
+            if self.change is not None and self.change["is_not_completed"]:
+                if self.change["dynamic_expr"] is None:
+                    self.change["dynamic_expr"] = DynamicCommentHandler(comments = self.change["expr"])
+                dynamic_comment_handler = self.change["dynamic_expr"]
+                dynamic_comment_handler.set_expr_comments(frame)
+                return
+            
+            # 条件がない = 常に条件がTrue → 解析しない
+            if self.condition is None:
+                return
+            
+            dynamic_comment_handler = self.condition["dynamic_expr"]
+            dynamic_comment_handler.set_expr_comments(self.frame)
+
+    def get_next_function(self):
+        if self.initializer is not None:
+            dynamic_comment_handler = self.initializer["dynamic_expr"]
+        elif self.change is not None and self.change["dynamic_expr"] is not None:
+            dynamic_comment_handler = self.change["dynamic_expr"]
+        elif (for_condition_status := self.condition) is not None:
+            dynamic_comment_handler = for_condition_status["dynamic_expr"]
+        else:
+            return None
+
+        return dynamic_comment_handler, 0
+
+    def get_skipped_functions(self):
+        if self.initializer is not None:
+            return [self.initializer["dynamic_expr"].skipped_function_list]
+        elif self.change is not None and self.change["dynamic_expr"] is not None:
+            return [self.change["dynamic_expr"].skipped_function_list]
+        elif (for_condition_status := self.condition) is not None:
+            return [for_condition_status["dynamic_expr"].skipped_function_list]
+        else:
+            return None
+
+    def check_status(self, send_event: SendEvent, execution_info: ForExecutionInfo):
+        if execution_info["type"] == "for":
+            if self.initializer is not None or self.required_var_list is not None:
+                return "incorrect"
+            
+            if self.change is not None and self.change["dynamic_expr"] is not None:
+                return "incorrect"
+            
+            if self.condition is None:
+                if not execution_info["condition"]:
+                    return "incorrect"
+                
+                send_event["execution_and_result_str_list"] = [
+                    ExecutionAndResultStr(
+                        execution = "no condition expression" if self.is_english else "条件式がない",
+                        result = f"so, this condition is always true" if self.is_english else f"ゆえに常に真です"
+                    )
+                ]
+            else:
+                if (result := self.condition["result"]) is None:
+                    return "next_function"
+                
+                if result is not execution_info["condition"]:
+                    return "incorrect"
+
+                send_event["execution_and_result_str_list"] = [
+                    ExecutionAndResultStr(
+                        execution = self.condition["dynamic_expr"].get_str_after_analysis_completed(),
+                        result = f"so, the condition is {"True" if result else "False"}" if self.is_english else f"ゆえに、{"真" if result else "偽"}です"
+                    )
+                ]
+        elif execution_info["type"] == "for_initializer":
+            if self.initializer is None:
+                return "incorrect"
+            
+            if self.initializer["dynamic_expr"].current_function_comment is not None:
+                return "next_function"
+            
+            # 初期化時(結果がNoneでない場合)はそのコメント(result)を取得する
+            send_event["execution_and_result_str_list"] = [
+                ExecutionAndResultStr(
+                    execution = self.initializer["dynamic_expr"].get_str_after_analysis_completed(),
+                    result = None
+                )
+            ]
+            self.initializer = None
+        elif execution_info["type"] == "for_change":
+            if self.change is None:
+                return "incorrect"
+
+            if (dynamic_comment_handler := self.change["dynamic_expr"]) is None:
+                return "incorrect"
+            
+            if dynamic_comment_handler.current_function_comment is not None:
+                return "next_function"
+                
+            # 変更式があるならその内容を登録する
+            send_event["execution_and_result_str_list"] = [
+                ExecutionAndResultStr(
+                    execution = dynamic_comment_handler.get_str_after_analysis_completed(),
+                    result = None
+                )
+            ]
+            
+            self.change["dynamic_expr"] = None
+        else:
+            return "incorrect"
+
+        return "correct"
 
 class ForInitializerStatus(TypedDict):
     expr: list[Comment]
     dynamic_expr: DynamicCommentHandler
-
-class ForVarInitializerStatus(TypedDict):
-    required: list[tuple[str, int]]
 
 class ForConditionStatus(TypedDict):
     expr: list[Comment]
@@ -89,50 +404,234 @@ class ForChangeStatus(TypedDict):
     dynamic_expr: DynamicCommentHandler | None
     is_not_completed: bool
 
-class ForStatus(TypedDict):
-    type: Literal["for"]
-    line: str
-    initializer: NotRequired[ForInitializerStatus]
-    var_initializer: NotRequired[ForVarInitializerStatus]
-    condition: ForConditionStatus | None
-    change: NotRequired[ForChangeStatus]
-    is_first: bool
 
-class SwitchConditionStatus(TypedDict):
-    condition: list[Comment]
-    dynamic_condition: DynamicCommentHandler
-    result: str | None
+class SwitchStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, expr: SwitchConditionComment, is_english: bool):
+        super().__init__(line, is_english)
+        self.condition = expr["condition"]
+        self.dynamic_condition = DynamicCommentHandler(comments = expr["condition"])
+        self.condition_result: str | None = None
+        self.case_expr_list_by_index = [
+            [
+                CaseStatus(
+                    case_expr = case_expr["comments"],
+                    dynamic_case_expr = DynamicCommentHandler(
+                        comments = case_expr["comments"]
+                    ),
+                    result = None,
+                    line = case_expr["line"]
+                )
+                for case_expr in case_expr_list
+            ] for case_expr_list in expr["case_exprs"]
+        ]
+        self.matched_case: tuple[int, int, str] | None = None
+        self.default_index = expr.get("default_index", None)
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        # matched_caseがNoneではない = 何らかのcaseが条件式の値と合致したことが確認済み = ラベル式の値の計算は終了済み
+        if self.matched_case is not None:
+            return
+        
+        # resultがNone = 条件文の計算処理は完了していない → その処理を実行しにいく
+        if self.condition_result is None:
+            dynamic_comment_handler = self.dynamic_condition
+            if dynamic_comment_handler.set_expr_comments(frame):
+                return
+            
+            if (result := dynamic_comment_handler.expr_result_by_id[-1]) is None:
+                sys.exit("error in result of switch condition")
+            
+            self.condition_result = result
+
+        for i, case_expr_list in enumerate(self.case_expr_list_by_index):
+            for case_expr in case_expr_list:
+                if case_expr["result"] is None:
+                    if case_expr["dynamic_case_expr"].set_expr_comments(frame):
+                        sys.exit("expression of case value cannot have any functions")
+                    
+                    if (result := case_expr["dynamic_case_expr"].expr_result_by_id[-1]) is None:
+                        sys.exit("error in result of case expression")
+
+                    case_expr["result"] = result
+
+                    if self.condition_result == result != None:
+                        self.matched_case = (i, case_expr["line"], result)
+                        return
+
+    def get_next_function(self):
+        return self.dynamic_condition, 0
+
+    def get_skipped_functions(self):
+        return [self.dynamic_condition.skipped_function_list]
+
+    def check_status(self, send_event: SendEvent, execution_info: SwitchCaseExecutionInfo):
+        if self.dynamic_condition.current_function_comment is not None:
+            return "next_function"
+        
+        if execution_info["true_case_index"] == -1:
+            # どこかしらの条件がTrue → 間違った条件を選んでいる
+            if self.matched_case is not None:
+                return "incorrect"
+
+            if self.default_index is not None:
+                return "incorrect"
+
+            # execution_and_result_str_list = []
+
+            # for case_expr_list in self.case_expr_list_by_index:
+            #     for case_expr in case_expr_list:
+                    
+            #         pass
+
+            execution_and_result_str_list = [
+                ExecutionAndResultStr(
+                    execution = self.dynamic_condition.get_str_after_analysis_completed(),
+                    result = "so, any case labels are not matched" if self.is_english else "ゆえに、どのcaseにも合致しません"
+                )
+            ]
+
+            send_event["execution_and_result_str_list"] = execution_and_result_str_list
+        else:
+            if self.matched_case is None:
+                if execution_info["true_case_index"] != self.default_index:
+                    return "incorrect"
+                
+                send_event["execution_and_result_str_list"] = [
+                    ExecutionAndResultStr(
+                        execution = self.dynamic_condition.get_str_after_analysis_completed(),
+                        result = "so, default label is matched" if self.is_english else "ゆえに、defaultに合致しました"
+                    )
+                ]
+            else:
+                case_index, line, result = self.matched_case
+                if execution_info["true_case_index"] != case_index:
+                    return "incorrect"
+
+                send_event["execution_and_result_str_list"] = [
+                    ExecutionAndResultStr(
+                        execution = self.dynamic_condition.get_str_after_analysis_completed(),
+                        result = f"so, case label of line {line} (value = {result}) is matched" if self.is_english else f"ゆえに、{line}行のcase (値は{result}) に合致しました"
+                    )
+                ]
+
+        return "correct"
 
 class CaseStatus(TypedDict):
     case_expr: list[Comment]
     dynamic_case_expr: DynamicCommentHandler
     result: str | None
+    line: int
+
+
+class ControlFlowStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, type: Literal["break", "continue"], is_english: bool):
+        super().__init__(line, is_english)
+        self.type = type
+
+    def check_status(self, send_event: SendEvent):
+        # lineがあっている時点で正しい → 正しいcontinueまたはbreakを選んでいる
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = (
+                    (
+                        "skip the remaining executions in a loop by continue" 
+                        if self.is_english else 
+                        "continueによりループ内の残りの処理をスキップします"
+                    )
+                    if self.type == "continue" else
+                    (
+                        "exit the current loop by break"
+                        if self.is_english else
+                        "breakにより現在のループから脱出します"
+                    )
+                ),
+                result = None
+            )
+        ]
+        return "correct"
+
+
+class ExpressionStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, expr: list[Comment], is_english: bool):
+        super().__init__(line, is_english)
+        self.expr = expr
+        self.dynamic_expr = DynamicCommentHandler(comments = expr)
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        if self.dynamic_expr.expr_result_by_id[-1] is not None:
+            return
+        
+        self.dynamic_expr.set_expr_comments(frame)
+
+    def get_next_function(self):
+        return self.dynamic_expr, 0
     
-class SwitchStatus(TypedDict):
-    type: Literal["switch"]
-    line: str
-    condition: SwitchConditionStatus
-    case_expr_list_by_index: list[list[CaseStatus]]
-    matched_case: str | None
+    def get_skipped_functions(self):
+        return [self.dynamic_expr.skipped_function_list]
 
-class ControlFlowStatus(TypedDict):
-    type: Literal["break", "continue"]
-    line: str
+    def check_expr(self, send_event: SendEvent):
+        # 計算式を解析し終わっている → 次のアクションに進める → 計算式の結果を取得する
+        if self.dynamic_expr.current_function_comment is not None:
+            return "next_function"
 
-class ExpressionStatus(TypedDict):
-    type: Literal["expression"]
-    line: str
-    expr: list[Comment]
-    dynamic_expr: DynamicCommentHandler
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = self.dynamic_expr.get_str_after_analysis_completed(),
+                result = None
+            )
+        ]
+
+        return "correct"
 
 # void関数は、自由に戻れるキャラにする 
 # ただし、frame_numが減らない場合(到達先の関数が異なる場合)は戻れない = プレイヤーはダメージを受けるようにする
-class ReturnStatus(TypedDict):
-    type: Literal["return"]
-    line: str
-    expr: list[Comment]
-    dynamic_expr: DynamicCommentHandler
-    result: str | None
+class ReturnStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, expr: list[Comment], thread: lldb.SBThread, is_english: bool):
+        super().__init__(line, is_english)
+        self.expr = expr
+        self.dynamic_expr = DynamicCommentHandler(comments = expr)
+        self.result: str | None = None
+        self.thread = thread
+
+    def analyze_comment(self, frame: lldb.SBFrame):
+        if self.dynamic_expr.set_expr_comments(frame) is None:
+            return
+        
+        # これで取得するのか?
+        if (return_value := self.thread.GetStopReturnValue().GetValue()) is None:
+            sys.exit("return value is not found")
+
+        self.result = return_value
+
+    def get_next_function(self):
+        return self.dynamic_expr, 0
+
+    def get_skipped_functions(self):
+        return [self.dynamic_expr.skipped_function_list]
+
+    def check_status(self, send_event: SendEvent, current_dynamic_comment_handler_being_checked: tuple[DynamicCommentHandler, int] | None):
+        # 計算式の解析が終わっている → 次のアクションに進める → 計算式の結果を取得する
+        if (result := self.result) is None:
+            return "next_function"
+
+        if current_dynamic_comment_handler_being_checked:
+            dynamic_comment_handler, index = current_dynamic_comment_handler_being_checked
+            send_event["function_return_info"] = FunctionReturnInfo(
+                func_name = dynamic_comment_handler.get_current_function(),
+                index = index,
+                return_value = result
+            )
+            dynamic_comment_handler.set_function_comment(result)
+
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = self.dynamic_expr.get_str_after_analysis_completed(),
+                result = None
+            )
+        ]
+
+        return "correct"
+
 
 class DynamicCommentHandler:
     def __init__(self, comments: list[Comment]):
@@ -427,7 +926,7 @@ class DynamicCommentHandler:
         if any(not isinstance(str, expr_description) for expr_description in self.expr_description_to_show_by_id):
             sys.exit("this expression is not completely analyzed yet")
         
-        return '\n'.join(self.expr_description_to_show_by_id)
+        return '\f'.join(self.expr_description_to_show_by_id)
 
     def is_analysis_potentially_completed(self):
         for comment in self.expr_description_to_show_by_id[self.index_scanned_currently:]:
@@ -439,79 +938,6 @@ class DynamicCommentHandler:
 
         return True
 
-#     elif len(fromTo) == 1 and fromTo == [self.line_number]:
-#         if type == 'whileIn':
-#             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
-#                 skipStart = self.line_number
-#                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
-#                 if skipStart <= self.next_line_number <= skipEnd:
-#                     # ここでスキップするかどうかを確認する
-#                     self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "while", "skip": True}, False)
-#                     event = self.event_reciever()
-#                     if event.get('skip', False):
-#                         while skipStart <= self.next_line_number <= skipEnd:
-#                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
-#                             self.step_conditionally()
-#                         self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "while", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
-#                     else:
-
-#                         self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "while"}, False)
-#                 else:
-#                     self.event_sender({"message": "", "status": "ok", "type": "while"})
-#             else:
-#                 self.event_sender({"message": "", "status": "ok", "type": "while"}, False)
-#                 self.line_loop.append(self.line_number)
-#         elif type == 'doWhileIn':
-#             if len(self.line_loop) and self.line_loop[-1] == self.next_line_number:
-#                 # ここでスキップするかどうを確認する
-#                 skipStart = self.line_data[self.func_name]["loops"][str(self.line_number)]
-#                 skipEnd = self.line_number
-#                 self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "doWhile", "skip": True}, False)
-#                 event = self.event_reciever()
-#                 if event.get('skip', False):
-#                     while skipStart <= self.next_line_number <= skipEnd:
-#                         # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
-#                         self.step_conditionally()
-#                     self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "doWhile", "items": self.vars_tracker.getValueAll(), "finalLine": self.line_number}, False)
-#                 else:
-#                     self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "doWhile"}, False)
-#             else:
-#                 self.event_sender({"message": "", "status": "ok", "type": "doWhile"}, False)
-#                 # なお、ループの始まりの行を管理するself.line_loopへの登録はdo-while-initの時にやっているのでここでは行わない
-#         elif type == 'forIn':
-#             if len(self.line_loop) and self.line_loop[-1] == self.line_number:
-#                 skipStart = self.line_number
-#                 skipEnd = self.line_data[self.func_name]["loops"][str(self.line_number)]
-#                 if skipStart <= self.next_line_number <= skipEnd:
-#                     # ここでスキップするかどうかを確認する
-#                     self.event_sender({"message": "Will you skip to rightly before exit of loop ?" if self.is_english else "ループを抜ける直前までスキップしますか?", "status": "ok", "type": "for", "skip": True, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged(), "line": self.line_number}, False)
-#                     event = self.event_reciever()
-#                     if event.get('skip', False):
-#                         line_list: list[int] = [skipStart]
-#                         while skipStart <= self.next_line_number <= skipEnd:
-#                             # ここは後々、scanfがあるかどうかでスキップするかどうかを確かめる
-#                             self.step_conditionally()
-#                             line_list.append(self.line_number)
-#                         self.event_sender({"message": "skip is completed" if self.is_english else "スキップが完了しました", "status": "ok", "type": "for", "items": self.vars_tracker.getValueAll(), "finalLine": skipStart if [skipStart, skipEnd] == line_list[-2:] else self.line_number}, False)
-#                         if skipEnd == self.line_number:
-#                             while True:
-#                                 if (event := self.event_reciever()) is None:
-#                                     break
-#                                 elif (fromTo := event.get('fromTo')) is None:
-#                                     self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng"}, False)
-#                                 elif (type := event.get('type')) != 'forFalse':
-#                                     self.event_sender({"message": "You did a different action !!" if self.is_english else "異なる行動をしようとしています!!", "status": "ng"}, False)
-#                                 if fromTo == [*line_list[-2:], self.next_line_number]:
-#                                     skipped_func = []
-#                                     self.event_sender({"message": "", "status": "ok", "type": "for", "skipped_function_list": skipped_func, "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
-#                                     break
-#                     else:
-#                         self.event_sender({"message": "skip is canceled" if self.is_english else "スキップをキャンセルしました", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()}, False)
-#                 else:
-#                     self.event_sender({"message": "", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()})
-#             else:
-#                 self.event_sender({"message": "", "status": "ok", "type": "for", "vars_w_value_changed": self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), "vars_w_value_unchanged": self.get_vars_w_value_unchanged()}, False)
-#                 self.line_loop.append(self.line_number)
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
     # エラーハンドリング
@@ -1065,7 +1491,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.str_info_to_send: list[StrcpyInfo] = []
             self.skipped_var_declaration_lines: list[str] = []
             ### return文のdynamic_comment_handlerはこのexpr_statusに設定する?
-            self.expr_status_list: list[DynamicNonVarStatus] = []
+            self.expr_status_handler_list: list[DynamicNonVarStatusHandler] = []
             self.exprs_by_line: dict[str, NonVarComment] = {}
 
         def set_process_and_thread(self, process: lldb.SBProcess, thread: lldb.SBThread) -> None:
@@ -1552,7 +1978,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             for line in new_lines:
                 self.vars_tracker.analyze_var_nodes(line, self.frame)
 
-        def vars_checker(self, isForFalse: bool = False) -> None:
+        def vars_checker(self, is_for_false: bool = False) -> None:
             if self.is_end:
                 return
             
@@ -1562,7 +1988,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 [
 
                 ] 
-                if isForFalse else 
+                if is_for_false else 
                 [
                     dynamic_variable_info
                     for dynamic_variable_info in self.vars_tracker.dynamic_variable_info_by_line.get(str(self.line_number), []) 
@@ -1734,182 +2160,32 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
         # 変数宣言以外の計算式の解析
         def analyze_non_var_expr_comments(self):
-            if self.next_line_number not in self.exprs_by_line:
+            if str(self.next_line_number) not in self.exprs_by_line:
                 self.thread.StepInto()
                 return
 
-            if len(self.expr_status_list) == 0 or self.expr_status_list[-1]["line"] != self.next_line_number:
+            if len(self.expr_status_handler_list) == 0 or self.expr_status_handler_list[-1].line != self.next_line_number:
                 self.set_expr_status(self.exprs_by_line[self.next_line_number], self.next_line_number)
 
-            expr_status = self.expr_status_list[-1]
+            expr_status_handler = self.expr_status_handler_list[-1]
 
-            if expr_status["type"] == "return" and expr_status["dynamic_expr"].is_analysis_potentially_completed():
+            if isinstance(expr_status_handler, ReturnStatusHandler) and expr_status_handler.dynamic_expr.is_analysis_potentially_completed():
                 self.thread.StepOut()
             else:
                 self.thread.StepInto()
 
-            if expr_status["type"] == "if":
-                if len(expr_status["results"]) and expr_status["results"][-1] is True:
-                    return
-                
-                for dynamic_comment_handler in expr_status["dynamic_conditions"][len(expr_status["results"]):]:
-                    # まずは解析
-                    if dynamic_comment_handler.set_expr_comments(self.frame):
-                        # 解析が途中で終了する = 自作関数が現れた → ひとまずは解析を終了する
-                        break
-                    
-                    # 解析終了 → 本条件の値の真偽値を取得し、その結果をresultsに格納する
-                    result = dynamic_comment_handler.get_result_bool(self.frame)
-                    expr_status["results"].append(result)
-
-                    # 条件がTrueならそれ以降の条件は確認しないので
-                    if result is True:
-                        break
-            elif expr_status["type"] == "while" or expr_status["type"] == "do_while":
-                if expr_status["result"] is not None:
-                    return
-                
-                dynamic_comment_handler = expr_status["dynamic_condition"]
-                if dynamic_comment_handler.set_expr_comments(self.frame):
-                    return
-                
-                result = dynamic_comment_handler.get_result_bool(self.frame)
-                expr_status["result"] = result
-            elif expr_status["type"] == "for":
-                # is_firstがTrue = まだ初期化が済んでいない
-                if expr_status["is_first"]:
-                    # 初期化部があるならその解析を行う
-                    if "initializer" in expr_status:
-                        if "var_initializer" in expr_status:
-                            sys.exit("variable initializer cannot be mixed with normal initializer")
-                        
-                        dynamic_comment_handler = expr_status["initializer"]["dynamic_expr"]
-                        if (dynamic_comment_handler.set_expr_comments(self.frame)):
-                            return
-
-                    elif "var_initializer" in expr_status:
-                        if "initializer" in expr_status:
-                            sys.exit("normal initializer cannot be mixed with variable initializer")
-                        return
-                    
-                    # 条件がない = 常に条件がTrue → 解析しない
-                    if expr_status["condition"] is None:
-                        return
-                    
-                    dynamic_comment_handler = expr_status["condition"]["dynamic_expr"]
-                    if dynamic_comment_handler.set_expr_comments(self.frame):
-                        return
-                    
-                    expr_status["is_first"] = True
-                else:
-                    if "initializer" in expr_status or "var_initializer" in expr_status:
-                        sys.exit("initializer or var_initializer have to be already done")
-                    
-                    # is_initializer is True = 条件部に戻ってきた → その前に変更式の解析を行う
-                    if "change" in expr_status and expr_status["change"]["is_not_completed"]:
-                        if expr_status["change"]["dynamic_expr"] is None:
-                            expr_status["change"]["dynamic_expr"] = DynamicCommentHandler(comments = expr_status["change"]["expr"])
-                        dynamic_comment_handler = expr_status["change"]["dynamic_expr"]
-                        dynamic_comment_handler.set_expr_comments(self.frame)
-                        return
-                    
-                    # 条件がない = 常に条件がTrue → 解析しない
-                    if expr_status["condition"] is None:
-                        return
-                    
-                    dynamic_comment_handler = expr_status["condition"]["dynamic_expr"]
-                    dynamic_comment_handler.set_expr_comments(self.frame)
-            elif expr_status["type"] == "switch":
-                # matched_caseがNoneではない = 何らかのcaseが条件式の値と合致したことが確認済み = ラベル式の値の計算は終了済み
-                if expr_status["matched_case"] is not None:
-                    return
-                
-                # resultがNone = 条件文の計算処理は完了していない → その処理を実行しにいく
-                if expr_status["condition"]["result"] is None:
-                    dynamic_comment_handler = expr_status["condition"]["dynamic_condition"]
-                    if dynamic_comment_handler.set_expr_comments(self.frame):
-                        return
-                    
-                    if (result := dynamic_comment_handler.expr_result_by_id[-1]) is None:
-                        sys.exit("error in result of switch condition")
-                    
-                    expr_status["condition"]["result"] = result
-
-                for i, case_expr_list in enumerate(expr_status["case_expr_list_by_index"]):
-                    for j, case_expr in enumerate(case_expr_list):
-                        if case_expr["result"] is None:
-                            if case_expr["dynamic_case_expr"].set_expr_comments(self.frame):
-                                return
-                            
-                            if (result := case_expr["dynamic_case_expr"].expr_result_by_id[-1]) is None:
-                                sys.exit("error in result of case expression")
-
-                            case_expr["result"] = result
-
-                        if expr_status["condition"]["result"] == case_expr["result"] != None:
-                            expr_status["matched_case"] = ','.join([i,j])
-                            return
-            elif expr_status["type"] == "expression":
-                if expr_status["dynamic_expr"].expr_result_by_id[-1] is not None:
-                    return
-                expr_status["dynamic_expr"].set_expr_comments(self.frame)
-            elif expr_status["type"] == "return":
-                if expr_status["dynamic_expr"].set_expr_comments(self.frame) is None:
-                    return
-                
-                # これで取得するのか?
-                return_value = thread.GetStopReturnValue().GetValue()
-                expr_status["result"] = return_value
+            expr_status_handler.analyze_comment(self.frame)
 
         # 次の処理の内容を取得する
-        def set_expr_status(self, expr: NonVarComment, line: str):
+        def set_expr_status(self, expr: NonVarComment, line: int):
             if expr["type"] == "if":
-                conditions: list[list[Comment]] = [
-                    value for _, value in sorted(expr["condition"].items())
-                ]
-                expr_status = IfStatus(
-                    type = expr["type"],
-                    line = line,
-                    conditions = conditions,
-                    dynamic_conditions = [
-                        DynamicCommentHandler(comments = comments) 
-                        for comments in conditions
-                    ],
-                    results = []
-                )
+                expr_status_handler = IfStatusHandler(line, expr["conditions"], self.is_english)
             elif expr["type"] == "while":
-                expr_status = WhileStatus(
-                    type = expr["type"],
-                    line = line,
-                    condition = expr["condition"],
-                    dynamic_condition = DynamicCommentHandler(comments = expr["condition"]),
-                    result = None
-                )
+                expr_status_handler = WhileStatusHandler(line, expr["condition"], self.is_english)
             elif expr["type"] == "do_while":
-                expr_status = DoWhileStatus(
-                    type = expr["type"],
-                    line = line,
-                    condition = expr["condition"],
-                    dynamic_condition = DynamicCommentHandler(comments = expr["condition"]),
-                    result = None
-                )
+                expr_status_handler = DoWhileStatusHandler(line, expr["condition"], self.is_english)
             elif expr["type"] == "for":
-                expr_status = ForStatus(
-                    type = expr["type"],
-                    line = line,
-                    condition = ForConditionStatus(
-                        expr = expr["condition"],
-                        dynamic_expr = DynamicCommentHandler(comments = expr["condition"]), 
-                        result = None
-                    ) if expr["condition"] else None,
-                    is_first = True
-                )
-                
-                if "initializer" in expr:
-                    expr_status["initializer"] = ForInitializerStatus(
-                        expr = expr["initializer"],
-                        dynamic_expr = DynamicCommentHandler(comments = expr["initializer"]),
-                    )
+                expr_status_handler = ForStatusHandler(line, expr, self.is_english)
 
                 if "var_initializer" in expr:
                     self.vars_tracker.dynamic_variable_info_by_line[line] = [
@@ -1921,138 +2197,24 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             current_comment = None
                         ) for var_info in expr["var_initializer"]
                     ]
-
-                    expr_status["var_initializer"] = ForVarInitializerStatus(
-                        required = [
-                            (var_info["varNode"]["name"], int(line)) 
-                            for var_info in expr["var_initializer"]
-                        ],
-                    )
-
-                if "change" in expr:
-                    expr_status["change"] = ForChangeStatus(
-                        expr = expr["change"],
-                        # 一回目のループ直前には変更式に到達することはないのでDynamicCommentHandlerは生成しない
-                        dynamic_expr = None,
-                        is_not_completed = True
-                    )
             elif expr["type"] == "switch":
-                if None in expr["case_exprs"]:
-                    sys.exit("None cannot be included in case exprs")
-
-                expr_status = SwitchStatus(
-                    type = expr["type"],
-                    line = line,
-                    condition = SwitchConditionStatus(
-                        condition = expr["condition"],
-                        dynamic_condition = DynamicCommentHandler(comments = expr["condition"]),
-                        result = None
-                    ),
-                    case_expr_list_by_index = [
-                        [
-                            CaseStatus(
-                                case_expr = case_expr,
-                                dynamic_case_expr = DynamicCommentHandler(
-                                    comments = case_expr
-                                ),
-                                result = None
-                            )
-                            for case_expr in case_expr_list
-                        ] for case_expr_list in expr["case_exprs"]
-                    ],
-                    matched_case = None
-                )
+                expr_status_handler = SwitchStatusHandler(line, expr, self.is_english)
             elif expr["type"] in ("continue", "break"):
-                expr_status = ControlFlowStatus(
-                    type = expr["type"],
-                    line = line
-                )
+                expr_status_handler = ControlFlowStatusHandler(line, expr["type"], self.is_english)
             elif expr["type"] == "expression":
-                expr_status = ExpressionStatus(
-                    type = expr["type"],
-                    line = line,
-                    expr = expr["expr"],
-                    dynamic_expr = DynamicCommentHandler(comments = expr["expr"])
-                )
-            else:
-                expr_status = ReturnStatus(
-                    type = expr["type"],
-                    line = line,
-                    expr = expr["expr"],
-                    dynamic_expr = DynamicCommentHandler(comments = expr["expr"]),
-                    result = None
-                )
+                expr_status_handler = ExpressionStatusHandler(line, expr["expr"], self.is_english)
+            else: # return
+                expr_status_handler = ReturnStatusHandler(line, expr["expr"], thread, self.is_english)
             
-            self.expr_status_list.append(expr_status)
-
-        # スキップされた関数を取得する
-        # ただし、そもそも関数の存在があり得ない処理文に関してはNoneを返す
-        def get_skipped_functions_non_var(self, expr_status: DynamicNonVarStatus):
-            if expr_status["type"] == "if":
-                return [dynamic_comment_handler.skipped_function_list for dynamic_comment_handler in expr_status["dynamic_conditions"]]
-            elif expr_status["type"] == "while" or expr_status["type"] == "do_while":
-                return [expr_status["dynamic_condition"].skipped_function_list]
-            elif expr_status["type"] == "for":
-                if "initializer" in expr_status:
-                    return [expr_status["initializer"]["dynamic_expr"].skipped_function_list]
-                elif "change" in expr_status and expr_status["change"]["dynamic_expr"] is not None:
-                    return [expr_status["change"]["dynamic_expr"].skipped_function_list]
-                elif (for_condition_status := expr_status["condition"]) is not None:
-                    return [for_condition_status["dynamic_expr"].skipped_function_list]
-                else:
-                    return None
-            elif expr_status["type"] == "switch":
-                return [expr_status["condition"]["dynamic_condition"].skipped_function_list]
-            elif expr_status["type"] == "expression":
-                return [expr_status["dynamic_expr"].skipped_function_list]
-            elif expr_status["type"] == "return":
-                return [expr_status["dynamic_expr"].skipped_function_list]
-            else:
-                sys.exit("continue or break statement have not to have any fucntions")
-
-        def get_next_function_non_var(self, expr_status: DynamicNonVarStatus):
-            # 次の関数が在するfunction_groupのインデックス
-            index = 0
-
-            if expr_status["type"] == "if":
-                if True in expr_status["results"] or len(expr_status["results"]) == len(expr_status["conditions"]):
-                    sys.exit("this if statement is already completely scanned")
-
-                dynamic_comment_handler = expr_status["dynamic_conditions"][len(expr_status["results"])]
-                index = len(expr_status["results"])
-            elif expr_status["type"] == "while" or expr_status["type"] == "do_while":
-                dynamic_comment_handler = expr_status["dynamic_condition"]
-            elif expr_status["type"] == "for":
-                if "initializer" in expr_status:
-                    dynamic_comment_handler = expr_status["initializer"]["dynamic_expr"]
-                elif "change" in expr_status and expr_status["change"]["dynamic_expr"] is not None:
-                    dynamic_comment_handler = expr_status["change"]["dynamic_expr"]
-                elif (for_condition_status := expr_status["condition"]) is not None:
-                    dynamic_comment_handler = for_condition_status["dynamic_expr"]
-                else:
-                    sys.exit("next function is not found")
-            elif expr_status["type"] == "switch":
-                dynamic_comment_handler = expr_status["condition"]["dynamic_condition"]
-            elif expr_status["type"] == "expression":
-                dynamic_comment_handler = expr_status["dynamic_expr"]
-            elif expr_status["type"] == "return":
-                dynamic_comment_handler = expr_status["dynamic_expr"]
-            else:
-                sys.exit("continue or break statement have not to have any fucntions")
-
-            # 次の関数のコメントと、それが在するfunction_groupのインデックスを返す
-            return dynamic_comment_handler, index
-            
-        def get_skipped_functions_var(self, var_info: DynamicVarInfo):
-            return var_info["skipped_function_list"]
+            self.expr_status_handler_list.append(expr_status_handler)
 
         def check_expr_status(self, execution_info: ExecutionInfo):
-            if len(self.expr_status_list) == 0:
+            if len(self.expr_status_handler_list) == 0:
                 return False
             
-            current_expr_status = self.expr_status_list[-1]
+            current_expr_status_handler = self.expr_status_handler_list[-1]
             
-            if current_expr_status["line"] != execution_info["line"]:
+            if current_expr_status_handler.line != execution_info["line"]:
                 return False
             
             send_event = SendEvent(
@@ -2060,178 +2222,74 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 status = "ok",
             )
 
-            if current_expr_status["type"] == "if" and execution_info["type"] == "if":
-                # true_condition_index = 0,1,2,...
-                if execution_info["true_condition_index"] == -1:
-                    if True in current_expr_status["results"]:
-                        return False
-                    
-                    # まだ解析できていない条件がある
-                    if len(current_expr_status["results"]) != len(current_expr_status["conditions"]):
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                    
-                    # 全ての条件がFalse → どの条件にも該当しない = true_case_indexは-1で正しい
-                else:
-                    # 今回選んだ条件より前の条件が正しい = 間違った条件を選んだ
-                    if True in current_expr_status["results"][:execution_info["true_condition_index"]]:
-                        return False
-                    
-                    # まだ探索中であれば(どこかしらの自作関数で止まっているなら)、その関数を確かめる方向に行く
-                    if len(current_expr_status["results"]) <= execution_info["true_condition_index"]:
-                        self.analyze_next_function(current_expr_status)
-                        return True
+            if isinstance(current_expr_status_handler, IfStatusHandler) and execution_info["type"] == "if":
+                check_result = current_expr_status_handler.check_conditions(send_event, execution_info["true_condition_index"])
+                if check_result == "correct":
+                    self.expr_status_handler_list.pop(-1)
+            elif (isinstance(current_expr_status_handler, WhileStatusHandler) and execution_info["type"] == "while") or (isinstance(current_expr_status_handler, DoWhileStatusHandler) and execution_info["type"] == "do_while"):
+                check_result = current_expr_status_handler.check_condition(send_event, execution_info["condition"])
+                if check_result == "correct" and not execution_info["condition"]:
+                    self.expr_status_handler_list.pop(-1)
 
-                    # 間違った条件を選んだ
-                    if current_expr_status["results"][execution_info["true_condition_index"]] is False:
-                        return False
-                    
-                    # executioin_info["true_condition_index"]番目の条件が正しい → 正しい条件を選んだ   
-            elif (current_expr_status["type"] == "while" and execution_info["type"] == "while") or (current_expr_status["type"] == "do_while" and execution_info["type"] == "do_while"):
-                if current_expr_status["result"] is None:
-                    self.analyze_next_function(current_expr_status)
-                    return True
-                
-                if current_expr_status["result"] is not execution_info["condition"]:
-                    return False
-                
-                if not execution_info["condition"]:
                     self.set_skipped_var_declaration([
                         line for line in self.vars_tracker.declared_variables_by_line
                         if self.line_number < int(line) < self.next_line_number
                     ])
-            elif current_expr_status["type"] == "for":
-                if execution_info["type"] == "for":
-                    if "initializer" in current_expr_status or "var_initializer" in current_expr_status:
-                        return False
-                    
-                    if "change" in current_expr_status and current_expr_status["change"]["dynamic_expr"] is not None:
-                        return False
-                    
-                    for_condition_status = current_expr_status["condition"]
-                    if for_condition_status is None:
-                        if execution_info["condition"]:
-                            return {}
-                        else:
-                            return False
-                    
-                    if for_condition_status["result"] is not None:
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                    
-                    if for_condition_status["result"] is not execution_info["condition"]:
-                        return False
-
-                    if not execution_info["condition"]:
-                        self.set_skipped_var_declaration([
-                            line for line in self.vars_tracker.declared_variables_by_line
-                            if self.line_number < int(line) < self.next_line_number
-                        ])
-                elif execution_info["type"] == "for_initializer":
-                    if "initializer" not in current_expr_status:
-                        return False
-                    
-                    if current_expr_status["initializer"]["dynamic_expr"].current_function_comment is not None:
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                    
-                    # 初期化時(結果がNoneでない場合)はそのコメント(result)を取得する
-                    initializer_str = current_expr_status["initializer"]["dynamic_expr"].get_str_after_analysis_completed()
-                    current_expr_status.pop("initializer")
-
-                    return {}
-                elif execution_info["type"] == "for_change":
-                    if "change" not in current_expr_status:
-                        return False
-                    
-                    dynamic_comment_handler = current_expr_status["change"]["dynamic_expr"]
-
-                    if dynamic_comment_handler is None:
-                        return False
-                    
-                    if dynamic_comment_handler.current_function_comment is not None:
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                        
-                    # 変更式があるならその内容を登録する
-                    change_str = dynamic_comment_handler.get_str_after_analysis_completed()
-                    
-                    current_expr_status["change"]["dynamic_expr"] = None
-                    return {}
-                else:
-                    return False
-            elif current_expr_status["type"] == "switch" and execution_info["type"] == "switch":
-                # condition_resultがまだ解析中ならその内容を返す
-                if current_expr_status["condition_result"] is None:
-                    self.analyze_next_function(current_expr_status)
-                    return True
+            elif isinstance(current_expr_status_handler, ForStatusHandler):
+                check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 
-                if execution_info["true_case_index"] == -1:
-                    # どこかしらの条件がTrue → 間違った条件を選んでいる
-                    if any(result["condition"] is True for result in current_expr_status["case_results"]):
-                        return False
-                    
-                    # 全ての条件がFalse → どの条件にも該当しない = true_case_indexは-1で正しい
-                    if len(all(result["condition"] is False for result in current_expr_status["case_results"])) != len(current_expr_status["case_results"]):
-                        # まだ探索中であれば(どこかしらの自作関数で止まっているなら)、その関数を確かめる方向に行く
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                else:
-                    # 今回のアクション以前のcase群でTrueとなっているものがあるなら、そのcase群を選んでいないこととなるので、アクションが間違っていることとなる
-                    if any(result["condition"] is True for result in current_expr_status["case_results"][:execution_info["true_case_index"]]):
-                        return False
-                    
-                    # まだ探索中であれば(どこかしらの自作関数で止まっているなら)、その関数を確かめる方向に行く
-                    if len(current_expr_status["case_results"]) <= execution_info["true_case_index"]:
-                        self.analyze_next_function(current_expr_status)
-                        return True
-                    
-                    # 間違った条件を選んだ
-                    if current_expr_status["results"][execution_info["true_case_index"]] is False:
-                        return False
-            elif (current_expr_status["type"] == "continue" and execution_info["type"] == "continue") and (current_expr_status["type"] == "break" and execution_info["type"] == "break"):
-                # lineがあっている時点で正しい → 正しいcontinueまたはbreakを選んでいる
-                pass
-            elif current_expr_status["type"] == "expression" and execution_info["type"] == "expression":
-                # 計算式を解析し終わっている → 次のアクションに進める → 計算式の結果を取得する
-                if current_expr_status["result"] is None:
-                    self.analyze_next_function(current_expr_status)
-                    return True
-            elif current_expr_status["type"] == "return" and execution_info["type"] == "return":
-                # 計算式の解析が終わっている → 次のアクションに進める → 計算式の結果を取得する
-                result = current_expr_status["result"]
-                if result is None:
-                    self.analyze_next_function(current_expr_status)
-                    return True
+                # for falseの条件文チェックが完了した場合のみ、スキップされ得る次の変数リストを取得する
+                if check_result == "correct" and execution_info["type"] == "for" and not execution_info["condition"]:
+                    self.expr_status_handler_list.pop(-1)
 
-                if len(self.dynamic_comment_handler_being_checked):
-                    dynamic_comment_handler, index = self.dynamic_comment_handler_being_checked[-1]
-                    send_event["function_return_info"] = FunctionReturnInfo(
-                        func_name = dynamic_comment_handler.get_current_function(),
-                        index = index,
-                        return_value = result
-                    )
-                    dynamic_comment_handler.set_function_comment(result)
+                    self.set_skipped_var_declaration([
+                        line for line in self.vars_tracker.declared_variables_by_line
+                        if self.line_number < int(line) < self.next_line_number
+                    ])
+            elif isinstance(current_expr_status_handler, SwitchStatusHandler) and execution_info["type"] == "switch":
+                check_result = current_expr_status_handler.check_status(send_event, execution_info)
+                if check_result == "correct":
+                    self.expr_status_handler_list.pop(-1)
+            elif isinstance(current_expr_status_handler, ControlFlowStatusHandler) and execution_info["type"] in ("continue", "break"):
+                check_result = current_expr_status_handler.check_status(send_event)
+                self.expr_status_handler_list.pop(-1)
+            elif isinstance(current_expr_status_handler, ExpressionStatusHandler) and execution_info["type"] == "expression":
+                check_result = current_expr_status_handler.check_expr(send_event)
+                
+                if check_result == "correct":
+                    self.expr_status_handler_list.pop(-1)
+            elif isinstance(current_expr_status_handler, ReturnStatusHandler) and execution_info["type"] == "return":
+                check_result = current_expr_status_handler.check_status(
+                    send_event, 
+                    self.dynamic_comment_handler_being_checked[-1] if len(self.dynamic_comment_handler_being_checked) else None
+                )
+
+                if check_result == "correct":
+                    self.expr_status_handler_list.pop(-1)
             else:
                 return False
 
-            send_event["skipped_function_list"] = self.get_skipped_functions_non_var(current_expr_status)
+            if check_result == "incorrect":
+                return False
+            elif check_result == "next_function":
+                self.analyze_next_function(current_expr_status_handler)
+                return True
+
+            send_event["skipped_function_list"] = current_expr_status_handler.get_skipped_functions()
             send_event["vars_w_value_changed"] = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), 
             send_event["vars_w_value_unchanged"] = self.get_vars_w_value_unchanged()
             
             self.event_sender(send_event)
-            
-            self.expr_status_list.pop(-1)
 
-            return {}
+            return True
         
-        def analyze_next_function(self, expression_info_being_analyzed: DynamicNonVarStatus | DynamicVarInfo):
-            if "dynamic_var_node" in expression_info_being_analyzed:
-                skipped_function_list = self.get_skipped_functions_var(expression_info_being_analyzed)
-                current_comment_w_index = expression_info_being_analyzed["current_comment_w_index"]
+        def analyze_next_function(self, expression_info_being_analyzed: DynamicNonVarStatusHandler | DynamicVarInfo):
+            if isinstance(expression_info_being_analyzed, DynamicNonVarStatusHandler):
+                skipped_function_list = expression_info_being_analyzed.get_skipped_functions()
+                current_comment_w_index = expression_info_being_analyzed.get_next_function()
             else:
-                skipped_function_list = self.get_skipped_functions_non_var(expression_info_being_analyzed)
-                current_comment_w_index = self.get_next_function_non_var(expression_info_being_analyzed)
+                skipped_function_list = expression_info_being_analyzed["skipped_function_list"]
+                current_comment_w_index = expression_info_being_analyzed["current_comment_w_index"]
 
             if current_comment_w_index is None:
                 sys.exit("function comment is not found even though next functions is being analyzed")
@@ -2305,10 +2363,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             )
                         )
                     )
+
                     self.dynamic_comment_handler_being_checked.append((current_comment_handler, index))
                     back_line_number = self.line_number
                     back_frame_num = self.frame_num
-                    self.set_skipped_var_declaration([line for line in self.variable_declarations_by_line if int(line) < self.next_line_number])
+                    self.set_skipped_var_declaration(
+                        [
+                            line for line in self.variable_declarations_by_line 
+                            if int(line) < self.next_line_number
+                        ]
+                    )
                     while True:
                         if self.analyze_frame(back_line_number):
                             continue
@@ -2331,7 +2395,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 if execution_info is not None:
                     # ここで何が返されるかによって次のアクションに向かうか、今のアクションを解析するか、間違ったアクションをしたのかを解析する
-                    if (result := self.check_expr_status(execution_info)) is False:
+                    if self.check_expr_status(execution_info) is False:
                         self.event_sender(
                             SendEvent(
                                 message = "You did a different action !!" if self.is_english else "異なる処理に対するアクションをしました!!", 
@@ -2351,12 +2415,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.step_conditionally()
             self.vars_checker()
 
-            if (len(self.expr_status_list) and self.expr_status_list[-1]["type"] == "for" and self.expr_status_list[-1].get("var_initializer", {}).get("required", [])):
-                vars_declared = set(self.vars_tracker.vars_declared[-1])
-                vars_required = self.expr_status_list[-1]["var_initializer"]["required"]
-                self.expr_status_list[-1]["var_initializer"]["required"] = [v for v in vars_required if v not in vars_declared]
-                if len(self.expr_status_list[-1]["var_initializer"]["required"]):
-                    self.expr_status_list[-1].pop("var_initializer")
+            if len(self.expr_status_handler_list):
+                current_expr_status_handler = self.expr_status_list[-1]
+                if isinstance(current_expr_status_handler, ForStatusHandler) and current_expr_status_handler.required_var_list:
+                    vars_declared = set(self.vars_tracker.vars_declared[-1])
+                    vars_required = current_expr_status_handler.required_var_list
+                    current_expr_status_handler.required_var_list = [v for v in vars_required if v not in vars_declared]
+                    if len(current_expr_status_handler.required_var_list):
+                        current_expr_status_handler.required_var_list = None
 
             return PROGRESS
 

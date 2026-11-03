@@ -2425,40 +2425,31 @@ class AST2Flowchart:
 
             comp_stmt_cursor_list: list[ci.Cursor] = list(comp_exec_cursor.get_children())
 
-            cursor_list_by_case: list[tuple[list[tuple[ci.Cursor, ci.Cursor]], list[ci.Cursor]]] = []
+            cursor_list_by_case: list[tuple[list[tuple[ci.Cursor, ci.Cursor | None]], list[ci.Cursor]]] = []
 
             case_cursor_list: list[tuple[ci.Cursor, ci.Cursor | None]] = []
 
-            # まずはcomp_stmt_cursor_list (すなわちB) の処理用にcaseの遷移先の行を取得する
             while len(comp_stmt_cursor_list):
                 cr = comp_stmt_cursor_list.pop(0)
                 self.check_cursor_error(cr)
 
-                while cr.kind == ci.CursorKind.CASE_STMT:
+                while cr.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
                     children: list[ci.Cursor] = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
-                    if len(children) != 2:
-                        sys.exit("number of child cursors of case cursor has to be 2 a")
-                    case_value_cursor, next_cr = children
+                    if cr.kind == ci.CursorKind.CASE_STMT:
+                        if len(children) != 2:
+                            sys.exit("number of child cursors of case cursor has to be 2")
+                        case_value_cursor, next_cr = children
+                    else: # ci.CursorKind.DEFAULT_STMT
+                        if len(children) != 1:
+                            sys.exit("number of child cursors of default cursor has to be 1")
+                        if is_default:
+                            sys.exit("default label cannot be overlapped")
+                        next_cr = children[0]
+                        case_value_cursor = None
+                        is_default = True
+                        
                     case_cursor_list.append((cr, case_value_cursor))
                     cr = next_cr
-
-                if cr.kind == ci.CursorKind.DEFAULT_STMT:
-                    if is_default:
-                        sys.exit("default label cannot be overlapped")
-                    is_default = True
-                    children: list[ci.Cursor] = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
-                    if len(children) != 1:
-                        sys.exit("number of child cursors of case cursor has to be 1 b")
-                    next_cr = children[0]
-                    case_cursor_list = [(cr, None)]
-                    cr = next_cr
-                    while cr.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
-                        if cr.kind == ci.CursorKind.DEFAULT_STMT:
-                            sys.exit("default cursor is not overlapped")
-                        children: list[ci.Cursor] = [case_cr for case_cr in cr.get_children() if self.check_cursor_error(case_cr)]
-                        if len(children) != 2:
-                            sys.exit("number of child cursors of case cursor has to be 2 c")
-                        cr = children[1]
 
                 comp_stmt_cursor_list.insert(0, cr)
                 stmt_cursor_list_in_case: list[ci.Cursor] = []
@@ -2495,7 +2486,7 @@ class AST2Flowchart:
                     if case_value_cursor:
                         case_nodeID = self.get_expr(case_value_cursor, shape='invtriangle', label='case')
                     else:
-                        case_nodeID = self.createNode('default', shape='invtriangle')
+                        case_nodeID = self.createNode(f'default,{self.get_cursor_line(case_cursor)}', shape='invtriangle')
                     
                     self.createEdge(prev_nodeID, case_nodeID)
 
@@ -2519,18 +2510,25 @@ class AST2Flowchart:
 
                 for stmt_cursor in stmt_cursor_list_in_case:
                     nodeID = self.parse_comp_stmt(stmt_cursor, nodeID) if stmt_cursor.kind == ci.CursorKind.COMPOUND_STMT else self.parse_stmt(stmt_cursor, nodeID)
-
         # switch(A) Bの時、Bが case C: D なら A == C でDが行われる。
         # しかし、Bが case C:でないなら D は無視される。Dは複数行でも良い。
         elif comp_exec_cursor.kind in (ci.CursorKind.CASE_STMT, ci.CursorKind.DEFAULT_STMT):
-            caseValue_cursor, exec_cursor = [cr for cr in comp_exec_cursor.get_children() if self.check_cursor_error(cr)]
-            if self.get_cursor_extent_start(comp_exec_cursor).line != self.get_cursor_extent_end(caseValue_cursor).line:
-                sys.exit("case expression has to be in one line")
-
-            if comp_exec_cursor.kind == ci.CursorKind.DEFAULT_STMT:
+            children: list[ci.Cursor] = [cr for cr in comp_exec_cursor.get_children() if self.check_cursor_error(cr)]
+            if comp_exec_cursor.kind == ci.CursorKind.CASE_STMT:
+                if len(children) != 2:
+                    sys.exit("number of child cursors of case cursor has to be 2")
+                case_value_cursor, stmt_cursor = children
+                if self.get_cursor_extent_start(comp_exec_cursor).line != self.get_cursor_extent_end(case_value_cursor).line:
+                    sys.exit("case expression has to be in one line")
+                case_nodeID = self.get_expr(case_value_cursor, shape='invtriangle')
+            else: # ci.CursorKind.DEFAULT_STMT
+                if len(children) != 1:
+                    sys.exit("number of child cursors of case cursor has to be 2")
+                stmt_cursor = children[0]
+                case_value_cursor = None
+                case_nodeID = self.createNode('default', shape='invtriangle')
                 is_default = True
 
-            case_nodeID = self.get_expr(caseValue_cursor, shape='invtriangle')
             self.createEdge(cond_nodeID, case_nodeID)
             createSwitchBreakerInfo()
             # switchの元の部屋のサイズを+1する
@@ -2539,12 +2537,12 @@ class AST2Flowchart:
 
             self.register_execution_info(case_nodeID, create_switch_case_executioin_info(self.get_cursor_line(cr), 0))
 
-            nodeID = self.parse_stmt(exec_cursor, case_nodeID)
+            nodeID = self.parse_stmt(stmt_cursor, case_nodeID)
              
-            self.line_info_dict[self.scanning_func].setLine(self.get_cursor_line(exec_cursor))
+            self.line_info_dict[self.scanning_func].setLine(self.get_cursor_line(stmt_cursor))
             self.createEdge(nodeID, end_nodeID)
-
-            end_line = self.get_cursor_line(exec_cursor)
+        else:
+            sys.exit("impossible ast of switch statement is found")
 
         self.createEdge(nodeID, end_nodeID)
 
