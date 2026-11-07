@@ -1,0 +1,5 @@
+start,101_variables_expression,3, 23
+itemget, 101_variables_expression,6, 19,day
+itemget, 101_variables_expression,15, 19,gap
+itemget, 101_variables_expression,22, 9,weather_code
+itemget, 101_variables_expression,19, 6,temp_variation

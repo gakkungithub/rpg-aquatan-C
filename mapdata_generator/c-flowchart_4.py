@@ -22,12 +22,12 @@ genBitMap = GenBitMap(
     ast_to_flowchart.gvar_info, 
     ast_to_flowchart.var_info, 
     ast_to_flowchart.expr_node_info, 
-    ast_to_flowchart.roomSize_info, 
+    ast_to_flowchart.room_size_info, 
     ast_to_flowchart.gotoRoom_list, 
     ast_to_flowchart.execution_info, 
     is_english
 )
 
-genBitMap.startTracking()
+genBitMap.start_tracking()
 
-genBitMap.setMapChip(program_name, ast_to_flowchart.line_info_dict, is_english)
+genBitMap.set_mapchip(program_name, ast_to_flowchart.line_info_dict, is_english)

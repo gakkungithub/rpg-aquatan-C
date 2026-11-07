@@ -6,11 +6,12 @@ from rpg_aquatan_utils.types.execution_info import *
 class CommentWindowInfo(TypedDict):
     detail: list[list[str]]
     hover: list[list[ExprDescription]]
-    func_groups: list[FuncWarpGroup]
+    func_groups: list[FuncWarpGroup | None]
     type: str
 
 # typeは型情報, lineは引数の宣言位置
 class ArgInfo(TypedDict):
+    name: str
     type: str
     line: int
 
@@ -22,7 +23,7 @@ class FuncWarp(TypedDict):
     name: str
     x: int
     y: int
-    args: dict[str, ArgInfo]
+    args: list[ArgInfo]
     line: int
     children: int
 
@@ -39,83 +40,63 @@ class ExpressionDetail(TypedDict):
     execution_info: ExecutionInfo
     vars: list[VarReference]
 
-# treasure_event = {
-#     "type": "TREASURE", 
-#     "x": int(treasure.local_pos[1]+self.offset["x"]), 
-#     "y": int(treasure.local_pos[0]+self.offset["y"]),
-#     "name": treasure.name,
-#     "initializer": treasure.var_info["varNode"], 
-#     "start": treasure.var_info["start"],
-#     "end": treasure.var_info["end"], 
-#     "funcWarp": func_warp, 
-#     "func": treasure.func_name
-# }
-# class Treasure_Info
+class TreasureInfo(TypedDict):
+    type: Literal["TREASURE"]
+    x: int
+    y: int
+    name: str
+    start: int
+    end: int
+    func_groups: list[FuncWarpGroup | None]
+    func: str
 
-# move_event = {
-#     "type": "MOVE", 
-#     "x": int(move_event.local_from_pos[1]+self.offset["x"]), 
-#     "y": int(move_event.local_from_pos[0]+self.offset["y"]),
-#     "func": move_event.func_name,
-#     "dest_x": int(move_event.local_to_pos[1]+self.offset["x"]), 
-#     "dest_y": int(move_event.local_to_pos[0]+self.offset["y"]), 
-#     "dest_map": program_name,
-#     "execution_info": move_event.execution_info,
-#     "detail": self.convert_to_comment_window_info(move_event.comment_window_info),
-#     "mapchip": move_event.mapchip
-# }
+class MoveEventInfo(TypedDict):
+    type: Literal["MOVE"]
+    x: int
+    y: int
+    func: str
+    dest_x: int
+    dest_y: int
+    dest_map: str
+    execution_info: ExecutionInfo | None
+    detail: CommentWindowInfo | None
+    mapchip: int
 
-# chara_return = {
-#     "type": "CHARARETURN", 
-#     "name": "15161" if chara_return.func_name else "15084", 
-#     "x": int(chara_return.local_pos[1]+self.offset["x"]), 
-#     "y": int(chara_return.local_pos[0]+self.offset["y"]),
-#     "dest_map": program_name,
-#     "dir": 0, 
-#     "movetype": 1, 
-#     "message": ("Congraturations !! Here is A Goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!") if chara_return.func_name == "main" else (f"This is the end of function {chara_return.func_name} !!" if self.is_english else f"ここが {chara_return.func_name} の終了地点です!!"), 
-#     "execution_info": chara_return.execution_info,
-#     "detail": self.convert_to_comment_window_info(chara_return.comment_window_info),
-#     "func": chara_return.func_name
-# }
+class CharaReturn(TypedDict):
+    type: Literal["CHARARETURN"]
+    name: str
+    x: int
+    y: int
+    dir: int
+    movetype: int
+    message: str
+    execution_info: ExecutionInfo
+    detail: CommentWindowInfo
+    func: str
 
-# chara_check_condition = {
-#     "type": "CHARACHECKCONDITION", 
-#     "name": str(color), 
-#     "x": pos[1], 
-#     "y": pos[0], 
-#     "dir": chara_checkCondition.dir, 
-#     "moveDir": move_dir,
-#     "movetype": 1, 
-#     "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", 
-#     "func": chara_checkCondition.func,
-#     "execution_info": chara_checkCondition.execution_info, 
-#     "detail": self.convert_to_comment_window_info(chara_checkCondition.comment_window_info)
-# }
+class CharaCheckCondition(TypedDict):
+    type: Literal["CHARACHECKCONDITION"]
+    name: str
+    x: int
+    y: int
+    dir: int
+    moveDir: int
+    movetype: int
+    message: str
+    func: str
+    execution_info: ExecutionInfo
+    detail: CommentWindowInfo
 
-# detail_by_line[firstLine] = {
-#     "expr": self.convert_to_comment_window_info(detail["expr"]), 
-#     "execution_info": detail["execution_info"],
-#     "vars": [
-#         {
-#             "name": var_reference[0], 
-#             "line": var_reference[1]
-#         } 
-#         for var_reference in detail["vars"]
-#     ]
-# }
-
-# chara_expression = {
-#     "type": "CHARAEXPRESSION", 
-#     "name": "15165", 
-#     "x": int(chara_expression.local_pos[1]+self.offset["x"]), 
-#     "y": int(chara_expression.local_pos[0]+self.offset["y"]), 
-#     "dir": 0,
-#     "movetype": 1, 
-#     "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", 
-#     "func": chara_expression.func, 
-#     "comments": detail_by_line
-# }
+class CharaExpression(TypedDict):
+    type: Literal["CHARAEXPRESSION"]
+    name: str
+    x: int
+    y: int
+    dir: int
+    movetype: int
+    message: str
+    func: str
+    comments: dict[int | str, ExpressionDetail]
 
 class SendEvent(TypedDict):
     message: str
@@ -125,7 +106,7 @@ class SendEvent(TypedDict):
     from_line: NotRequired[int]
     is_end: NotRequired[Literal[True]]
     is_finished: NotRequired[Literal[True]]
-    items: NotRequired[dict[str, dict[int | str, VariableValue]]]
+    items: NotRequired[list[VariableInfo]]
     item: NotRequired[DeclaredVariableInfo]
     func: NotRequired[str]
     skip: NotRequired[Literal[True]]
@@ -134,8 +115,8 @@ class SendEvent(TypedDict):
     vars_w_value_changed: NotRequired[list[VariablePartWithValue]]
     vars_w_value_unchanged: NotRequired[list[VariablePartWithValue]]
     function_return_info: NotRequired[FunctionReturnInfo]
-    gvars: NotRequired[dict[str, dict[int | str, VariableValue]]]
-    vars: NotRequired[list[dict[str, dict[int | str, VariableValue]]]]
+    gvars: NotRequired[list[VariableInfo]]
+    vars: NotRequired[list[list[VariableInfo]]]
     std: NotRequired[list[str]]
     files: NotRequired[list[FileInfo]]
     memory: NotRequired[list[MemoryAllocation | MemoryFree]]
@@ -144,9 +125,20 @@ class SendEvent(TypedDict):
     execution_and_result_str_list: list[ExecutionAndResultStr]
 
 class DeclaredVariableInfo(TypedDict):
-    value: VariableValue
+    value: VariableValueWComment | VariableValue
     line: int
+
+class VariableValueWComment(TypedDict):
+    value: str | None
+    type: str
+    comment: str
+    children: dict[str, VariableValueWComment]
     initialized: bool
+    
+class VariableInfo(TypedDict):
+    name: str
+    line: int
+    value: VariableValue
 
 class VariableValue(TypedDict):
     value: str | None
@@ -165,9 +157,11 @@ class NextFunctionInfo(TypedDict):
     name: str
     x: int
     y: int
-    items: dict[str, dict[int | str, ArgumentItemInfo]]
+    items: list[ArgumentItemInfo]
 
 class ArgumentItemInfo(TypedDict):
+    name: str
+    line: int
     value: VariableValue
     type: ArgumentTypeInfo
 

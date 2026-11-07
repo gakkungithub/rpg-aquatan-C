@@ -427,9 +427,14 @@ def main():
         ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
         ITEMWND.show()
 
-        for gvar_name, item_info in initialResult["items"].items():
-            for line, values in item_info.items():
-                PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {"values": items[gvar_name]["values"]}, items[gvar_name]["type"]))
+        for gvar_info in initialResult["items"]:
+            PLAYER.common_itembag.add(
+                Item(
+                    gvar_info["name"], 
+                    gvar_info["line"], 
+                    gvar_info["value"],
+                )
+            )
 
         fieldmap = Map(mapname)
         fieldmap.add_chara(PLAYER)
@@ -597,25 +602,25 @@ def main():
                             MSGWND.set("Would you go back to rightly after the dungeon began ?", (['Yes', 'No'], 'rollback_to_init'))
                         else:
                             MSGWND.set("ゲーム開始時点に戻りますか?", (['はい', 'いいえ'], 'rollback_to_init'))
-                elif cmd == "undo":
-                    if len(PLAYER.move5History) < 1:
-                        MSGWND.set("No history...")
-                    else:
-                        move = PLAYER.move5History.pop()
-                        if move["return"]:
-                            PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                # elif cmd == "undo":
+                #     if len(PLAYER.move5History) < 1:
+                #         MSGWND.set("No history...")
+                #     else:
+                #         move = PLAYER.move5History.pop()
+                #         if move["return"]:
+                #             PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
 
-                        # 暗転
-                        DIMWND.show(200, 'warp')
+                #         # 暗転
+                #         DIMWND.show(200, 'warp')
 
-                        PLAYER.commonItembag.items[-1] = move['cItems']
-                        PLAYER.itembag.items[-1] = move['items']
+                #         PLAYER.common_itembag.get_current_item_layer() = move['cItems']
+                #         PLAYER.itembag.get_current_item_layer() = move['items']
 
-                        fieldmap.warp_player(move['mapname'], move['x'], move['y'])
+                #         fieldmap.warp_player(move['mapname'], move['x'], move['y'])
 
-                    cmd = "\0"
-                    atxt = "\0"
-                    PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                #     cmd = "\0"
+                #     atxt = "\0"
+                #     PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif cmd == "break":
                     try:
                         move = PLAYER.moveHistory.pop()
@@ -674,10 +679,9 @@ def main():
                         if stdinResult["status"] == "ok":
                             # 今回更新した変数以外の計算コメントは全て消去する
                             PLAYER.remove_itemvalue()
-                            for name, item_info in stdinResult["items"].items():
-                                for line, value in item_info.items():
-                                    if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
-                                        item.update_value(value)
+                            for stdin_variable_info in stdinResult["items"]:
+                                if (item := PLAYER.find_item_belong_to_player(stdin_variable_info["name"], stdin_variable_info["line"])) is not None:
+                                    item.update_value(stdin_variable_info["value"])
                         MSGWND.set(stdinResult['message'])
                     except (IndexError, ValueError):
                         MSGWND.set("ERROR...")
@@ -1518,7 +1522,15 @@ class Map:
         end = data["end"]
         func_groups = data["func_groups"]
         func = data["func"]
-        treasure = Treasure((x, y), name, func, start, end, func_groups, self.name.lower())
+        treasure = Treasure(
+            pos = (x, y), 
+            name = name, 
+            start = start, 
+            end = end, 
+            func = func, 
+            func_groups = func_groups, 
+            mapname = self.name.lower()
+        )
         self.events.append(treasure)
 
     def create_light_j(self, data):
@@ -1898,7 +1910,7 @@ class Player(Character):
         self.move5History: list[dict] = []
         self.status = {"HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
         self.itembag = ItemBag()
-        self.commonItembag = ItemBag()
+        self.common_itembag = ItemBag()
         self.sender : EventSender = sender
         self.sender.programCodeWindow.history.append(
             (
@@ -1998,7 +2010,7 @@ class Player(Character):
                 #         self.door = None
         elif self.damage_motion:
             if self.damage_motion[0] == 0:
-                PLAYER.damage_label = ""
+                self.damage_label = ""
             self.rect.move_ip(self.damage_motion.pop(0), 0)
         elif self.waitingMove is not None:
             dest_map = self.waitingMove.dest_map
@@ -2165,39 +2177,46 @@ class Player(Character):
                 }
             )
             
-            if (itemResult := self.sender.receive_json()) is None:
+            if (item_result := self.sender.receive_json()) is None:
                 return False
-            
-            self.add_skipped_funcs(
-                itemResult["skipped_function_list"], 
-                mymap.name, 
-                event.func, 
-                event.start, 
-                event.item
-            )
 
-            if itemResult['status'] == "ok":
-                if itemResult.get('skip', False):
-                    MSGWND.set(itemResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'func_skip'))
+            if item_result['status'] == "ok":
+                self.add_skipped_funcs(
+                    item_result["skipped_function_list"], 
+                    mymap.name, 
+                    event.func, 
+                    event.start, 
+                    event.item
+                )
+
+                if item_result.get('skip', False):
+                    MSGWND.set(
+                        item_result['message'], 
+                        (
+                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                            'func_skip'
+                        )
+                    )
                 else:
                     # 初期化値なしの変数でコメントを初期化する
-                    if 'values' not in itemResult:
-                        PLAYER.remove_itemvalue()
+                    if "values" not in item_result:
+                        self.remove_itemvalue()
                         
-                    event.open(itemResult['item']['value'], itemResult['item']['line'], itemResult["expr_descriptions"])
+                    event.open(item_result["item"])
+
                     item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                     self.add_log(f"Item \"{event.item}\" of {event.start} line was acquired" if ISENGLISH else f"{event.start}行目のアイテム「{event.item}」を取得")
-                    if (indexes_comments := itemResult["expr_descriptions"]["indexes"]):
-                        item_get_message += "\f" + "\f".join(indexes_comments)
-                    if not itemResult['item']["initialized"]:
-                        item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                    # if (indexes_comments := item_result["expr_descriptions"]["indexes"]):
+                    #     item_get_message += "\f" + "\f".join(indexes_comments)
+                    # if not item_result['item']["initialized"]:
+                    #     item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                     self.set_completed_checked_func_location(mymap.name, event.func, event.start, event.item)
 
                     mymap.remove_event(event)
                     MSGWND.set(item_get_message)
                 self.fp.write("itemget, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "," + event.item + "\n")
             else:
-                MSGWND.set(itemResult['message'])
+                MSGWND.set(item_result['message'])
             return True
         elif isinstance(event, MoveEvent):
             if event.execution_info:
@@ -2211,14 +2230,13 @@ class Player(Character):
                 if (move_result := self.sender.receive_json()) is None:
                     return False
 
-                self.add_skipped_funcs(
-                    move_result["skipped_function_list"], 
-                    mymap.name, 
-                    event.func, 
-                    event.execution_info["line"]
-                )
-
                 if move_result['status'] == "ok":
+                    self.add_skipped_funcs(
+                        move_result["skipped_function_list"], 
+                        mymap.name, 
+                        event.func, 
+                        event.execution_info["line"]
+                    )
                     # 関数のスキップ
                     if move_result.get('skipCond', False):
                         MSGWND.set(move_result['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
@@ -2236,13 +2254,13 @@ class Player(Character):
                     dest_x = event.dest_x
                     dest_y = event.dest_y
 
-                    PLAYER.append_move5History(
+                    self.append_move5History(
                         {
                             'mapname': mymap.name, 
-                            'x': PLAYER.x, 
-                            'y': PLAYER.y, 
-                            'cItems': PLAYER.commonItembag.items[-1], 
-                            'items': PLAYER.itembag.items[-1], 
+                            'x': self.x, 
+                            'y': self.y, 
+                            'cItems': self.common_itembag.get_current_item_layer(), 
+                            'items': self.itembag.get_current_item_layer(), 
                             'return':False
                         }
                     )
@@ -2250,7 +2268,7 @@ class Player(Character):
                     DIMWND.show(200, 'warp')
                     mymap.warp_player(dest_map, dest_x, dest_y)
 
-                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    self.fp.write("jump, " + dest_map + "," + str(self.x)+", " + str(self.y) + "\n")
                 else:
                     MSGWND.set(move_result['message'])
 
@@ -2268,10 +2286,10 @@ class Player(Character):
                 self.append_move5History(
                     {
                         'mapname': from_map, 
-                        'x': PLAYER.x, 
-                        'y': PLAYER.y, 
-                        'cItems': PLAYER.commonItembag.items[-1], 
-                        'items': PLAYER.itembag.items[-1], 
+                        'x': self.x, 
+                        'y': self.y, 
+                        'cItems': self.common_itembag.get_current_item_layer(), 
+                        'items': self.itembag.get_current_item_layer(), 
                         'return':False
                     }
                 )
@@ -2279,7 +2297,7 @@ class Player(Character):
                 DIMWND.show(200, 'warp')
                 mymap.warp_player(dest_map, dest_x, dest_y)
 
-                PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                self.fp.write("jump, " + dest_map + "," + str(self.x)+", " + str(self.y) + "\n")
                 return True
 
         MSGWND.set("nothing on foot" if ISENGLISH else "足元には何もない。")
@@ -2335,7 +2353,7 @@ class Player(Character):
         """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
 
         # 向いている方向のとなりの座標を求める
-        nextx, nexty = self.x, self.y
+        nextx, nexty = self.pos()
         if self.direction == DOWN:
             nexty = self.y + 1
         elif self.direction == LEFT:
@@ -2374,11 +2392,15 @@ class Player(Character):
                         "func_groups": comment["expr"]["func_groups"]
                     }
                 )
-                charaExpressionResult: dict | None = self.sender.receive_json()
+                charaExpressionResult = self.sender.receive_json()
 
                 if charaExpressionResult is None:
                     return False
                 
+                if charaExpressionResult['status'] == "ng":
+                    MSGWND.set(charaExpressionResult['message'])
+                    return True
+
                 if comment["execution_info"]["line"]:
                     self.add_skipped_funcs(
                         charaExpressionResult["skipped_function_list"], 
@@ -2386,10 +2408,6 @@ class Player(Character):
                         chara.func, 
                         comment["execution_info"]["line"]
                     )
-                
-                if charaExpressionResult['status'] == "ng":
-                    MSGWND.set(charaExpressionResult['message'])
-                    return True
                 
                 if charaExpressionResult.get('skipCond', False):
                     MSGWND.set(charaExpressionResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'exp_func_skip'))
@@ -2416,11 +2434,12 @@ class Player(Character):
                     if (path_list := item_info_dict.get((varname, line))) is None:
                         continue
 
-                    if (item := PLAYER.find_item_belong_to_player(varname, line)) is None:
+                    if (item := self.find_item_belong_to_player(varname, line)) is None:
                         continue
                     
                     for path in path_list:
-                        item.set_comments(path, comment["comments"])
+                        # ここは今後修正する (今はデフォルトのコメントしか設定できない)
+                        item.set_comments(path, "new value set !!" if ISENGLISH else "新しい値が設定されました!!")
                         vars_quiz_count += 1
 
                         var_path = (varname, *path)
@@ -2487,13 +2506,6 @@ class Player(Character):
             if CCCharacterResult is None: # 結果を取得できない場合
                 MSGWND.set("You did a different action" if ISENGLISH else "異なる行動をしようとしています")
                 return False
-            
-            self.add_skipped_funcs(
-                CCCharacterResult["skipped_function_list"], 
-                mymap.name, 
-                chara.func, 
-                chara.execution_info["line"]
-            )
 
             if CCCharacterResult['status'] == "ng": # 間違った行動をした場合
                 if mymap.name in ("tutorial", "tutorial_en"):
@@ -2505,6 +2517,13 @@ class Player(Character):
                 else:
                     MSGWND.set(CCCharacterResult['message'])
             else:
+                self.add_skipped_funcs(
+                    CCCharacterResult["skipped_function_list"], 
+                    mymap.name, 
+                    chara.func, 
+                    chara.execution_info["line"]
+                )
+
                 if CCCharacterResult.get('skipCond', False):
                     MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
                 elif CCCharacterResult.get('skip', False):
@@ -2530,15 +2549,15 @@ class Player(Character):
                 )
                 returnResult = self.sender.receive_json()
 
-                self.add_skipped_funcs(
-                    returnResult["skipped_function_list"], 
-                    mymap.name,
-                    chara.func,
-                    chara.execution_info["line"]
-                )
-
                 if returnResult['status'] == 'ok':
-                    if returnResult.get('skipReturn', False):
+                    self.add_skipped_funcs(
+                        returnResult["skipped_function_list"], 
+                        mymap.name,
+                        chara.func,
+                        chara.execution_info["line"]
+                    )
+                    
+                    if returnResult.get("function_return_info", False):
                         MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                     else:
                         self.set_completed_checked_func_location(
@@ -2552,29 +2571,28 @@ class Player(Character):
                                 'mapname': mymap.name, 
                                 'x': self.x, 
                                 'y': self.y, 
-                                'cItems': self.commonItembag.items[-1], 
-                                'items': self.itembag.items[-1], 
+                                'cItems': self.common_itembag.get_current_item_layer(), 
+                                'items': self.itembag.get_current_item_layer(), 
                                 'return':True
                             }
                         )
 
                         move = self.moveHistory.pop(-1)
                         self.itembag.items.pop(-1)
-                        PLAYER.remove_itemvalue()
+                        self.remove_itemvalue()
                         self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
-                        for name, item_info in returnResult["items"].items():
-                            for line, value in item_info.items():
-                                if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
-                                    item.update_value(value)
+                        for variable_info in returnResult["items"]:
+                            if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
+                                item.update_value(variable_info["value"])
                         
                         checked_func_location = CheckedFuncLocation(map_name=move['mapname'], func_name=returnResult["backToFunc"], line=returnResult["backToLine"])
-                        if checked_func_location in PLAYER.checked_funcs:
-                            PLAYER.checked_funcs[checked_func_location][-1].return_value = returnResult["function_return_info"]
+                        if checked_func_location in self.checked_funcs:
+                            self.checked_funcs[checked_func_location][-1].return_value = returnResult["function_return_info"]
                         else:
                             # ここに来ることはシステム上ありえないが一応
                             sys.exit("error in checked func location after return")
 
-                        PLAYER.func = returnResult["backToFunc"]
+                        self.func = returnResult["backToFunc"]
                         self.waitingMove = chara
                         self.waitingMove.dest_map = move['mapname']
                         self.waitingMove.dest_x = move['x']
@@ -2593,14 +2611,14 @@ class Player(Character):
                 )
                 returnResult = self.sender.receive_json()
 
-                self.add_skipped_funcs(
-                    returnResult["skipped_function_list"], 
-                    mymap.name, 
-                    chara.func, 
-                    chara.execution_info["line"]
-                )
-
                 if returnResult['status'] == 'ok':
+                    self.add_skipped_funcs(
+                        returnResult["skipped_function_list"], 
+                        mymap.name, 
+                        chara.func, 
+                        chara.execution_info["line"]
+                    )
+
                     if returnResult.get('skipReturn', False):
                         MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                     elif returnResult.get('finished', False):
@@ -2692,16 +2710,21 @@ class Player(Character):
         else:
             sys.exit("unknown execution-info type is found")
 
+    # グローバル変数リスト→ローカル変数リスト
     def find_item_belong_to_player(self, name: str, line: int | str):
-        return PLAYER.commonItembag.find(name, int(line)) or PLAYER.itembag.find(name, int(line))
+        return self.common_itembag.find(name, int(line)) or self.itembag.find(name, int(line))
+
+    def add_local_item_layer(self, item_layer: list[Item]):
+        self.itembag.items.append(item_layer)
 
     def remove_itemvalue(self):
-        self.commonItembag.remove_item_comments()
+        self.common_itembag.remove_item_comments()
         self.itembag.remove_item_comments()
 
     def append_code_element_window(self, code_element_window: CodeElementWindow | None):
         if code_element_window is None:
             return
+        
         self.codeElementWindow_list.append(code_element_window)
 
     def is_scrollable_code_element_window(self, mouse_pos: tuple[int, int]):
@@ -3328,10 +3351,9 @@ class MessageWindow(Window):
                                 break
                     self.set(skipResult['message'])
                     PLAYER.remove_itemvalue()
-                    for name, item_info in skipResult["items"].items():
-                        for line, value in item_info.items():
-                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
-                                item.update_value(value)
+                    for variable_info in skipResult["items"]:
+                        if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
+                            item.update_value(variable_info["value"])
                 else:
                     self.sender.send_event({"skip": False})
                     skipResult = self.sender.receive_json()
@@ -3342,10 +3364,9 @@ class MessageWindow(Window):
                     skipResult = self.sender.receive_json()
                     self.set(skipResult['message'])
                     PLAYER.remove_itemvalue()
-                    for name, item_info in skipResult["items"].items():
-                        for line, value in item_info.items():
-                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
-                                item.update_value(value)
+                    for variable_info in skipResult["items"]:
+                        if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
+                            item.update_value(variable_info["value"])
                     event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                     if isinstance(event, Treasure):
                         PLAYER.append_checked_func_state(
@@ -3372,29 +3393,39 @@ class MessageWindow(Window):
                             'mapname': from_map, 
                             'x': PLAYER.x, 
                             'y': PLAYER.y, 
-                            'cItems': PLAYER.commonItembag.items[-1], 
-                            'items': PLAYER.itembag.items[-1], 
+                            'cItems': PLAYER.common_itembag.get_current_item_layer(), 
+                            'items': PLAYER.itembag.get_current_item_layer(), 
                             'return': False
                         }
                     )
-                    PLAYER.moveHistory.append({'mapname': from_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["from_line"]})
+
+                    PLAYER.moveHistory.append(
+                        {
+                            'mapname': from_map, 
+                            'x': PLAYER.x, 
+                            'y': PLAYER.y, 
+                            'line': skipResult["from_line"]
+                        }
+                    )
                     
-                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
+                    event = fieldmap.get_event(*PLAYER.pos())
                     if isinstance(event, Treasure) and len(event.codeElementWindow.func_groups) != 0:
                         PLAYER.append_checked_func_state(
                             (fieldmap.name, event.func, event.start, event.item), 
                             (skipResult["next_func"]["name"], None, True)
                         )
                         func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.start, event.item))
-                        
-                        newItems = []
-                        arg_index = 0
-                        for name, argInfo in skipResult["next_func"]["items"].items():
-                            for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], event.comments["values"]["comments"][func_index_to_check]["args"][arg_index], itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
-                        PLAYER.itembag.items.append(newItems)
+
+                        PLAYER.add_local_item_layer(
+                            [
+                                Item(
+                                    arg_item_info["name"], 
+                                    arg_item_info["line"], 
+                                    arg_item_info,
+                                )
+                                for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
+                            ]
+                        )
                     # 暗転
                     DIMWND.show(200, 'warp')
                     fieldmap.warp_player(dest_map, dest_x, dest_y)
@@ -3407,10 +3438,9 @@ class MessageWindow(Window):
                     skipResult = self.sender.receive_json()
                     self.set(skipResult['message'])
                     PLAYER.remove_itemvalue()
-                    for name, item_info in skipResult["items"].items():
-                        for line, value in item_info.items():
-                            if (item := PLAYER.find_item_belong_to_player(name, line)) is not None:
-                                item.update_value(value)
+                    for variable_info in skipResult["items"]:
+                        if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
+                            item.update_value(variable_info["value"])
                     event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                     if isinstance(event, MoveEvent):
                         PLAYER.append_checked_func_state(
@@ -3453,16 +3483,16 @@ class MessageWindow(Window):
                         )
                         func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.execution_info["line"], None))
                         
-                        newItems = []
-                        arg_index = 0
-                        for name, argInfo in skipResult["next_func"]["items"].items():
-                            for line, itemInfo in argInfo.items():
-                                # event.func_argcomments[func_index_to_check]["args"][arg_index] = detail[expr_id][] if ISENGLISH else detail[expr_id]
-                                # item = Item(name, int(line), itemInfo["value"], event.func_argcomments[func_num_checked]["args"][arg_index], itemInfo["type"])
-                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
-                        PLAYER.itembag.items.append(newItems)
+                        PLAYER.add_local_item_layer(
+                            [
+                                Item(
+                                    arg_item_info["name"], 
+                                    arg_item_info["line"], 
+                                    arg_item_info["value"]
+                                )
+                                for arg_item_info in skipResult["next_func"]["items"]
+                            ]
+                        )
                     if PLAYER.direction == DOWN:
                         x = PLAYER.x
                         y = PLAYER.y+1
@@ -3481,16 +3511,19 @@ class MessageWindow(Window):
                             (fieldmap.name, chara.func, chara.execution_info["line"], None), 
                             (skipResult["next_func"]["name"], None, True)
                         )
+
                         func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.execution_info["line"], None))
                         
-                        newItems = []
-                        arg_index = 0
-                        for name, argInfo in skipResult["next_func"]["items"].items():
-                            for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], {"values": None}, itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
-                        PLAYER.itembag.items.append(newItems)
+                        PLAYER.add_local_item_layer(
+                            [
+                                Item(
+                                    arg_item_info["name"], 
+                                    arg_item_info["line"], 
+                                    arg_item_info["value"]
+                                )
+                                for arg_item_info in skipResult["next_func"]["items"]
+                            ]
+                        )
                     elif isinstance(chara, CharaExpression):
                         PLAYER.append_checked_func_state(
                             (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
@@ -3498,14 +3531,16 @@ class MessageWindow(Window):
                         )
                         func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None))
                         
-                        newItems = []
-                        arg_index = 0
-                        for name, argInfo in skipResult["next_func"]["items"].items():
-                            for line, itemInfo in argInfo.items():
-                                item = Item(name, int(line), itemInfo["value"], chara.comments[str(chara.linenum)]["comments"][func_index_to_check]["args"][arg_index], itemInfo["type"])
-                                newItems.append(item)
-                                arg_index += 1
-                        PLAYER.itembag.items.append(newItems)
+                        PLAYER.add_local_item_layer(
+                            [
+                                Item(
+                                    arg_item_info["name"], 
+                                    arg_item_info["line"], 
+                                    arg_item_info["value"]
+                                )
+                                for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
+                            ]
+                        )
                     self.set(skipResult['message'])
                     # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                     dest_map = fieldmap.name
@@ -3517,8 +3552,8 @@ class MessageWindow(Window):
                             'mapname': dest_map, 
                             'x': PLAYER.x, 
                             'y': PLAYER.y, 
-                            'cItems': PLAYER.commonItembag.items[-1], 
-                            'items': PLAYER.itembag.items[-1], 
+                            'cItems': PLAYER.common_itembag.get_current_item_layer(), 
+                            'items': PLAYER.itembag.get_current_item_layer(), 
                             'return': False
                         }
                     )
@@ -3570,21 +3605,33 @@ class MessageWindow(Window):
                     PLAYER.waitingMove = None
                     PLAYER.moveHistory = []
                     PLAYER.move5History = []
-                    PLAYER.commonItembag = ItemBag()
+                    PLAYER.common_itembag = ItemBag()
 
                     # items = ast.literal_eval(config.get("game", "items"))
-                    for gvar_name, gvar_info in rollbackResult["gvars"].items():
-                        for line, values in gvar_info.items():
-                            PLAYER.commonItembag.add(Item(gvar_name, int(line), values, {}, player_history[2]["gvars"][(gvar_name, int(line))]))
+                    for gvar_info in rollbackResult["gvars"]:
+                        PLAYER.common_itembag.add(
+                            Item(
+                                gvar_info["name"], 
+                                gvar_info["line"], 
+                                gvar_info["value"],
+                            )
+                        )
 
                     PLAYER.itembag = ItemBag()
                     if len(rollbackResult["vars"]) != 0:
                         PLAYER.itembag.items.pop(0)
-                    for i, var_dict in enumerate(rollbackResult["vars"]):
-                        PLAYER.itembag.items.append([])
-                        for var_name, var_info in var_dict.items():
-                            for line, values in var_info.items():
-                                PLAYER.itembag.add(Item(var_name, int(line), values, {}, player_history[2]["vars"][i][(var_name, int(line))]))
+                    
+                    for i, variable_info_list in enumerate(rollbackResult["vars"]):
+                        PLAYER.add_local_item_layer(
+                            [
+                                Item(
+                                    variable_info["name"], 
+                                    variable_info["line"], 
+                                    variable_info["value"]
+                                )
+                                for variable_info in variable_info_list
+                            ]
+                        )
 
                     PLAYER.door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
@@ -3849,7 +3896,7 @@ class ItemWindow(ScrollableWindow):
         self.is_inAction = True
         self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
 
-    def draw_itemValueChangedRect(self, comments: list[str], local_y: int):
+    def draw_itemValueChangedRect(self, comments: str, local_y: int):
         y = self.offset_y + local_y
         if y < 34:
             return
@@ -3858,11 +3905,14 @@ class ItemWindow(ScrollableWindow):
             if self.check_comments_line[1]:
                 self.check_comments_line = (-1, False)
             else:
-                MSGWND.set('\f'.join(comments))
+                MSGWND.set(comments)
                 self.check_comments_line = (self.check_comments_line[0], True)
         self.item_changed_lines.add(y // 24)
-        pygame.draw.rect(self.surface, self.RED if self.check_comments_line[0] == y // 24 and self.check_comments_line[1] else self.WHITE, 
-                            pygame.Rect(0, y, self.rect.width, 24))
+        pygame.draw.rect(
+            self.surface, 
+            self.RED if self.check_comments_line[0] == y // 24 and self.check_comments_line[1] else self.WHITE, 
+            pygame.Rect(0, y, self.rect.width, 24)
+        )
 
     def draw_icon(self, icon, local_x, local_y):
         y = self.offset_y + local_y
@@ -3883,13 +3933,11 @@ class ItemWindow(ScrollableWindow):
         y = self.TITLE_FONT_SIZE + 4
 
         # グローバル変数
-        for item in PLAYER.commonItembag.items[-1]:
+        for item in PLAYER.common_itembag.get_current_item_layer():
             is_item_changed = True
             # 値が変化している変数に対しては白ハイライトをつける
             if item.itemvalue.declared_comments is not None:
                 self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
-            elif item.index_comments is not None:
-                self.draw_itemValueChangedRect(item.index_comments, y)
             elif item.itemvalue.changed_comments is not None:
                 self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
             else:
@@ -3902,8 +3950,8 @@ class ItemWindow(ScrollableWindow):
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
-            # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype["type"])
+            # 型に応じたアイコンを blit（描画）(typeの型はまだ修正途中なのでNoneの場合は""にする)
+            icon, constLock = self.itemChips.getChip(item.itemvalue.type or "")
 
             if isinstance(icon, list):
                 self.draw_icon(icon[0], icon_x+8, y+4)
@@ -3930,33 +3978,27 @@ class ItemWindow(ScrollableWindow):
             y += 24
 
             if item.itemvalue.is_open:
-                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], False)
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, False)
             
         # ローカル変数
-        for item in PLAYER.itembag.items[-1]:
+        for item in PLAYER.itembag.get_current_item_layer():
             is_item_changed = True
             if item.itemvalue.declared_comments is not None:
-                for comment in item.itemvalue.declared_comments:
-                    if isinstance(comment, dict):
-                        print(comment)
-
-                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in item.itemvalue.declared_comments], y)
-            elif item.index_comments is not None:
-                self.draw_itemValueChangedRect(item.index_comments, y)
+                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
             elif item.itemvalue.changed_comments is not None:
                 self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
 
             icon_x = x
-            if item.itemvalue.children and item.vartype["type"] != "FILE *":
+            if item.itemvalue.children and item.itemvalue.type != "FILE *":
                 self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
                 if self.is_inAction:
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.vartype["type"])
+            icon, constLock = self.itemChips.getChip(item.itemvalue.type or "")
             if isinstance(icon, list):
                 self.draw_icon(icon[0], icon_x+8, y+4)
                 self.draw_icon(icon[1], icon_x+4, y+12)
@@ -3975,7 +4017,7 @@ class ItemWindow(ScrollableWindow):
             # アイコンの右に名前と値を描画
             self.draw_string(text_x, y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
-            if item.vartype["type"] == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and self.offset_y+y >= 34:
+            if item.itemvalue.type == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and self.offset_y+y >= 34:
                 offset_name = self.font.get_rect(item.name).width + 30
                 file_button = pygame.Rect(text_x + offset_name, y + 2, 100, 20)
                 pygame.draw.rect(self.surface, (100, 100, 100), file_button)  # グレーのボタン
@@ -3986,15 +4028,15 @@ class ItemWindow(ScrollableWindow):
 
             offset_name = self.font.get_rect(item.name).width + text_x
             # 配列などの値がないvalueは表示しない
-            if item.itemvalue.value is not None and item.vartype["type"] != "FILE *":
+            if item.itemvalue.value is not None and item.itemvalue.type != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 offset_name += 30
                 self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", value_color)
 
             y += 24
 
-            if item.itemvalue.is_open and item.vartype["type"] != "FILE *":
-                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, item.vartype["children"], True)
+            if item.itemvalue.is_open and item.itemvalue.type != "FILE *":
+                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, True)
 
         if self.is_inAction:
             self.is_inAction = False
@@ -4005,11 +4047,11 @@ class ItemWindow(ScrollableWindow):
         self.file_window.draw(screen)
         ScrollableWindow.blit(self, screen)
 
-    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, "ItemValue"], y: int, x: int, type_dict: dict, isLocal: bool):
+    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, ItemValue], y: int, x: int, isLocal: bool):
         for valuename, itemvalue in itemvalue_children.items():
             is_item_changed = True
             if itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect([comment["comment"] if isinstance(comment, dict) else comment for comment in itemvalue.declared_comments], y)
+                self.draw_itemValueChangedRect(itemvalue.declared_comments, y)
             elif itemvalue.changed_comments is not None:
                 self.draw_itemValueChangedRect(itemvalue.changed_comments, y)
             else:
@@ -4017,9 +4059,9 @@ class ItemWindow(ScrollableWindow):
                 
             # 型に応じたアイコンを blit（描画)
             if valuename[0] == '[' or valuename == '*':
-                icon, constLock = self.itemChips.getChip(type_dict["type"])
+                icon, constLock = self.itemChips.getChip(itemvalue.type or "")
             else:
-                icon, constLock = self.itemChips.getChip(type_dict[valuename]["type"])
+                icon, constLock = self.itemChips.getChip(itemvalue.type or "")
 
             # アイコンの右に名前と値を描画
             if isLocal:
@@ -4061,7 +4103,12 @@ class ItemWindow(ScrollableWindow):
             y += 24
 
             if itemvalue.is_open:
-                y = self.draw_values([valuename, *var_path] if valuename == '*' else [*var_path, valuename] if valuename[0] == '[' else [*var_path, ".", valuename], itemvalue.children, y, icon_x, type_dict["children"] if valuename[0] == '[' or valuename == '*' else type_dict[valuename]["children"], isLocal)
+                y = self.draw_values(
+                    [valuename, *var_path] if valuename == '*' else [*var_path, valuename] if valuename[0] == '[' else [*var_path, ".", valuename], 
+                    itemvalue.children, 
+                    y, 
+                    icon_x, 
+                    isLocal)
 
         return y
     
@@ -4388,7 +4435,6 @@ class MoveEvent(Event):
 class HoverComment(TypedDict):
     description: str
     expr: str
-    value: str
                                                                                                                                                                                                 
 #   ,ad8888ba,                       88            88888888888 88                                                           I8,        8        ,8I 88                      88                                 
 #  d8"'    `"8b                      88            88          88                                                       ,d  `8b       d8b       d8' ""                      88                                 
@@ -4433,7 +4479,7 @@ class CodeElementWindow(Window):
         self.is_right_edge = True
         self.show()
 
-    def set_expression_comment(self, detail: list[list[str]], hover: list[list[ExprDescription]], comment_type: str):
+    def set_expression_comment(self, detail: list[list[str]], hover: list[list[Comment]], comment_type: str):
         self.hoverLink_info_list: list[tuple[pygame.Surface, pygame.Rect, pygame.Rect]] = []
         self.baseComment_info_list: list[tuple[pygame.Surface, pygame.Rect]] = []
         self.hoverComment_list = [self.get_hover_comment(h) for h in hover]
@@ -4521,31 +4567,139 @@ class CodeElementWindow(Window):
 
         return reference
 
-    def get_hover_comment(self, expr_descriptions: list[ExprDescription]) -> list[HoverComment]:
+    # region type of comments
+    # class Comment(TypedDict):
+    #     id: int
+    #     comment: ExprDescription | FunctionComment
+    #     execution_condition: dict[int, bool]
+
+    # class FunctionComment(TypedDict):
+    #     func_name: str
+    #     is_custom: bool
+    #     description: list[TextPart | ExprIdPart]
+    #     expr: list[TextPart | ExprIdPart]
+
+    # class ExprDescription(TypedDict):
+    #     description: list[ExprDescriptionPart]
+    #     expr: list[ExprDescriptionPart]
+    # endregion
+    def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_description_str_to_show: list[HoverComment]):
+        if expr_part["type"] == "scalar":
+            # scalar variableの結果自体は取得する必要がない
+            reference = expr_part["name"]
+        elif expr_part["type"] == "struct":
+            # struct variableの結果自体は取得する必要がない。
+            struct_base = self.get_reference_expr_comments(expr_part["parent"], expr_description_str_to_show)
+            reference = '.'.join([struct_base, *expr_part["members"]])
+        else: # array
+            # 計算結果を含めていない、計算式の文字列
+            reference_index_base_list: list[str] = []
+            # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
+            for index_part in expr_part["indexes"]:
+                if "expr_id" in index_part:
+                    # expr_id
+                    reference_index_base_list.append(f"[{expr_description_str_to_show[index_part["expr_id"]]["expr"]}]")
+                else:
+                    reference_index_base_list.append(f"[{index_part["text"]}]")
+
+            reference_top = self.get_reference_expr_comments(expr_part["parent"], expr_description_str_to_show)
+            reference = ''.join([reference_top, *reference_index_base_list])
+        return reference
+    
+    def get_hover_comment(self, comment_list: list[Comment]) -> list[HoverComment]:
         # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
-        expr_str_base_by_id: dict[int, str] = {}
         expr_description_str_to_show: list[HoverComment] = []
-        for middle_expr in expr_descriptions:
-            expr_str_base: list[str] = []
-            expr_description: list[str] = []
-            for expr_part in middle_expr["expr"]:
-                if "type" in expr_part:
-                    expr_str_base.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
-                elif "text" in expr_part:
-                    expr_str_base.append(expr_part["text"])
-                else: # expr_idなら、計算式の結果を動的に代入する
-                    expr_str_base.append(expr_str_base_by_id[expr_part["expr_id"]])
+        for comment_index, comment in enumerate(comment_list):
+            expr_str: str = ""
+            description_str: str = ""
 
-            for expr_part in middle_expr["description"]: # "description": [{"name": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}]
-                if "type" in expr_part:
-                    expr_description.append(self.get_reference_hover_comment(expr_part, expr_str_base_by_id))
-                elif "text" in expr_part:
-                    expr_description.append(expr_part["text"])
-                else: # expr_id
-                    expr_description.append(expr_str_base_by_id[expr_part["expr_id"]])
+            expr_description = comment["comment"]
 
-            expr_str_base_by_id[middle_expr["id"]] = " ".join(expr_str_base)
-            expr_description_str_to_show.append({"expr": ' '.join(expr_str_base), "description": ' '.join(expr_description)})
+
+            condition_description_list: list[str] = []
+            for line, condition in comment["execution_condition"].items():
+                condition_str = expr_description_str_to_show[line]["expr"]
+                condition_description_list.append(f"{condition_str} is {"True" if condition else "False"}" if ISENGLISH else f"{condition_str}が{"真" if condition else "偽"}")
+
+            if len(condition_description_list):
+                # # もし、評価されないと判断された場合、計算式の評価をスキップする
+                # if is_not_to_evaluate:
+                #     if "func_name" in expr_description and expr_description["is_custom"]:
+                #         self.skipped_function_list.append(expr_description["func_name"])
+
+                #     self.index_scanned_currently += 1
+                #     continue
+
+                if "func_name" in expr_description:
+                    ### 今は自作関数のみを考えている
+                    arg_list = [
+                        arg_expr_part["text"] 
+                        if "text" in arg_expr_part else 
+                        expr_description_str_to_show[arg_expr_part["expr_id"]]["expr"]
+                        for arg_expr_part in expr_description["expr"]
+                    ]
+
+                    expr_str = ''.join([expr_description["func_name"], "(", *arg_list, ")"])
+
+                    description_part_list = [
+                        arg_expr_part["text"] 
+                        if "text" in arg_expr_part else
+                        expr_description_str_to_show[arg_expr_part["expr_id"]]["expr"]
+                        for arg_expr_part in expr_description["description"]
+                    ]
+
+                    description_str = ''.join(description_part_list)
+                else:
+                    str_to_show_list: list[str] = []
+
+                    for expr_part in expr_description["expr"]: # "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                        if "type" in expr_part:
+                            str_to_show_list.append(self.get_reference_expr_comments(expr_part, expr_description_str_to_show))
+                        elif "text" in expr_part:
+                            str_to_show_list.append(expr_part["text"])
+                        elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
+                            str_to_show_list.append(expr_part["macro"])
+                        else: # expr_id
+                            str_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["expr"])
+
+                    expr_str = " ".join(str_to_show_list)
+
+                    '''
+                    ここで"||", "&&", "?"の演算子の処理を行う
+                    a || b の時はbが未処理なら"1"(aが真であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
+                    a && b の時はbが未処理なら"0"(aが偽であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
+                    c ? a : b の時はaが未処理ならbの値, bが未処理ならaの値をstr_for_evaluationリストに登録する
+                    未処理の計算式については、Noneをstr_for_evaluationに登録する
+                    '''
+                    description_to_show_list: list[str] = []
+                    for expr_part in expr_description["description"]:
+                        if "type" in expr_part:
+                            # 後々ここで値を取得できるようにする(send_eventによって明らかになっていく感じ)
+                            # description_to_show_list.append(f"{self.get_reference_expr_comments(expr_part, expr_description_str_to_show)}(={frame.EvaluateExpression(reference_description_base).GetValue()})")
+                            # description_to_show_list.append(f"{self.get_reference_expr_comments(expr_part, expr_description_str_to_show)}")
+                            pass
+                        elif "text" in expr_part:
+                            # description_to_show_list.append(expr_part["text"])
+                            pass
+                        elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
+                            if "text" in expr_part["replacement"]:
+                                description_to_show_list.append(f"(={expr_part["replacement"]["text"]})")
+                            else:
+                                # description_to_show_list.append(f"{expr_part["macro"]}(={value_list_from_send_event(expr_part["replacement"]["expr_id"])})")
+                                pass
+                        else: # expr_id
+                            description_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["description"])
+
+                    description_str = " ".join(description_to_show_list)
+            else:
+                description_str += f"if {", ".join(condition_description_list)}, this part is executed" if ISENGLISH else f"もし、{", ".join(condition_description_list)}ならこの部分は実行されます"
+                
+            expr_description_str_to_show.append(
+                HoverComment(
+                    expr = expr_str, 
+                    description = description_str
+                )
+            )
         return expr_description_str_to_show
 
     def draw_string(self, x, y, string, color, size=None):
@@ -4595,7 +4749,7 @@ class CodeElementWindow(Window):
         checked_funcs = PLAYER.checked_funcs.get(self.location, [])
         func_pos_list: list[tuple[int, int]] = []
 
-        if any(len(func_group) != 0 for func_group in self.func_groups):
+        if any(func_group is not None and len(func_group) != 0 for func_group in self.func_groups):
             self.draw_string(offset_x, offset_y, "FUNCTION" if ISENGLISH else "関数", self.CYAN, 20)
             offset_y += 24
 
@@ -4617,6 +4771,9 @@ class CodeElementWindow(Window):
 
         func_index = 0
         for i, func_groups in enumerate(self.func_groups):
+            if func_groups is None:
+                continue
+
             self.draw_string(offset_x, offset_y, func_groups["name"], self.CYAN)
             offset_y += self.FONT_SIZE
             for func in func_groups["func_warps"]:
@@ -4757,7 +4914,7 @@ class Treasure(Event):
     """宝箱"""
     FONT_SIZE = 16
 
-    def __init__(self, pos: tuple[int, int], name: str, start: int, end: int, func: str, func_groups: list[FuncWarpGroup], mapname):
+    def __init__(self, pos: tuple[int, int], name: str, start: int, end: int, func: str, func_groups: list[FuncWarpGroup], mapname: str):
         super().__init__(pos, 138)
         self.font = pygame.freetype.SysFont("monospace", self.FONT_SIZE)
         self.image = Map.images[self.mapchip]
@@ -4766,15 +4923,26 @@ class Treasure(Event):
         self.start = start
         self.end = end
         self.func = func # 宝箱が位置するマップの関数名
-        comment_window_info: CommentWindowInfo = {"detail": [], "hover": [], "func_groups": func_groups, "type": ""}
-        self.codeElementWindow = CodeElementWindow(comment_window_info, (mapname, self.func, start, name))
+        self.codeElementWindow = CodeElementWindow(
+            comment_window_info = CommentWindowInfo(
+                detail = [],
+                hover = [],
+                func_groups = func_groups,
+                type = ""
+            ), 
+            location = (mapname, self.func, start, name)
+        )
 
-    def open(self, data: dict, line: int, comments: list[str]):
+    def open(self, data: DeclaredVariableInfo):
         """宝箱をあける"""
         SMANAGER.play_se("treasure_open")
         # アイテムを追加する処理
-        item = Item(self.item, line, data, comments, self.vartype)
-        PLAYER.itembag.items[-1].append(item)
+        item = Item(
+            self.item, 
+            data["line"], 
+            data["value"],
+        )
+        PLAYER.itembag.add(item)
 
     def draw(self, screen: pygame.Surface, offset: tuple[int, int]):
         """オフセットを考慮してイベントを描画"""
@@ -5030,14 +5198,12 @@ class AutoEvent(Event):
 
 class Item:
     """アイテム (配列や構造体、ポインタにも対応している)"""
-    def __init__(self, name: str, line: int, data: dict, comments: dict, vartype: dict):
+    def __init__(self, name: str, line: int, data: VariableValueWComment | VariableValue):
         self.name = name
         self.line = line
-        self.index_comments = comments.get('indexes')
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_inAction = True
-        self.itemvalue: ItemValue = ItemValue.from_dict(data, comments=comments.get("values"))
-        self.vartype: dict = vartype
+        self.itemvalue = ItemValue.from_dict(data)
 
     def get_value(self):
         """値を返す"""
@@ -5051,7 +5217,7 @@ class Item:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.value = vals["value"]
 
-    def set_comments(self, path: list[str], comments: list[str]):
+    def set_comments(self, path: list[str], comments: str):
         """計算コメントをセット"""
         temp_itemvalue = self.itemvalue
         while len(path) != 0:
@@ -5064,7 +5230,6 @@ class Item:
         self.itemvalue = ItemValue.from_dict(data)
 
     def remove_itemvalue_comments(self):
-        self.index_comments = None
         self.itemvalue.remove_comments()
                                                                                   
 # 88                                   8b           d8          88                         
@@ -5077,20 +5242,21 @@ class Item:
 # 88   "Y888 `"Ybbd8"' 88      88      88    `8'     `"8bbdP"Y8 88  `"YbbdP'Y8  `"Ybbd8"'  
                                                                                          
 class ItemValue:
-    def __init__(self, value: str | None, comments: list[str] | None, children: dict[str | int, "ItemValue"]):
+    def __init__(self, value: str | None, type: str | None, comments: str | None, children: dict[str, ItemValue]):
         self.value = value
+        self.type = type
         self.is_open = True if children else None
         self.declared_comments = comments
-        self.changed_comments = None
+        self.changed_comments: str | None = None
         self.children = children
 
     @classmethod
-    def from_dict(cls, data: dict, comments: dict | list[str] | None = None) -> "ItemValue":
+    def from_dict(cls, data: VariableValueWComment | VariableValue) -> ItemValue:
         value: str | None = data["value"]
-        itemvalue_comments: list[str] = comments if isinstance(comments, list) else None
-        children_dict: dict[str | int, dict] = data["children"]
-        children = {index: cls.from_dict(v, comments=comments.get(f"\"{index}\"", None) if isinstance(comments, dict) else None) for index, v in children_dict.items()}
-        return cls(value, itemvalue_comments, children)
+        type = data.get("type", None)
+        itemvalue_comments = data["comment"] if "comment" in data else None
+        children = {name: cls.from_dict(value) for name, value in data["children"].items()}
+        return cls(value, type, itemvalue_comments, children)
     
     def remove_comments(self):
         self.declared_comments = None
@@ -5118,25 +5284,31 @@ class ItemBag:
 
     def add(self, item: Item):
         """袋にアイテムを追加"""
-        self.items[-1].append(item)
+        self.get_current_item_layer().append(item)
 
     def find(self, name: str, line: int) -> Item | None:
         """袋からアイテムを探す"""
-        for i, n in enumerate(self.items[-1]):
-            if n.name == name and n.line == line:
-                return n
+        for item in self.get_current_item_layer():
+            if item.name == name and item.line == line:
+                return item
         return None
 
     def remove(self, name: str, line: int):
         """袋からアイテムを取り除く"""
-        for i, n in enumerate(self.items[-1]):
+        for i, n in enumerate(self.get_current_item_layer()):
             if n.name == name and n.line == line:
-                return self.items[-1].pop(i)
+                return self.get_current_item_layer().pop(i)
         return None
     
     def remove_item_comments(self):
-        for item in self.items[-1]:
+        for item in self.get_current_item_layer():
             item.remove_itemvalue_comments()
+
+    def get_current_item_layer(self):
+        if len(self.items) == 0:
+            sys.exit("no items cannot be found in itembag")
+
+        return self.items[-1]
                                                                                                                                                                                                      
 #  ad88888ba                                          88888888ba                                                   I8,        8        ,8I 88                      88                                 
 # d8"     "8b ,d                                      88      "8b               ,d      ,d                         `8b       d8b       d8' ""                      88                                 
@@ -5952,8 +6124,7 @@ class EventSender:
             try:
                 buffer = ""
                 while True:
-                    data = self.sock.recv(1024)
-                    if not data:
+                    if not (data := self.sock.recv(1024)):
                         raise ConnectionError("Connection closed by remote host.")
                     buffer += data.decode()
                     try:
@@ -5985,17 +6156,6 @@ class EventSender:
                     return msg
                 
                 if msg["status"] == "ok" and not "first_func" in msg:
-                    gvar_dict = {}
-                    for gvar in PLAYER.commonItembag.items[-1]:
-                        gvar_dict[(gvar.name, gvar.line)] = gvar.vartype
-                    
-                    var_list = []
-                    for item_list in PLAYER.itembag.items:
-                        var_dict = {}
-                        for var in item_list:
-                            var_dict[(var.name, var.line)] = var.vartype
-                        var_list.append(var_dict)
-
                     self.programCodeWindow.history.append(
                         (
                             msg["message"], 
@@ -6006,9 +6166,7 @@ class EventSender:
                                 "door": PLAYER.door, 
                                 "ccchara": PLAYER.ccchara, 
                                 "checked_funcs": PLAYER.checked_funcs.copy(), 
-                                "func": PLAYER.func, 
-                                "gvars": gvar_dict, 
-                                "vars": var_list, 
+                                "func": PLAYER.func,
                                 "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, 
                                 "logLists": PLAYER.log_lists.copy()
                             }
@@ -6017,14 +6175,14 @@ class EventSender:
                     
                     if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
                         self.programCodeWindow.history_index_not_allowed_chosen_list.append(len(self.programCodeWindow.history))
+                    
                     PLAYER.isLoopStatementInBefore = False
 
                 if "line" in msg:
                     self.programCodeWindow.update_code_line(msg["line"])
 
-                if "removed" in msg:
-                    for item in msg["removed"]:
-                        PLAYER.itembag.remove(item["name"], item["line"])
+                for item in msg.get("removed", []):
+                    PLAYER.itembag.remove(item["name"], item["line"])
 
                 if "vars_w_value_changed" in msg:
                     PLAYER.remove_itemvalue()
@@ -6056,29 +6214,27 @@ class EventSender:
                     MSGWND.new_std_messages = msg["std"][len(PLAYER.std_messages):]
                     PLAYER.std_messages = msg["std"]
 
-                if "files" in msg:
-                    for file_info in msg["files"]:
-                        if file_info["type"] == "fopen":
-                            PLAYER.address_to_fname[file_info["address"]] = file_info["filename"]
-                            MSGWND.file_message = f"{file_info['filename'][1:-1]}　を変数　{file_info['varname']}　で開きました!!"
-                        else:
-                            MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
-                            ITEMWND.file_window.filename = None
-                            ITEMWND.file_window.is_visible = False
-                            fname = PLAYER.address_to_fname.pop(file_info["address"], "")
-                            ITEMWND.file_buttons.pop(fname, None)
+                for file_info in msg.get("files", []):
+                    if file_info["type"] == "fopen":
+                        PLAYER.address_to_fname[file_info["address"]] = file_info["filename"]
+                        MSGWND.file_message = f"{file_info['filename'][1:-1]}　を変数　{file_info['varname']}　で開きました!!"
+                    else:
+                        MSGWND.file_message = f"{PLAYER.address_to_fname[file_info['address']][1:-1]}　を閉じました!!"
+                        ITEMWND.file_window.filename = None
+                        ITEMWND.file_window.is_visible = False
+                        fname = PLAYER.address_to_fname.pop(file_info["address"], "")
+                        ITEMWND.file_buttons.pop(fname, None)
 
-                if "memory" in msg:
-                    for memory_info in msg["memory"]:
-                        if memory_info["type"] == "malloc":
-                            MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory by malloc" if ISENGLISH else f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
-                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
-                        elif memory_info["type"] == "realloc":
-                            MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory used {memory_info['source_address']} memory by realloc" if ISENGLISH else f"reallocにより、{memory_info['source_address']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
-                            # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
-                        else:
-                            MSGWND.memory_message = f"liberate {memory_info['address']} memory" if ISENGLISH else f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
-                            # PLAYER.address_to_size.pop(memory_info["address"], None)
+                for memory_info in msg.get("memory", []):
+                    if memory_info["type"] == "malloc":
+                        MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory by malloc" if ISENGLISH else f"mallocにより、{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                        # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                    elif memory_info["type"] == "realloc":
+                        MSGWND.memory_message = f"stored {memory_info['size']} {memory_info['vartype']} type memory used {memory_info['source_address']} memory by realloc" if ISENGLISH else f"reallocにより、{memory_info['source_address']}のメモリを使って{memory_info['vartype']}型の要素のメモリを{memory_info['size']}個分確保しました"
+                        # PLAYER.address_to_size[memory_info["address"]] = {"vartype": memory_info["vartype"], "size": memory_info["size"], "varname": [memory_info["varname"]]}
+                    else:
+                        MSGWND.memory_message = f"liberate {memory_info['address']} memory" if ISENGLISH else f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
+                        # PLAYER.address_to_size.pop(memory_info["address"], None)
                 
                 if "type" in msg:
                     PLAYER.isLoopStatementInBefore = True

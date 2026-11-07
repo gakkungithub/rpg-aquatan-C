@@ -60,14 +60,6 @@ class ExprDescription(TypedDict):
     description: list[ExprDescriptionPart]
     expr: list[ExprDescriptionPart]
 
-# 元のExprDescription型
-# このExprDescriptionをCommentに変更する
-# class ExprDescription(TypedDict):
-#     id: int
-#     description: list[ExprDescriptionPart]
-#     expr: list[ExprDescriptionPart]
-#     execution_condition: dict[int, bool]
-
 class VarReference(TypedDict):
     name: str
     line: int
@@ -76,7 +68,7 @@ class VarReference(TypedDict):
 class VarNode(TypedDict):
     name: str
     type: str
-    children: list["VarNode"]
+    children: list[VarNode]
     comments: list[Comment]
     # varsはset(tuple)からjsonデータとして使えるように変換する
     vars: list[VarReference]
