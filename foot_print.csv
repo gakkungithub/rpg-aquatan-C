@@ -1,5 +1,6 @@
-start,101_variables_expression,3, 23
-itemget, 101_variables_expression,6, 19,day
-itemget, 101_variables_expression,15, 19,gap
-itemget, 101_variables_expression,22, 9,weather_code
-itemget, 101_variables_expression,19, 6,temp_variation
+start,102_functions_condition,45, 45
+itemget, 102_functions_condition,49, 41,battery
+itemget, 102_functions_condition,37, 38,obstacle_dist
+itemget, 102_functions_condition,29, 34,mode
+itemget, 102_functions_condition,19, 29,action
+itemget, 102_functions_condition,19, 29,action

@@ -300,6 +300,7 @@ class ExecutionCommentHandler:
             if line in execution_comments:
                 sys.exit("two or more comments cannot be registered to execution_comments dictionary")
             execution_comments[line] = IfConditionsComment(
+                type = "if",
                 line = line,
                 conditions = [
                     IfConditionComment(

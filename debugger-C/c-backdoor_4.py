@@ -676,7 +676,7 @@ class DynamicCommentHandler:
                     for arg_expr_part in expr_description["expr"]
                 ]
                 
-                expr_str_base_list.append(f"{expr_part["func_name"]}({','.join(arg_list)})")
+                expr_str_base_list.append(f"{expr_description["func_name"]}({','.join(arg_list)})")
             else:
                 expr_str_base_list_by_part: list[str] = []
 
@@ -689,7 +689,6 @@ class DynamicCommentHandler:
                         expr_str_base_list_by_part.append(expr_part["macro"])
                     else: # expr_id
                         expr_str_base_list_by_part.append(expr_str_base_list[expr_part["expr_id"]])
-                    print(expr_str_base_list_by_part)
 
                 expr_str_base_list.append(" ".join(expr_str_base_list_by_part))
         return expr_str_base_list
@@ -860,6 +859,7 @@ class DynamicCommentHandler:
     def set_function_comment(self, return_value: str):
         if self.current_function_comment is None:
             sys.exit("current function comment is not found")
+        
         self.expr_result_by_id[self.index_scanned_currently] = return_value
         self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {return_value}'
 
@@ -1647,12 +1647,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 while True:
                     if (event := self.event_reciever()) is None:
                         continue
-                    if event.get('type', None) == 'return' and event['fromTo'][0] == self.line_number:
+                    
+                    execution_info: ExecutionInfo | None = event.get("execution_info")
+                    if execution_info is not None and execution_info["type"] == 'return' and execution_info["line"] == self.line_number:
                         self.event_sender(
                             SendEvent(
                                 message = "Congraturations!! Here is a goal!!" if self.is_english else "おめでとうございます!! ここがゴールです!!", 
                                 status = "ok", 
-                                is_finished = True
+                                is_finished = True,
+                                skipped_function_list = None
                             )
                         )
                         raise ProgramFinished()
@@ -2073,7 +2076,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         line = var[1]
                                     ),
                                     skipped_function_list = dynamic_variable_info["skipped_function_list"]
-                                ), 
+                                ),
                                 False
                             )
                         # 全ての宣言が完了している場合
@@ -2108,6 +2111,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     # non_varの時と同じくこのメソッドで次の関数を解析する
                     self.analyze_next_function(dynamic_variable_info)
+                    self.vars_tracker.analyze_var_nodes(str(var[1]), self.frame)
 
         # 変数宣言以外の計算式の解析
         def analyze_non_var_expr_comments(self):
@@ -2116,7 +2120,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 return
 
             if len(self.expr_status_handler_list) == 0 or self.expr_status_handler_list[-1].line != self.next_line_number:
-                self.set_expr_status(self.exprs_by_line[self.next_line_number], self.next_line_number)
+                self.set_expr_status(self.exprs_by_line[str(self.next_line_number)], self.next_line_number)
 
             expr_status_handler = self.expr_status_handler_list[-1]
 
@@ -2303,7 +2307,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             elif isinstance(current_expr_status_handler, ReturnStatusHandler) and execution_info["type"] == "return":
                 check_result = current_expr_status_handler.check_status(
                     send_event, 
-                    self.dynamic_comment_handler_being_checked[-1] if len(self.dynamic_comment_handler_being_checked) else None
+                    self.dynamic_comment_handler_being_checked[-1] 
+                    if len(self.dynamic_comment_handler_being_checked) else 
+                    None
                 )
 
                 if check_result == "correct":
@@ -2463,7 +2469,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             if not len(self.expr_status_handler_list):
                 return PROGRESS
             
-            current_expr_status_handler = self.expr_status_list[-1]
+            current_expr_status_handler = self.expr_status_handler_list[-1]
             if not isinstance(current_expr_status_handler, ForStatusHandler) or not current_expr_status_handler.required_var_list:
                 return PROGRESS
             
@@ -2493,6 +2499,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 raise NoConnection()
             
             event = json.loads(data.decode())
+
             if "rollback" in event:
                 self.event_sender(
                     SendEvent(
@@ -2618,7 +2625,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
         error = lldb.SBError()
         process: lldb.SBProcess = target.Launch(launch_info, error)
-
     except Exception as e:
         # エラーの行番をトラックするためのコード
         tb = e.__traceback__
@@ -2657,7 +2663,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped:
                 debug_manager.analyze_frame()
-
         except Exception as e:
             # エラーの行番をトラックするためのコード
             tb = e.__traceback__

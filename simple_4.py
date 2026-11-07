@@ -608,7 +608,7 @@ def main():
                 #     else:
                 #         move = PLAYER.move5History.pop()
                 #         if move["return"]:
-                #             PLAYER.moveHistory.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
+                #             PLAYER.move_history.append({'mapname': mapname, 'x': PLAYER.x, 'y': PLAYER.y})
 
                 #         # 暗転
                 #         DIMWND.show(200, 'warp')
@@ -623,7 +623,7 @@ def main():
                 #     PLAYER.fp.write("undo, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif cmd == "break":
                     try:
-                        move = PLAYER.moveHistory.pop()
+                        move = PLAYER.move_history.pop()
 
                         DIMWND.show(200, 'warp')
 
@@ -1879,6 +1879,12 @@ class Character:
         ]
         return f"{self.__class__.__name__.upper()}({', '.join(values)})"
 
+class PlayerFuncHistory(TypedDict):
+    mapname: str
+    x: int 
+    y: int
+    line: int
+    func: str
 
 #                                                              
 # 88888888ba  88                                               
@@ -1906,7 +1912,7 @@ class Player(Character):
         self.place_label = "away"
         self.automove = []
         self.waitingMove = None
-        self.moveHistory: list[dict] = []
+        self.move_history: list[PlayerFuncHistory] = []
         self.move5History: list[dict] = []
         self.status = {"HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
         self.itembag = ItemBag()
@@ -2540,7 +2546,7 @@ class Player(Character):
         elif isinstance(chara, CharaReturn):
             # main以外のreturnキャラ
             # void関数のreturnについては後で考える
-            if self.moveHistory:
+            if self.move_history:
                 self.sender.send_event(
                     {
                         "execution_info": chara.execution_info,
@@ -2577,22 +2583,23 @@ class Player(Character):
                             }
                         )
 
-                        move = self.moveHistory.pop(-1)
+                        move = self.move_history.pop(-1)
                         self.itembag.items.pop(-1)
                         self.remove_itemvalue()
                         self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
+                        
                         for variable_info in returnResult["items"]:
                             if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
                                 item.update_value(variable_info["value"])
                         
-                        checked_func_location = CheckedFuncLocation(map_name=move['mapname'], func_name=returnResult["backToFunc"], line=returnResult["backToLine"])
-                        if checked_func_location in self.checked_funcs:
-                            self.checked_funcs[checked_func_location][-1].return_value = returnResult["function_return_info"]
-                        else:
-                            # ここに来ることはシステム上ありえないが一応
-                            sys.exit("error in checked func location after return")
+                        checked_func_location = CheckedFuncLocation(
+                            map_name = move['mapname'], 
+                            func_name = move["func"], 
+                            line = move["line"]
+                        )
+                        self.append_analyzed_func_state(checked_func_location, returnResult["function_return_info"])
 
-                        self.func = returnResult["backToFunc"]
+                        self.func =  move["func"]
                         self.waitingMove = chara
                         self.waitingMove.dest_map = move['mapname']
                         self.waitingMove.dest_x = move['x']
@@ -2609,6 +2616,7 @@ class Player(Character):
                         'main': True
                     }
                 )
+
                 returnResult = self.sender.receive_json()
 
                 if returnResult['status'] == 'ok':
@@ -2621,7 +2629,7 @@ class Player(Character):
 
                     if returnResult.get('skipReturn', False):
                         MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
-                    elif returnResult.get('finished', False):
+                    elif returnResult.get('is_finished', False):
                         SMANAGER.stop_bgm()
                         SMANAGER.play_se("goal")
                         self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
@@ -2760,7 +2768,7 @@ class Player(Character):
         if checked_func_location in self.checked_funcs:
             self.completed_checked_func_location = checked_func_location
 
-    def append_checked_func_state(self, location: tuple[str, str, int, str | None], state: tuple[str, str | None, bool]):
+    def append_analyzed_func_state(self, location: tuple[str, str, int, str | None], state: FunctionReturnInfo):
         '''
         location: 
             map_name, func_name, line, var_name
@@ -2768,11 +2776,19 @@ class Player(Character):
             func_name, return_value, checked
         '''
         checked_func_location = CheckedFuncLocation(*location)
-        checked_func_state = CheckedFuncState(*state)
-        if checked_func_location in self.checked_funcs:
-            self.checked_funcs[checked_func_location].append(checked_func_state)
-        else:
-            self.checked_funcs[checked_func_location] = [checked_func_state]
+        checked_func_state = CheckedFuncState(
+            func_name = state["func_name"], 
+            return_value = state["return_value"], 
+            checked = True
+        )
+
+        if checked_func_location not in self.checked_funcs:
+            self.checked_funcs[checked_func_location] = []
+
+        if (lacked_state_layer_num := state["index"] - len(self.checked_funcs[checked_func_location]) + 1) >= 1:
+            self.checked_funcs[checked_func_location].extend([[] for _ in range(lacked_state_layer_num)])
+            
+        self.checked_funcs[checked_func_location][state["index"]].append(checked_func_state)
 
     def get_func_index_to_check(self, location: tuple[str, str, int, str | None]):
         checked_func_location = CheckedFuncLocation(*location)
@@ -3369,9 +3385,9 @@ class MessageWindow(Window):
                             item.update_value(variable_info["value"])
                     event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                     if isinstance(event, Treasure):
-                        PLAYER.append_checked_func_state(
+                        PLAYER.append_analyzed_func_state(
                             (fieldmap.name, event.func, event.start, event.item), 
-                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                            skipResult["function_return_info"]
                         )
                     # 暗転
                     DIMWND.show(200, 'skip')
@@ -3399,33 +3415,26 @@ class MessageWindow(Window):
                         }
                     )
 
-                    PLAYER.moveHistory.append(
-                        {
-                            'mapname': from_map, 
-                            'x': PLAYER.x, 
-                            'y': PLAYER.y, 
-                            'line': skipResult["from_line"]
-                        }
+                    PLAYER.move_history.append(
+                        PlayerFuncHistory(
+                            mapname = from_map,
+                            x = PLAYER.x,
+                            y = PLAYER.y,
+                            line = skipResult["from_line"],
+                            func = skipResult["next_func"]["name"]
+                        )
                     )
                     
-                    event = fieldmap.get_event(*PLAYER.pos())
-                    if isinstance(event, Treasure) and len(event.codeElementWindow.func_groups) != 0:
-                        PLAYER.append_checked_func_state(
-                            (fieldmap.name, event.func, event.start, event.item), 
-                            (skipResult["next_func"]["name"], None, True)
-                        )
-                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.start, event.item))
-
-                        PLAYER.add_local_item_layer(
-                            [
-                                Item(
-                                    arg_item_info["name"], 
-                                    arg_item_info["line"], 
-                                    arg_item_info,
-                                )
-                                for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
-                            ]
-                        )
+                    PLAYER.add_local_item_layer(
+                        [
+                            Item(
+                                arg_item_info["name"], 
+                                arg_item_info["line"], 
+                                arg_item_info,
+                            )
+                            for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
+                        ]
+                    )
                     # 暗転
                     DIMWND.show(200, 'warp')
                     fieldmap.warp_player(dest_map, dest_x, dest_y)
@@ -3443,9 +3452,9 @@ class MessageWindow(Window):
                             item.update_value(variable_info["value"])
                     event = fieldmap.get_event(PLAYER.x, PLAYER.y)
                     if isinstance(event, MoveEvent):
-                        PLAYER.append_checked_func_state(
+                        PLAYER.append_analyzed_func_state(
                             (fieldmap.name, event.func, event.execution_info["line"], None),
-                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                            skipResult["function_return_info"]
                         )
 
                     if PLAYER.direction == DOWN:
@@ -3463,84 +3472,30 @@ class MessageWindow(Window):
                     
                     chara = fieldmap.get_chara(x, y)
                     if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)):
-                        PLAYER.append_checked_func_state(
+                        PLAYER.append_analyzed_func_state(
                             (fieldmap.name, chara.func, chara.execution_info["line"], None), 
-                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                            skipResult["function_return_info"]
                         )
                     elif isinstance(chara, CharaExpression):
-                        PLAYER.append_checked_func_state(
+                        PLAYER.append_analyzed_func_state(
                             (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
-                            (skipResult["skipped_function_list"], skipResult["function_return_info"], True)
+                            skipResult["function_return_info"]
                         )
                 else:
                     self.sender.send_event({"skip": False})
                     skipResult = self.sender.receive_json()
-                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                    if isinstance(event, MoveEvent) and event.codeElementWindow and len(event.codeElementWindow.func_groups) != 0:
-                        PLAYER.append_checked_func_state(
-                            (fieldmap.name, event.func, event.execution_info["line"], None),
-                            (skipResult["next_func"]["name"], None, True)
-                        )
-                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, event.func, event.execution_info["line"], None))
-                        
-                        PLAYER.add_local_item_layer(
-                            [
-                                Item(
-                                    arg_item_info["name"], 
-                                    arg_item_info["line"], 
-                                    arg_item_info["value"]
-                                )
-                                for arg_item_info in skipResult["next_func"]["items"]
-                            ]
-                        )
-                    if PLAYER.direction == DOWN:
-                        x = PLAYER.x
-                        y = PLAYER.y+1
-                    elif PLAYER.direction == LEFT:
-                        x = PLAYER.x-1
-                        y = PLAYER.y
-                    elif PLAYER.direction == RIGHT:
-                        x = PLAYER.x+1
-                        y = PLAYER.y
-                    else:
-                        x = PLAYER.x
-                        y = PLAYER.y-1
-                    chara = fieldmap.get_chara(x, y)
-                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)) and len(chara.codeElementWindow.func_groups) != 0:
-                        PLAYER.append_checked_func_state(
-                            (fieldmap.name, chara.func, chara.execution_info["line"], None), 
-                            (skipResult["next_func"]["name"], None, True)
-                        )
 
-                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.execution_info["line"], None))
-                        
-                        PLAYER.add_local_item_layer(
-                            [
-                                Item(
-                                    arg_item_info["name"], 
-                                    arg_item_info["line"], 
-                                    arg_item_info["value"]
-                                )
-                                for arg_item_info in skipResult["next_func"]["items"]
-                            ]
-                        )
-                    elif isinstance(chara, CharaExpression):
-                        PLAYER.append_checked_func_state(
-                            (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
-                            (skipResult["next_func"]["name"], None, True)
-                        )
-                        func_index_to_check = PLAYER.get_func_index_to_check((fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None))
-                        
-                        PLAYER.add_local_item_layer(
-                            [
-                                Item(
-                                    arg_item_info["name"], 
-                                    arg_item_info["line"], 
-                                    arg_item_info["value"]
-                                )
-                                for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
-                            ]
-                        )
+                    PLAYER.add_local_item_layer(
+                        [
+                            Item(
+                                arg_item_info["name"], 
+                                arg_item_info["line"], 
+                                arg_item_info["value"]
+                            )
+                            for arg_item_info in skipResult["next_func"]["items"]
+                        ]
+                    )
+
                     self.set(skipResult['message'])
                     # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                     dest_map = fieldmap.name
@@ -3557,7 +3512,16 @@ class MessageWindow(Window):
                             'return': False
                         }
                     )
-                    PLAYER.moveHistory.append({'mapname': dest_map, 'x': PLAYER.x, 'y': PLAYER.y, 'line': skipResult["from_line"]})
+
+                    PLAYER.move_history.append(
+                        PlayerFuncHistory(
+                            mapname = dest_map,
+                            x = PLAYER.x,
+                            y = PLAYER.y,
+                            line = skipResult["from_line"],
+                            func = skipResult["next_func"]["name"]
+                        )
+                    )
                     
                     DIMWND.show(200, 'warp')
                     fieldmap.warp_player(dest_map, dest_x, dest_y)
@@ -3603,7 +3567,7 @@ class MessageWindow(Window):
                     PLAYER.place_label = "away"
                     PLAYER.automove = []
                     PLAYER.waitingMove = None
-                    PLAYER.moveHistory = []
+                    PLAYER.move_history = []
                     PLAYER.move5History = []
                     PLAYER.common_itembag = ItemBag()
 
@@ -3665,7 +3629,7 @@ class MessageWindow(Window):
                     PLAYER.place_label = "away"
                     PLAYER.automove = []
                     PLAYER.waitingMove = None
-                    PLAYER.moveHistory = []
+                    PLAYER.move_history = []
                     PLAYER.move5History = []
                     PLAYER.door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
@@ -4247,19 +4211,6 @@ class CharaReturn(Character):
                                                                                                                                                                                                                                                                                                                                                                                                            
 class CharaCheckCondition(Character):
     '''条件文を確認するキャラクター'''
-
-    # chara = CharaCheckCondition(
-    #     name, 
-    #     (x, y), 
-    #     direction, 
-    #     move_direction, 
-    #     movetype, 
-    #     message, 
-    #     execution_info, 
-    #     func, 
-    #     detail,
-    #     self.name.lower()
-    # )
     def __init__(self, name: str, pos: tuple[int, int], direction: Literal[0,1,2,3], move_direction: int, movetype: int, message: str, execution_info: ExecutionInfo, func: str, detail: CommentWindowInfo, mapname: str):
         super().__init__(name, pos, direction, movetype, message)
         self.initial_direction: Literal[0,1,2,3] = direction
@@ -4746,7 +4697,7 @@ class CodeElementWindow(Window):
             pygame.draw.rect(self.surface, self.HOVER_TEXT_COLOR, hoverLink_info[2], width=2, border_radius=10)
             self.surface.blit(hoverLink_info[0], hoverLink_info[1])
 
-        checked_funcs = PLAYER.checked_funcs.get(self.location, [])
+        checked_funcs_group = PLAYER.checked_funcs.get(self.location, [])
         func_pos_list: list[tuple[int, int]] = []
 
         if any(func_group is not None and len(func_group) != 0 for func_group in self.func_groups):
@@ -4776,9 +4727,12 @@ class CodeElementWindow(Window):
 
             self.draw_string(offset_x, offset_y, func_groups["name"], self.CYAN)
             offset_y += self.FONT_SIZE
-            for func in func_groups["func_warps"]:
-                # text = f"{func['name']}: {checked_funcs[i]["return_value"]}" if i < len(checked_funcs) and checked_funcs[i]["checked"] else func["name"]
-                text = func['name']
+
+            checked_funcs = checked_funcs_group[i] if i < len(checked_funcs_group) else []
+            len_checked_funcs = len(checked_funcs)
+
+            for j, func in enumerate(func_groups["func_warps"]):
+                text = f"{func['name']}: {checked_funcs[j].return_value} " if j < len_checked_funcs and checked_funcs[j].checked else func["name"]
                 # ハイライトにはパディングをつける
                 highlight_width = self.font.get_rect(text).width + 4
                 # 引数に関数が含まれる場合は段落をつけて関係を描画する
@@ -4799,8 +4753,8 @@ class CodeElementWindow(Window):
                     self.draw_arrow(self.surface, self.LINE_COLOR, (x_pos_start+10, y_pos_list[x_pos_index]+(self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
 
                 # 関数が遷移済みかどうかで背景色を変える
-                if i < len(checked_funcs):
-                    if checked_funcs[i]["checked"]:
+                if j < len(checked_funcs):
+                    if checked_funcs[j].checked:
                         highlightColor = self.CHECKED_COLOR
                     else:
                         highlightColor = self.SKIPPED_CHECK_COLOR
@@ -5475,7 +5429,7 @@ class StageButtonWindow:
                 buffer += data.decode()
                 try:
                     msg = json.loads(buffer)
-                    return msg["finished"]
+                    return msg["is_finished"]
                 except json.JSONDecodeError:
                     continue  # JSONがまだ完全でないので続けて待つ
         except socket.timeout:
