@@ -669,6 +669,7 @@ class MapInfo:
                 "characters": characters, 
                 "events": events
             }
+
             self.check_data_format_is_true(fileContent)
             json.dump(fileContent, f) 
 
@@ -722,17 +723,18 @@ class MapInfo:
         file_name = f'{DATA_DIR}/{program_name}/{program_name}_line.json'
 
         line_info_json = {
-            func_name: 
-                {
-                    "lines": sorted(list(line_info.lines)),
-                    "loops": line_info.loops, 
-                    "start": line_info.start,
-                    "input": self.input_lines.get(func_name, {}), 
-                    "file": self.file_lines.get(func_name, {}), 
-                    "memory": self.memory_lines.get(func_name, {}), 
-                    "string": self.str_lines.get(func_name, {})
-                }
-                for func_name, line_info in line_info_dict.items()
+            func_name: LineInfoDataByFunc(
+                lines = sorted(list(line_info.lines)),
+                loops = line_info.loops,
+                returns = sorted(list(line_info.returns)),
+                stdins = sorted(list(line_info.stdins)),
+                start = line_info.start,
+                input = self.input_lines.get(func_name, {}), 
+                file = self.file_lines.get(func_name, {}), 
+                memory = self.memory_lines.get(func_name, {}), 
+                string = self.str_lines.get(func_name, {})
+            )
+            for func_name, line_info in line_info_dict.items()
         }
         
         with open(file_name, 'w') as f:
@@ -1122,7 +1124,8 @@ class GenBitMap:
             if (next_func_info := self.func_info_dict.pop(func_name, None)):
                 self.func_name = func_name
                 self.track_function_entry(next_func_info)
-    
+
+    # 繰り返し文の終わりだけはgetNextNodeInfoメソッドではなく、next_node_info.get(nodeID, [])で取得する
     def track_function_body(self, crntRoomID: str, nodeID: str, condition_comment_window_info: TempCommentWindowInfo | None = None):
         # if文とdo_while文とswitch文
         if self.getNodeShape(nodeID) == 'diamond':
@@ -1130,8 +1133,12 @@ class GenBitMap:
 
             if self.getNodeLabel(nodeID) == 'if':
                 to_nodeID_info = self.getNextNodeInfo(nodeID)
+
+                if len(to_nodeID_info) == 0:
+                    return
+
                 if len(to_nodeID_info) != 2:
-                    sys.exit("number of nodes connected from an if node")
+                    sys.exit("number of nodes connected from an if node has to be 2")
 
                 node_shapes = tuple([self.getNodeShape(to_nodeID) for to_nodeID, _ in to_nodeID_info])
                 # (circle, diamond), (circle, doublecircle), (circle, terminator)
@@ -1214,7 +1221,7 @@ class GenBitMap:
                     comment_window_info = self.create_comment_window_info(
                         "cond-check", 
                         detail=[
-                            [{self.getNodeLabel(nodeID)}, f"of line {expr_node_info["line"]} is false"] 
+                            [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
                             if self.is_english else 
                             [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が偽"]
                         ], 
@@ -1237,7 +1244,7 @@ class GenBitMap:
                     comment_window_info = self.create_comment_window_info(
                         "cond-check", 
                         detail = [
-                            [{self.getNodeLabel(nodeID)}, f"of line {expr_node_info["line"]} is false"] 
+                            [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
                             if self.is_english else 
                             [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が偽"]
                         ], 
@@ -1260,12 +1267,15 @@ class GenBitMap:
                     None
                 )
 
-                crntRoomID = nodeID
+                to_nodeID_info = self.getNextNodeInfo(nodeID)
 
-                to_nodeID_info = self.nextNodeInfo.get(nodeID, [])
-
+                if len(to_nodeID_info) == 0:
+                    return
+                
                 if len(to_nodeID_info) != 2 or (self.getNodeShape(to_nodeID_info[0][0]), self.getNodeShape(to_nodeID_info[1][0])) not in ("circle", "doublecircle"):
                     sys.exit("wrong number or type nodes are connected from a do-while condition node")
+
+                crntRoomID = nodeID
 
                 if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
                     sys.exit(f"flowchart node of a false condition in do-while statement is not found")
@@ -1349,6 +1359,7 @@ class GenBitMap:
                 has_default = False
                 # caseラベルをグループごとに格納するリスト
                 case_group_list: list[tuple[str, list[ExprNodeInfo], int | None]] = []
+
                 for to_nodeID, _ in to_nodeID_info:
                     if self.getNodeLabel(to_nodeID) == "end":
                         end_nodeID = to_nodeID
@@ -1376,7 +1387,6 @@ class GenBitMap:
                             split_label_str = default_label[1:-1].split(',')
 
                             if len(split_label_str) != 2 or split_label_str[0] != "default":
-                                print(split_label_str)
                                 sys.exit("unknown node is found for switch default label")
                             try:
                                 default_line = int(split_label_str[1])
@@ -1480,7 +1490,11 @@ class GenBitMap:
                         self.func_name, 
                     )
 
-                    next_track_list.insert(0, (to_nodeID, to_nodeID, None))
+                    in_case_nodeID_info = self.getNextNodeInfo(to_nodeID)
+                    if len(in_case_nodeID_info) != 1:
+                        sys.exit("number of child nodes connected from case node has to be 1")
+
+                    next_track_list.insert(0, (to_nodeID, in_case_nodeID_info[0][0], None))
 
                 if end_nodeID is not None:
                     comment_window_info = self.create_comment_window_info(
@@ -1504,8 +1518,12 @@ class GenBitMap:
                         comment_window_info, 
                         self.func_name, 
                     )
-                    
-                    next_track_list.insert(0, (end_nodeID, end_nodeID, None))
+
+                    in_case_nodeID_info = self.getNextNodeInfo(end_nodeID)
+                    if len(in_case_nodeID_info) != 1:
+                        sys.exit("number of child nodes connected from case node has to be 1")
+
+                    next_track_list.insert(0, (end_nodeID, in_case_nodeID_info[0][0], None))
 
             for next_track in next_track_list:
                 self.track_function_body(*next_track)
@@ -1514,7 +1532,13 @@ class GenBitMap:
 
         # if文の終点でワープゾーンを作る
         elif self.getNodeShape(nodeID) == 'terminator':
-            to_nodeID, _ = self.getNextNodeInfo(nodeID)[0]
+            to_nodeID_info = self.getNextNodeInfo(nodeID)
+
+            if len(to_nodeID_info) != 1:
+                sys.exit("number of child nodes connected from a terminator node has to be 1")
+
+            to_nodeID, _ = to_nodeID_info[0]
+
             next_of_if_end_conclusion_node_info: list[tuple[str, str]] | None = None
             # 今まではifの終了ごとにワープゾーンを作っていたが、ifの終了が連続する場合に対応できなかったので、連続するノードは飛ばすようにした
             while True:
@@ -1562,9 +1586,6 @@ class GenBitMap:
             self.createRoom(nodeID, crntRoomID)
 
             to_nodeID_info = self.getNextNodeInfo(nodeID)
-
-            if len(to_nodeID_info) == 0:
-                return
             
             if len(to_nodeID_info) != 2 or (self.getNodeShape(to_nodeID_info[0][0]), self.getNodeShape(to_nodeID_info[1][0])) not in ("circle", "doublecircle"):
                 sys.exit(f"wrong number or type nodes are connected from a {condition_type} condition node ")
@@ -1718,8 +1739,8 @@ class GenBitMap:
             )
 
             self.map_info.setCharaReturn(
-                crntRoomID, 
-                nodeID, # execution_info用
+                crntRoomID,
+                nodeID,
                 comment_window_info,
                 self.func_name, 
             )
@@ -1799,6 +1820,7 @@ class GenBitMap:
                 var_decl_nodeID: str | None = None
                 for to_nodeID, _ in to_nodeID_info:
                     if self.getNodeShape(to_nodeID) == 'signature':
+                        sys.exit("this game does not allow variable initializers in for statement initializer")
                         if var_decl_nodeID is not None:
                             sys.exit("number of signature nodes which are connected from a for-initializer node has to be 1")
                         var_decl_nodeID = to_nodeID
@@ -1957,19 +1979,14 @@ class GenBitMap:
                     warpNodeID=nodeID
                 )
 
-                if self.getNodeLabel(nextNodeID) == 'end':
-                    crntRoomID = nextNodeID
-                    nodeID = nextNodeID
-
                 self.map_info.execution_comment_handler.register_control_flow_comment(
                     self.map_info.execution_info[nodeID]["line"], 
                     "break"
                 )
-
             else:
                 sys.exit("unknown node is found")
 
-            self.track_function_body(nextNodeID, nextNodeID, comment_window_info)
+            self.track_function_body(nextNodeID, nextNodeID)
             return
         
         # do while構文の最初の1回
@@ -1994,6 +2011,7 @@ class GenBitMap:
         elif self.getNodeShape(nodeID) == 'invtriangle':
             case_expr_node_info_list = []
             to_nodeID = nodeID
+
             while True:
                 if (tempNode_info := self.nextNodeInfo.get(to_nodeID, None)) is None:
                     break
@@ -2008,6 +2026,7 @@ class GenBitMap:
                     break
 
                 to_nodeID = temp_nodeID
+ 
             self.createRoom(to_nodeID, crntRoomID)
             self.map_info.setWarpZone(
                 crntRoomID,
@@ -2015,6 +2034,12 @@ class GenBitMap:
                 None, 
                 self.func_name
             )
+
+            next_nodeID_info = self.getNextNodeInfo(to_nodeID)
+            if len(next_nodeID_info) == 0:
+                return
+
+            self.track_function_body(to_nodeID, next_nodeID_info[0][0])
             return
 
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
@@ -2027,8 +2052,10 @@ class GenBitMap:
                     None
                 )
                 crntRoomID = nodeID
+
             if (execution_info := self.map_info.execution_info.get(nodeID)) is None:
                 sys.exit("execution_info is not found")
+
             if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
                 sys.exit("expr_node_info is not found")
 

@@ -98,6 +98,17 @@ class CharaExpression(TypedDict):
     func: str
     comments: dict[int | str, ExpressionDetail]
 
+class LineInfoDataByFunc(TypedDict):
+    lines: list[int]
+    loops: dict[int | str, int]
+    returns: list[int]
+    stdins: list[int]
+    start: int
+    input: dict[int | str, list[int]]
+    file: dict[int | str, list[dict]]
+    memory: dict[int | str, list[dict]]
+    string: dict[int | str, list[dict]]
+
 class SendEvent(TypedDict):
     message: str
     status: Literal["ok", "ng", "rollback", "rollback_success", "rollback_fail"]

@@ -317,7 +317,14 @@ def main():
         SMANAGER.stop_bgm()
         SMANAGER.play_se("stage_entry")
         # サーバを立てる
-        c_backdoor_code = ["/opt/homebrew/opt/python@3.13/bin/python3.13", "c-backdoor_4.py", "--name", programpath, "--lines", "", "--events", "--english" if ISENGLISH else ""]
+        c_backdoor_code = [
+            "/opt/homebrew/opt/python@3.13/bin/python3.13", 
+            "c-backdoor_4.py", 
+            "--name", programpath, 
+            "--lines", "", 
+            "--events",
+            " --english" if ISENGLISH else ""
+        ]
         server = subprocess.Popen(c_backdoor_code, cwd="debugger-C", env=env)
         # endregion
 
@@ -2563,7 +2570,7 @@ class Player(Character):
                         chara.execution_info["line"]
                     )
                     
-                    if returnResult.get("function_return_info", False):
+                    if returnResult.get("skip", False):
                         MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                     else:
                         self.set_completed_checked_func_location(
@@ -2627,7 +2634,8 @@ class Player(Character):
                         chara.execution_info["line"]
                     )
 
-                    if returnResult.get('skipReturn', False):
+                    print(returnResult)
+                    if returnResult.get("skip", False):
                         MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
                     elif returnResult.get('is_finished', False):
                         SMANAGER.stop_bgm()
@@ -2640,6 +2648,8 @@ class Player(Character):
                                 returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
                         MSGWND.set(returnResult['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
                         self.fp.write("finished\n")
+                    else:
+                        sys.exit("is_finished is not found in a sent event of return statement")
                     return True
             
             MSGWND.set(returnResult['message'])
@@ -3222,11 +3232,11 @@ class MessageWindow(Window):
         self.var_quiz_list: list[tuple[tuple[str,...], bool]] = []
         self.var_quiz_answer = True
 
-    def set(self, base_message: str, selectMessages: tuple[list[str],str]|None=None):
+    def set(self, base_message: str, selectMessages: tuple[list[str],str] | None = None):
         """メッセージをセットしてウィンドウを画面に表示する"""
+        message_list: list[str] = []
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
             SMANAGER.play_se("message_window")
-            message_list: list[str] = []
             if len(self.new_std_messages):
                 message_list.append("\n".join(["Output:" if ISENGLISH else "コンソール出力:"] + self.new_std_messages))
                 self.new_std_messages = []
@@ -3241,20 +3251,22 @@ class MessageWindow(Window):
             if len(self.memory_message):
                 message_list.append(self.memory_message)
                 self.memory_message = ""
-            if selectMessages is not None:
-                # 選択肢を選ぶコメントウィンドウが表示されている時は要素ウィンドウを表示させない (画面全体がごちゃごちゃするのを防ぐため)
-                PLAYER.codeElementWindow_list = []
-                self.selectMsgText, self.select_type = selectMessages
-                if self.select_type == "var_quiz":
-                    var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
-                    varname = var_path[0]
-                    for var_path_element in var_path[1:]:
-                        if var_path_element[0] in ('[', '*'):
-                            varname += var_path_element
-                        else:
-                            varname += '.' + var_path_element
-                    message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
 
+        if selectMessages is not None:
+            # 選択肢を選ぶコメントウィンドウが表示されている時は要素ウィンドウを表示させない (画面全体がごちゃごちゃするのを防ぐため)
+            PLAYER.codeElementWindow_list = []
+            self.selectMsgText, self.select_type = selectMessages
+            if self.select_type == "var_quiz":
+                var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
+                varname = var_path[0]
+                for var_path_element in var_path[1:]:
+                    if var_path_element[0] in ('[', '*'):
+                        varname += var_path_element
+                    else:
+                        varname += '.' + var_path_element
+                message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
+
+        if len(message_list):
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -3276,6 +3288,8 @@ class MessageWindow(Window):
                 else:
                     self.text += ch
                     p += 1
+
+        if len(message_list) or selectMessages:
             self.show()
 
     def update(self):
@@ -3552,7 +3566,6 @@ class MessageWindow(Window):
                     return
                 else:
                     self.set(message)
-
             elif self.select_type == 'rollback':
                 self.sender.programCodeWindow.scrollY = 0
                 self.sender.programCodeWindow.scrollX = 0

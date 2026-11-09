@@ -60,6 +60,9 @@ class DynamicNonVarStatusHandler:
     def get_skipped_functions(self) -> list[list[str]] | None:
         return None
 
+    def check_expr_automatically(self) -> Literal["progress", "end", "next_function"]:
+        return "end"
+
 class IfStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, conditions: list[IfConditionComment], is_english: bool):
         super().__init__(line, is_english)
@@ -150,6 +153,14 @@ class IfStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if True in self.results:
+            return "end"
+
+        if len(self.results) == len(self.conditions):
+            return "end"
+
+        return "next_function"
 
 class WhileStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, condition: list[Comment], is_english: bool):
@@ -190,6 +201,14 @@ class WhileStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.result is True:
+            return "progress"
+        elif self.result is False:
+            return "end"
+
+        return "next_function"
+    
 class DoWhileStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, condition: list[Comment], is_english: bool):
         super().__init__(line, is_english)
@@ -229,7 +248,14 @@ class DoWhileStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.result is True:
+            return "progress"
+        elif self.result is False:
+            return "end"
 
+        return "next_function"
+    
 class ForStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, expr: ForComment, is_english: bool):
         super().__init__(line, is_english)
@@ -395,6 +421,28 @@ class ForStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.initializer is not None:
+            if self.initializer["dynamic_expr"].current_function_comment is not None:
+                return "next_function"
+
+            return "progress"
+
+        if self.change and (dynamic_comment_handler := self.change["dynamic_expr"]) is not None:
+            if dynamic_comment_handler.current_function_comment is not None:
+                return "next_function"
+
+            self.change["dynamic_expr"] = None
+            return "progress"
+
+        if self.condition is None:
+            return "progress"
+
+        if (result := self.condition["result"]) is None:
+            return "next_function"
+
+        return "progress" if result else "end"
+
 class ForInitializerStatus(TypedDict):
     expr: list[Comment]
     dynamic_expr: DynamicCommentHandler
@@ -521,6 +569,18 @@ class SwitchStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.dynamic_condition.current_function_comment is not None:
+            return "next_function"
+
+        if self.default_index is None and self.matched_case is None:
+            return "end"
+
+        if self.default_index is not None and self.matched_case is not None:
+            return "end"
+
+        sys.exit("all case exprs of switch statement have to be calculated at once")
+
 class CaseStatus(TypedDict):
     case_expr: list[Comment]
     dynamic_case_expr: DynamicCommentHandler
@@ -588,6 +648,12 @@ class ExpressionStatusHandler(DynamicNonVarStatusHandler):
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.dynamic_expr.current_function_comment is not None:
+            return "next_function"
+        
+        return "end"
+    
 # void関数は、自由に戻れるキャラにする 
 # ただし、frame_numが減らない場合(到達先の関数が異なる場合)は戻れない = プレイヤーはダメージを受けるようにする
 class ReturnStatusHandler(DynamicNonVarStatusHandler):
@@ -599,12 +665,12 @@ class ReturnStatusHandler(DynamicNonVarStatusHandler):
         self.thread = thread
 
     def analyze_comment(self, frame: lldb.SBFrame):
-        if self.dynamic_expr.set_expr_comments(frame) is None:
+        if self.dynamic_expr.set_expr_comments(frame) is not None:
             return
         
         # これで取得するのか?
         if (return_value := self.thread.GetStopReturnValue().GetValue()) is None:
-            sys.exit("return value is not found")
+            return
 
         self.result = return_value
 
@@ -617,9 +683,10 @@ class ReturnStatusHandler(DynamicNonVarStatusHandler):
     def check_status(self, send_event: SendEvent, current_dynamic_comment_handler_being_checked: tuple[DynamicCommentHandler, int] | None):
         # 計算式の解析が終わっている → 次のアクションに進める → 計算式の結果を取得する
         if (result := self.result) is None:
+            print("check status returns next function")
             return "next_function"
 
-        if current_dynamic_comment_handler_being_checked:
+        if current_dynamic_comment_handler_being_checked is not None:
             dynamic_comment_handler, index = current_dynamic_comment_handler_being_checked
             send_event["function_return_info"] = FunctionReturnInfo(
                 func_name = dynamic_comment_handler.get_current_function(),
@@ -628,15 +695,21 @@ class ReturnStatusHandler(DynamicNonVarStatusHandler):
             )
             dynamic_comment_handler.set_function_comment(result)
 
+        print("result:", result)
         send_event["execution_and_result_str_list"] = [
             ExecutionAndResultStr(
-                execution = self.dynamic_expr.get_str_after_analysis_completed(),
+                execution = result,
                 result = None
             )
         ]
 
         return "correct"
 
+    def check_expr_automatically(self):
+        if self.result is None:
+            return "next_function"
+
+        return "end"
 
 class DynamicCommentHandler:
     def __init__(self, comments: list[Comment]):
@@ -859,7 +932,7 @@ class DynamicCommentHandler:
     def set_function_comment(self, return_value: str):
         if self.current_function_comment is None:
             sys.exit("current function comment is not found")
-        
+
         self.expr_result_by_id[self.index_scanned_currently] = return_value
         self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {return_value}'
 
@@ -1529,7 +1602,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.str_check_num = {}
             self.str_info_to_send: list[StrcpyInfo] = []
             self.skipped_var_declaration_lines: list[str] = []
-            self.expr_status_handler_list: list[DynamicNonVarStatusHandler] = []
+            self.expr_status_handler_dict_by_frame: list[dict[int, DynamicNonVarStatusHandler]] = [{}]
             self.exprs_by_line: dict[str, NonVarComment] = {}
 
         def set_process_and_thread(self, process: lldb.SBProcess, thread: lldb.SBThread) -> None:
@@ -1539,7 +1612,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
-                    self.line_data: dict[str, dict] = json.load(f)
+                    self.line_data: dict[str, LineInfoDataByFunc] = json.load(f)
                     self.func_name = self.func_crnt_name
                     self.frame_num = 1
                     self.get_std_outputs()
@@ -1572,7 +1645,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_tracker.start_tracking(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self, var_check: bool = True) -> None:
+        def step_conditionally(self) -> None:
             # scanf フォーマット → Python 正規表現パターンの対応表
             scanf_patterns = {
                 "%d": (r"[-+]?\d+", "符号付き10進整数"),
@@ -1644,35 +1717,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             
             # プロセスの状態を更新
             if self.is_end:
-                while True:
-                    if (event := self.event_reciever()) is None:
-                        continue
-                    
-                    execution_info: ExecutionInfo | None = event.get("execution_info")
-                    if execution_info is not None and execution_info["type"] == 'return' and execution_info["line"] == self.line_number:
-                        self.event_sender(
-                            SendEvent(
-                                message = "Congraturations!! Here is a goal!!" if self.is_english else "おめでとうございます!! ここがゴールです!!", 
-                                status = "ok", 
-                                is_finished = True,
-                                skipped_function_list = None
-                            )
-                        )
-                        raise ProgramFinished()
-                    else:
-                        self.event_sender(
-                            SendEvent(
-                                message = "Talk to a Return Character!!" if self.is_english else "returnキャラに話しかけてください!!", 
-                                status = "ng"
-                            )
-                        )
+                self.analyze_non_var_expr_comments(is_end = True)
+                self.get_std_outputs()
+                return
 
             self.thread = self.frame.GetThread()
             self.process = self.thread.GetProcess()
 
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
-            # 変数が合致していればstepinを実行して次に進む
-
             while len(self.skipped_var_declaration_lines):
                 line = self.skipped_var_declaration_lines.pop(0)
                 self.vars_tracker.analyze_var_nodes(line, self.frame)
@@ -1765,8 +1817,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 self.frame_num = self.next_frame_num
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
                 
-                if var_check:
-                    self.vars_tracker.start_tracking(self.frame)
+                self.vars_tracker.start_tracking(self.frame)
 
                 ### ここから下の標準関数の解析はdynamic_comment_handlerのset_expr_commentsメソッドで行うことにする(予定)
                 if input_check:
@@ -1869,6 +1920,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             else:
                 self.is_end = True
                 self.line_number = self.next_line_number
+                self.frame_num = self.next_frame_num
+                self.func_name = self.func_crnt_name
 
             self.get_std_outputs()
 
@@ -1887,9 +1940,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 return None
             
             frame_num = thread.GetNumFrames()
-            
-            # これで取得できるのは、16進数アドレスを10進数に変換したもの
-            # print(frame.FindVariable("p").GetValueAsUnsigned())
             
             print(f"{func_name} at {file_name}:{line_number}")
 
@@ -1973,7 +2023,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         def vars_checker(self, is_for_false: bool = False) -> None:
             if self.is_end:
                 return
-            
+
+            line_number = self.line_number
             # これだとスコープ外の変数を拾ってしまうことがある
             # for文の条件文内の宣言だとfalseの時にself.vars_tracker.declared_variables_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
             if is_for_false:
@@ -1981,8 +2032,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             else:
                 varsDeclLines = [
                     dynamic_variable_info
-                    for dynamic_variable_info in self.vars_tracker.dynamic_variable_info_by_line.get(str(self.line_number), []) 
-                    if (dynamic_variable_info["dynamic_var_node"]["name"], self.line_number) not in self.vars_tracker.vars_declared[-1]
+                    for dynamic_variable_info in self.vars_tracker.dynamic_variable_info_by_line.get(str(line_number), []) 
+                    if (dynamic_variable_info["dynamic_var_node"]["name"], line_number) not in self.vars_tracker.vars_declared[-1]
                 ]
 
             varsDeclLines_copy = varsDeclLines[:]
@@ -1990,7 +2041,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # やはり、変数は順番に取得させる
             while len(varsDeclLines_copy):
                 dynamic_variable_info = varsDeclLines_copy.pop(0)
-                var = (dynamic_variable_info["dynamic_var_node"]["name"], self.line_number)
+                var = (dynamic_variable_info["dynamic_var_node"]["name"], line_number)
                 errorCnt = 0
                 while True:
                     # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
@@ -2040,7 +2091,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         continue
 
                     # 変数宣言の処理の行番は完全一致ではなくbetweenで確認する(条件分岐は引き続き完全一致で?)
-                    if self.line_number < event["start"] or event["end"] < self.line_number:
+                    if line_number < event["start"] or event["end"] < line_number:
                         errorCnt += 1
                         self.event_sender(
                             SendEvent(
@@ -2111,23 +2162,42 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     # non_varの時と同じくこのメソッドで次の関数を解析する
                     self.analyze_next_function(dynamic_variable_info)
+
                     self.vars_tracker.analyze_var_nodes(str(var[1]), self.frame)
 
+                    self.step_conditionally()
+
         # 変数宣言以外の計算式の解析
-        def analyze_non_var_expr_comments(self):
+        def analyze_non_var_expr_comments(self, is_end: bool = False):
             if str(self.next_line_number) not in self.exprs_by_line:
+                if is_end:
+                    sys.exit("main return statement is not found")
+
                 self.thread.StepInto()
                 return
 
-            if len(self.expr_status_handler_list) == 0 or self.expr_status_handler_list[-1].line != self.next_line_number:
+            if len(self.expr_status_handler_dict_by_frame) <= self.next_frame_num - 2:
+                self.expr_status_handler_dict_by_frame.append({})
+
+            if self.next_line_number not in self.expr_status_handler_dict_by_frame[self.next_frame_num-2]:
                 self.set_expr_status(self.exprs_by_line[str(self.next_line_number)], self.next_line_number)
 
-            expr_status_handler = self.expr_status_handler_list[-1]
+            expr_status_handler = self.expr_status_handler_dict_by_frame[self.next_frame_num-2][self.next_line_number]
 
-            if isinstance(expr_status_handler, ReturnStatusHandler) and expr_status_handler.dynamic_expr.is_analysis_potentially_completed():
-                self.thread.StepOut()
-            else:
-                self.thread.StepInto()
+            if isinstance(expr_status_handler, ForStatusHandler):
+                expr_status_handler.analyze_comment(self.frame)
+                return
+
+            if not is_end:
+                if isinstance(expr_status_handler, ReturnStatusHandler) and expr_status_handler.dynamic_expr.is_analysis_potentially_completed():
+                    self.thread.StepOut()
+                else:
+                    self.thread.StepInto()
+
+            # if isinstance(expr_status_handler, ReturnStatusHandler) and expr_status_handler.dynamic_expr.is_analysis_potentially_completed():
+            #     self.thread.StepOut()
+            # elif not is_end:
+            #     self.thread.StepInto()
 
             expr_status_handler.analyze_comment(self.frame)
 
@@ -2163,7 +2233,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             else: # return
                 expr_status_handler = ReturnStatusHandler(line, expr["expr"], thread, self.is_english)
             
-            self.expr_status_handler_list.append(expr_status_handler)
+            self.expr_status_handler_dict_by_frame[self.next_frame_num-2][line] = expr_status_handler
 
         def append_line_loop(self, type: Literal["while", "do_while", "for"], line: int):
             if (opposite_edge := self.line_data[self.func_name]["loops"].get(str(line), None)) is None:
@@ -2208,10 +2278,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.line_loop_list.pop(-1)
 
         def check_expr_status(self, execution_info: ExecutionInfo):
-            if len(self.expr_status_handler_list) == 0:
+
+            if (current_expr_status_handler := self.expr_status_handler_dict_by_frame[self.frame_num-2].get(self.line_number, None)) is None:
                 return False
-            
-            current_expr_status_handler = self.expr_status_handler_list[-1]
             
             if current_expr_status_handler.line != execution_info["line"]:
                 return False
@@ -2227,7 +2296,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             if isinstance(current_expr_status_handler, IfStatusHandler) and execution_info["type"] == "if":
                 check_result = current_expr_status_handler.check_conditions(send_event, execution_info["true_condition_index"])
                 if check_result == "correct":
-                    self.expr_status_handler_list.pop(-1)
+                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                     start_line = self.line_number
                     end_line = self.next_line_number
             elif (isinstance(current_expr_status_handler, WhileStatusHandler) and execution_info["type"] == "while") or (isinstance(current_expr_status_handler, DoWhileStatusHandler) and execution_info["type"] == "do_while"):
@@ -2253,7 +2322,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             else: # self.next_line_number < self.line_numberにしかなり得ない
                                 end_line = self.next_line_number
                     else: # falseなら、一番下の行をstart_lineに設定して、next_line_numberをend_lineに設定する
-                        self.expr_status_handler_list.pop(-1)
+                        self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
 
                         if execution_info["type"] == "while":
                             if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
@@ -2280,7 +2349,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                         self.append_line_loop("for", self.line_number)
                     else:
-                        self.expr_status_handler_list.pop(-1)
+                        self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
 
                         if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
                             sys.exit("start_line of for statement is not found")
@@ -2290,21 +2359,24 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             elif isinstance(current_expr_status_handler, SwitchStatusHandler) and execution_info["type"] == "switch":
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 if check_result == "correct":
-                    self.expr_status_handler_list.pop(-1)
+                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                     start_line = self.line_number
                     end_line = self.next_line_number
             elif isinstance(current_expr_status_handler, ControlFlowStatusHandler) and execution_info["type"] in ("continue", "break"):
                 check_result = current_expr_status_handler.check_status(send_event)
-                self.expr_status_handler_list.pop(-1)
+                self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                 if execution_info["type"] == "break":
                     self.remove_line_loop(execution_info["type"], self.line_number)
             elif isinstance(current_expr_status_handler, ExpressionStatusHandler) and execution_info["type"] == "expression":
                 check_result = current_expr_status_handler.check_expr(send_event)
                 if check_result == "correct":
-                    self.expr_status_handler_list.pop(-1)
+                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                     start_line = self.line_number
                     end_line = self.next_line_number
             elif isinstance(current_expr_status_handler, ReturnStatusHandler) and execution_info["type"] == "return":
+                print("return statement")
+
+                print(self.dynamic_comment_handler_being_checked)
                 check_result = current_expr_status_handler.check_status(
                     send_event, 
                     self.dynamic_comment_handler_being_checked[-1] 
@@ -2313,23 +2385,33 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 )
 
                 if check_result == "correct":
-                    self.expr_status_handler_list.pop(-1)
+                    self.expr_status_handler_dict_by_frame.pop(-1)
+
+                if self.is_end:
+                    send_event["is_finished"] = True
+                    print(check_result)
             else:
                 return False
 
-            if check_result == "incorrect":
-                return False
-            elif check_result == "next_function":
-                self.analyze_next_function(current_expr_status_handler)
-                return True
+            if not self.is_end:
+                if check_result == "incorrect":
+                    return False
+                elif check_result == "next_function":
+                    self.analyze_next_function(current_expr_status_handler)
+                    print("return check true")
+                    return True
 
             self.set_skipped_var_declaration(start_line, end_line)
 
             send_event["skipped_function_list"] = current_expr_status_handler.get_skipped_functions()
-            send_event["vars_w_value_changed"] = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())), 
-            send_event["vars_w_value_unchanged"] = self.get_vars_w_value_unchanged()
-            
+            if not self.is_end:
+                send_event["vars_w_value_changed"] = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys()))
+                send_event["vars_w_value_unchanged"] = self.get_vars_w_value_unchanged()
+
             self.event_sender(send_event)
+
+            if self.is_end:
+                raise ProgramFinished()
 
             return True
         
@@ -2366,29 +2448,44 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 if event.get('skip', False):
                     back_line_number = self.line_number
                     back_frame_num = self.frame_num
+                    self.dynamic_comment_handler_being_checked.append((current_comment_handler, index))
+
+                    return_value = None
                     while True:
                         self.step_conditionally()
-                        
-                        if back_line_number == self.next_line_number and back_frame_num == self.next_frame_num:
-                            return_value = thread.GetStopReturnValue().GetValue()
-                            current_comment_handler.set_function_comment(return_value)
-
-                            self.event_sender(
-                                SendEvent(
-                                    message = "function skip is completed" if self.is_english else "スキップが完了しました", 
-                                    status = "ok", 
-                                    items = self.vars_tracker.get_value(), 
-                                    func = self.func_crnt_name,
-                                    function_return_info = FunctionReturnInfo(
-                                        func_name = current_comment_handler.get_current_function(),
-                                        index = index,
-                                        return_value = return_value
-                                    )
-                                )
-                            )
 
                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                             break
+
+                        if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
+                            if (current_expr_status_handler := self.expr_status_handler_dict_by_frame[self.frame_num-2].get(self.line_number, None)) is None:
+                                sys.exit("expr status handler is not found")
+
+                            if (result := current_expr_status_handler.check_expr_automatically()) == "end":
+                                if isinstance(current_expr_status_handler, ReturnStatusHandler):
+                                    self.expr_status_handler_dict_by_frame.pop(-1)
+                                    return_value = current_expr_status_handler.result
+                                    break
+                                else:
+                                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                            elif result == "next_function":
+                                current_comment_w_index = current_expr_status_handler.get_next_function()
+                                current_comment_w_index[0].set_function_comment(self.analyze_next_function_in_skip())
+
+                    current_comment_handler.set_function_comment(return_value)
+                    self.event_sender(
+                        SendEvent(
+                            message = "function skip is completed" if self.is_english else "スキップが完了しました", 
+                            status = "ok", 
+                            items = self.vars_tracker.get_value(), 
+                            func = self.func_crnt_name,
+                            function_return_info = FunctionReturnInfo(
+                                func_name = current_comment_handler.get_current_function(),
+                                index = index,
+                                return_value = return_value
+                            )
+                        )
+                    )
                 else:
                     func_warp = event["func_warp"]
                     self.event_sender(
@@ -2432,16 +2529,40 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                             break
 
-                    self.dynamic_comment_handler_being_checked.pop(-1)
+                self.dynamic_comment_handler_being_checked.pop(-1)
             # ここはインライン関数が来る可能性がある? (今はまだ対応しない)
             else:
                 sys.exit("error in function move")
 
+            print("next func check is already completed")
+
+        def analyze_next_function_in_skip(self) -> str | None:
+            crnt_frame_num = self.frame_num
+            while crnt_frame_num == self.frame_num:
+                self.step_conditionally()
+                if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
+                    if (current_expr_status_handler := self.expr_status_handler_dict_by_frame[self.frame_num-2].get(self.line_number, None)) is None:
+                        sys.exit("expr status handler is not found")
+
+                    if (result := current_expr_status_handler.check_expr_automatically()) == "end":
+                        if isinstance(current_expr_status_handler, ReturnStatusHandler):
+                            self.expr_status_handler_dict_by_frame.pop(-1)
+                            return current_expr_status_handler.result
+                        else:
+                            self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                    elif result == "next_function":
+                        current_comment_handler, index = current_expr_status_handler.get_next_function()
+                        current_comment_handler.set_function_comment(self.analyze_next_function_in_skip())
+                    
+            return None
+
         def analyze_frame(self, backToLine: int | None = None) -> int: # Literal[PROGRESS, CONTINUE]
-            if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"] and not self.is_end:
+            if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
+                print("herearaega??")
+                
                 if (event := self.event_reciever()) is None:
                     return CONTINUE
-                
+
                 execution_info: ExecutionInfo | None = event.get("execution_info")
 
                 if execution_info is not None:
@@ -2462,24 +2583,24 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         )
                     )
                     return CONTINUE
-                
+
             self.step_conditionally()
             self.vars_checker()
 
-            if not len(self.expr_status_handler_list):
-                return PROGRESS
+            # if not len(self.expr_status_handler_list):
+            #     return PROGRESS
             
-            current_expr_status_handler = self.expr_status_handler_list[-1]
-            if not isinstance(current_expr_status_handler, ForStatusHandler) or not current_expr_status_handler.required_var_list:
-                return PROGRESS
+            # current_expr_status_handler = self.expr_status_handler_list[-1]
+            # if not isinstance(current_expr_status_handler, ForStatusHandler) or not current_expr_status_handler.required_var_list:
+            #     return PROGRESS
             
-            vars_declared = set(self.vars_tracker.vars_declared[-1])
-            vars_required = current_expr_status_handler.required_var_list
-            current_expr_status_handler.required_var_list = [v for v in vars_required if v not in vars_declared]
-            if not len(current_expr_status_handler.required_var_list):
-                return PROGRESS
+            # vars_declared = set(self.vars_tracker.vars_declared[-1])
+            # vars_required = current_expr_status_handler.required_var_list
+            # current_expr_status_handler.required_var_list = [v for v in vars_required if v not in vars_declared]
+            # if not len(current_expr_status_handler.required_var_list):
+            #     return PROGRESS
             
-            current_expr_status_handler.required_var_list = None
+            # current_expr_status_handler.required_var_list = None
 
             return PROGRESS
 
