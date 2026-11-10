@@ -1,7 +1,8 @@
-start,102_functions_condition,35, 30
-itemget, 102_functions_condition,36, 31,battery
-itemget, 102_functions_condition,33, 25,obstacle_dist
-itemget, 102_functions_condition,18, 20,mode
-itemget, 102_functions_condition,19, 12,action
-itemget, 102_functions_condition,19, 12,action
+start,102_functions_condition,19, 67
+itemget, 102_functions_condition,16, 72,battery
+itemget, 102_functions_condition,26, 65,obstacle_dist
+itemget, 102_functions_condition,21, 62,mode
+itemget, 102_functions_condition,12, 58,action
+itemget, 102_functions_condition,12, 58,action
+itemget, 102_functions_condition,12, 58,action
 finished

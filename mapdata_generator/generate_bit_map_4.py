@@ -70,7 +70,7 @@ class Treasure:
         self.func_name = func_name
 
 class FuncWarpBase:
-    def __init__(self, to_pos: tuple[int, int], args: list[ArgInfo], line: int):
+    def __init__(self, to_pos: tuple[int, int], args: list[VarInfo], line: int):
         self.local_to_pos = to_pos
         self.args = args
         self.line = line
@@ -1083,14 +1083,7 @@ class GenBitMap:
         # ただし、ワープ元の部屋を表すノードは使わない(アイテムに対するワープ情報はアイテムの生成時にくっつける)
         self.map_info.func_warps[self.func_name] = FuncWarpBase(
             to_pos = self.map_info.set_func_warp_start_pos(nodeID), 
-            args = [
-                ArgInfo(
-                    type = arg["varNode"]["type"],
-                    name = arg["varNode"]["name"],
-                    line = arg["start"]
-                )
-                for arg in func_info.args
-            ],
+            args = func_info.args,
             line = func_info.start
         )
 

@@ -23,7 +23,7 @@ class FuncWarp(TypedDict):
     name: str
     x: int
     y: int
-    args: list[ArgInfo]
+    args: list[VarInfo]
     line: int
     children: int
 
@@ -109,9 +109,9 @@ class LineInfoDataByFunc(TypedDict):
     memory: dict[int | str, list[dict]]
     string: dict[int | str, list[dict]]
 
-class SendEvent(TypedDict):
+class Debugger2GameEvent(TypedDict):
     message: str
-    status: Literal["ok", "ng", "rollback", "rollback_success", "rollback_fail"]
+    status: Literal["ok", "ng", "rollback_accept", "rollback_success", "rollback_fail"]
     first_func: NotRequired[str]
     line: NotRequired[int]
     from_line: NotRequired[int]
@@ -120,12 +120,13 @@ class SendEvent(TypedDict):
     items: NotRequired[list[VariableInfo]]
     item: NotRequired[DeclaredVariableInfo]
     func: NotRequired[str]
-    skip: NotRequired[Literal[True]]
+    func_skip: NotRequired[int]
+    loop_skip: NotRequired[Literal[True]]
     skipped_function_list: NotRequired[list[list[str]] | None]
     next_func: NotRequired[NextFunctionInfo]
     vars_w_value_changed: NotRequired[list[VariablePartWithValue]]
     vars_w_value_unchanged: NotRequired[list[VariablePartWithValue]]
-    function_return_info: NotRequired[FunctionReturnInfo]
+    return_value: NotRequired[str]
     gvars: NotRequired[list[VariableInfo]]
     vars: NotRequired[list[list[VariableInfo]]]
     std: NotRequired[list[str]]
@@ -142,7 +143,7 @@ class DeclaredVariableInfo(TypedDict):
 class VariableValueWComment(TypedDict):
     value: str | None
     type: str
-    comment: str
+    comment: str | None
     children: dict[str, VariableValueWComment]
     initialized: bool
     
@@ -173,12 +174,7 @@ class NextFunctionInfo(TypedDict):
 class ArgumentItemInfo(TypedDict):
     name: str
     line: int
-    value: VariableValue
-    type: ArgumentTypeInfo
-
-class ArgumentTypeInfo(TypedDict):
-    type: str
-    children: list[ArgumentTypeInfo]
+    value: VariableValueWComment
 
 class FunctionReturnInfo(TypedDict):
     func_name: str
@@ -211,3 +207,19 @@ class StrcpyInfo(TypedDict):
     # ここは今後直す必要がある (アドレスを取得するために)
     destination: TextPart | ExprIdPart
 
+class Game2DebuggerEvent(TypedDict):
+    stdin: NotRequired[str]
+    item: NotRequired[ItemInfo]
+    start: NotRequired[int]
+    end: NotRequired[int]
+    skip: NotRequired[bool]
+    func_warp: NotRequired[FuncWarp]
+    execution_info: NotRequired[ExecutionInfo]
+    rollback_request: NotRequired[Literal[True]]
+    rollback: NotRequired[bool]
+    index: NotRequired[int]
+
+
+class ItemInfo(TypedDict):
+    name: str
+    line: int

@@ -448,19 +448,30 @@ def main():
 
         # region ウィンドウの設定
         MSGWND = MessageWindow(
-            pygame.Rect(BUTTON_WIDTH * 3 + 70 , SCR_HEIGHT // 4 * 3, 
-                SCR_WIDTH // 2 - 30, SCR_HEIGHT // 4 - 10), MessageEngine(), sender)
+            pygame.Rect(
+                BUTTON_WIDTH * 3 + 70 , 
+                SCR_HEIGHT // 4 * 3, 
+                SCR_WIDTH // 2 - 30, 
+                SCR_HEIGHT // 4 - 10
+            ), 
+            MessageEngine(), 
+            sender
+        )
         
         if fieldmap.name in ("tutorial", "tutorial_en"):
-            mission_message_list: list[str] = []
-            if ISENGLISH:
-                for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
-                    mission_message_list.append('\n'.join(help_message_list))
-            else:
-                for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
-                    mission_message_list.append('\n'.join(help_message_list))
             PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
-            MSGWND.set('\f'.join(mission_message_list))
+            MSGWND.set(
+                '\f'.join(
+                    [
+                        '\n'.join(help_message_list) 
+                        for help_message_list in (
+                            PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0] 
+                            if ISENGLISH else 
+                            PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]
+                        )
+                    ]
+                )
+            )
 
         DIMWND = DimWindow(pygame.Rect(0, 0, SCR_WIDTH, SCR_HEIGHT + TXTBOX_HEIGHT), screen)
         DIMWND.hide()
@@ -527,15 +538,19 @@ def main():
                 fieldmap.update()
                 # チュートリアルステージではhelp用のメッセージがあり、それを表示させる
                 if fieldmap.name in ("tutorial", "tutorial_en") and PLAYER.sender.programCodeWindow.linenum not in PLAYER.help_line_number_aquired:
-                    mission_message_list: list[str] = []
-                    if ISENGLISH:
-                        for help_message_list in PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0]:
-                            mission_message_list.append('\n'.join(help_message_list))
-                    else:
-                        for help_message_list in PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]:
-                            mission_message_list.append('\n'.join(help_message_list))
                     PLAYER.help_line_number_aquired.append(PLAYER.sender.programCodeWindow.linenum)
-                    MSGWND.set('\f'.join(mission_message_list))
+                    MSGWND.set(
+                        '\f'.join(
+                            [
+                                '\n'.join(help_message_list)
+                                for help_message_list in (
+                                    PLAYER.help_dict_en[PLAYER.sender.programCodeWindow.linenum][0] 
+                                    if ISENGLISH else 
+                                    PLAYER.help_dict[PLAYER.sender.programCodeWindow.linenum][0]
+                                )
+                            ]
+                        )
+                    )
             elif PLAYER.damage_motion:
                 PLAYER.update(fieldmap)
 
@@ -602,7 +617,11 @@ def main():
                     continue
                 elif cmd == "rollback":
                     if len(PCODEWND.history) > 1:
-                        sender.send_event({"rollback": True})
+                        sender.send_event(
+                            Game2DebuggerEvent(
+                                rollback_request = True
+                            )
+                        )
                         sender.receive_json()
                     else:
                         if ISENGLISH:
@@ -635,13 +654,12 @@ def main():
                         DIMWND.show(200, 'warp')
 
                         fieldmap.warp_player(move['mapname'], move['x'], move['y'])
-
                     except IndexError:
                         MSGWND.set("No history.")
 
                     cmd = "\0"
                     atxt = "\0"
-                    PLAYER.fp.write( "break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.write("break, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                 elif cmd == "restart":
                     # ゲームを最初から始める
                     dest_x = int(config.get("game", "player_x"))
@@ -659,11 +677,6 @@ def main():
                     MSGWND.set(atxt)
                     atxt = "\0"
                     cmd = "\0"
-                elif cmd == "itemsetall":
-                    sender.send_event({"itemsetall": True})
-
-                    itemsetAllResult = sender.receive_json()
-                    MSGWND.set(itemsetAllResult['message'])
                 elif cmd == "goto":
                     ## 任意の座標まで飛ばしてくれる 同じマップ内だけ
                     parts = atxt.split(",", 1)
@@ -681,15 +694,19 @@ def main():
                     try:
                         parts = atxt.split(' ', 1)
                         value = " ".join(parts)
-                        sender.send_event({"stdin": f"{value}\n"})
-                        stdinResult = sender.receive_json()
-                        if stdinResult["status"] == "ok":
+                        sender.send_event(
+                            Game2DebuggerEvent(
+                                stdin = f"{value}\n"
+                            )
+                        )
+                        stdin_result = sender.receive_json()
+                        if stdin_result["status"] == "ok":
                             # 今回更新した変数以外の計算コメントは全て消去する
                             PLAYER.remove_itemvalue()
-                            for stdin_variable_info in stdinResult["items"]:
+                            for stdin_variable_info in stdin_result["items"]:
                                 if (item := PLAYER.find_item_belong_to_player(stdin_variable_info["name"], stdin_variable_info["line"])) is not None:
                                     item.update_value(stdin_variable_info["value"])
-                        MSGWND.set(stdinResult['message'])
+                        MSGWND.set(stdin_result['message'])
                     except (IndexError, ValueError):
                         MSGWND.set("ERROR...")
                     cmd = "\0"
@@ -754,7 +771,6 @@ def main():
 
                     if PLAYER.is_scrollable_code_element_window(event.pos):
                         codeElementWindow_scroll_mouse_pos = event.pos
-                    
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     mouse_down = False
                     if itemWindow_expand_mouse_pos:
@@ -762,10 +778,12 @@ def main():
                     elif itemWindow_scroll_mouse_pos:
                         ITEMWND.is_inAction = True
                     end_timer()
+
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
                         # ここより下の部分を関数化するかどうかは後で考える
                         SMANAGER.play_se("pause_open")
                         PAUSEWND.show()
+                    
                     programCodeWindow_scroll_mouse_pos = None
                     itemWindow_expand_mouse_pos = None
                     itemWindow_scroll_mouse_pos = None
@@ -831,7 +849,6 @@ def main():
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
                             CMNDWND.show()
-                
                 # endregion
                 
                 # region keydown event
@@ -870,7 +887,6 @@ def main():
 
                         # 表示中でないなら話す
                         PLAYER.talk(fieldmap)
-
                 # endregion
 
             while PAUSEWND.is_visible:
@@ -935,10 +951,7 @@ def main():
 
         if PLAYER.game_status == "goaled" and mapname not in ("tutorial", "tutorial_en"):
             with open(f"{BASE_DIR}/score.json", 'w') as f:
-                if PLAYER.status["HP"] > 0:
-                    SBWND.scores_dict[mapname] = max(PLAYER.status["HP"] // 20, 1)
-                else:
-                    SBWND.scores_dict[mapname] = 0
+                SBWND.scores_dict[mapname] = max(PLAYER.status["HP"] // 20, 1) if PLAYER.status["HP"] > 0 else 0
                 json.dump(SBWND.scores_dict, f)
         
         SMANAGER.stop_se("hp_warning")
@@ -1949,6 +1962,7 @@ class Player(Character):
         # 遷移済みの関数の情報を記憶
         # ワープゾーンまたは宝箱の計算式におけるチェック済みの関数を確認するための辞書
         self.checked_funcs: dict[CheckedFuncLocation, list[list[CheckedFuncState]]] = {}
+        self.checking_func: list[tuple[CheckedFuncLocation, FuncWarp, int]] = []
         # 全ての関数の確認が完了したらすぐに消すのではなく、メッセージウィンドウが消えてから消す。そのための変数
         self.completed_checked_func_location: CheckedFuncLocation | None = None
 
@@ -1958,11 +1972,11 @@ class Player(Character):
         self.std_messages = []
         self.address_to_fname = {}
         self.address_to_size = {}
-        self.func = None
+        self.func: str | None = None
         self.helps_aquired: list[tuple[int, int]] = []
-        self.isFootActionValid = False
-        self.isFowardActionValid = False
-        self.isLoopStatementInBefore = False
+        self.is_foot_action_valid: bool = False
+        self.is_foward_action_valid: bool = False
+        self.is_before_loop_statement_in: bool = False
         self.log_lists: list[list[str]] = []
         self.help_dict: dict[int, tuple[list[list[str]], list[str], tuple[int, int]]] = {
             3: ([["関数をスキップしなければ、その関数に応じた部屋に遷移します!!"]], ["再び計算式キャラクター", "と話せ!!"], (13,6)),
@@ -1991,8 +2005,8 @@ class Player(Character):
         """プレイヤー状態を更新する。
         mapは移動可能かの判定に必要。"""
         self.codeElementWindow_list = []
-        self.isFootActionValid = False
-        self.isFowardActionValid = False
+        self.is_foot_action_valid = False
+        self.is_foward_action_valid = False
         # プレイヤーの移動処理
         if self.moving:
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
@@ -2111,7 +2125,7 @@ class Player(Character):
                 event = mymap.get_event(self.x, self.y)
                 if isinstance(event, MoveEvent) or isinstance(event, Treasure):
                     self.append_code_element_window(event.codeElementWindow)
-                    self.isFootActionValid = True
+                    self.is_foot_action_valid = True
 
                 if self.direction == DOWN:
                     nextx = self.x
@@ -2133,14 +2147,14 @@ class Player(Character):
                 chara = mymap.get_chara(nextx, nexty)
                 if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
                     self.append_code_element_window(chara.codeElementWindow)
-                    self.isFowardActionValid = True
+                    self.is_foward_action_valid = True
                 elif isinstance(chara, CharaExpression):
                     self.append_code_element_window(chara.codeElementWindow_dict.get(str(self.sender.programCodeWindow.linenum)))
-                    self.isFowardActionValid = True
+                    self.is_foward_action_valid = True
 
                 event = mymap.get_event(nextx, nexty)
                 if isinstance(event, SmallDoor) and not event.status:
-                    self.isFowardActionValid = True
+                    self.is_foward_action_valid = True
 
             if self.moving and self.ccchara:
                 if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
@@ -2179,49 +2193,49 @@ class Player(Character):
         if isinstance(event, Treasure):
             # 宝箱を開けることの情報を送信する
             self.sender.send_event(
-                {
-                    "item": {
-                        "name": event.item, 
-                        "line": event.start
-                    }, 
-                    "start": event.start, 
-                    "end": event.end, 
-                    "func_groups": event.codeElementWindow.func_groups
-                }
+                Game2DebuggerEvent(
+                    item = ItemInfo(
+                        name = event.item,
+                        line = event.start
+                    ),
+                    start = event.start,
+                    end = event.end
+                )
             )
             
-            if (item_result := self.sender.receive_json()) is None:
+            if (received_event := self.sender.receive_json()) is None:
                 return False
 
-            if item_result['status'] == "ok":
+            if received_event['status'] == "ok":
                 self.add_skipped_funcs(
-                    item_result["skipped_function_list"], 
+                    received_event["skipped_function_list"], 
                     mymap.name, 
                     event.func, 
                     event.start, 
                     event.item
                 )
 
-                if item_result.get('skip', False):
+                if (func_skip_index := received_event.get("func_skip")) is not None:
+                    self.set_checking_function(event, func_skip_index)
                     MSGWND.set(
-                        item_result['message'], 
+                        received_event['message'], 
                         (
                             ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                            'func_skip'
+                            "func_skip"
                         )
                     )
                 else:
                     # 初期化値なしの変数でコメントを初期化する
-                    if "values" not in item_result:
+                    if "values" not in received_event:
                         self.remove_itemvalue()
                         
-                    event.open(item_result["item"])
+                    event.open(received_event["item"])
 
                     item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
                     self.add_log(f"Item \"{event.item}\" of {event.start} line was acquired" if ISENGLISH else f"{event.start}行目のアイテム「{event.item}」を取得")
-                    # if (indexes_comments := item_result["expr_descriptions"]["indexes"]):
+                    # if (indexes_comments := received_event["expr_descriptions"]["indexes"]):
                     #     item_get_message += "\f" + "\f".join(indexes_comments)
-                    # if not item_result['item']["initialized"]:
+                    # if not received_event['item']["initialized"]:
                     #     item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
                     self.set_completed_checked_func_location(mymap.name, event.func, event.start, event.item)
 
@@ -2229,35 +2243,49 @@ class Player(Character):
                     MSGWND.set(item_get_message)
                 self.fp.write("itemget, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "," + event.item + "\n")
             else:
-                MSGWND.set(item_result['message'])
+                MSGWND.set(received_event['message'])
+
             return True
         elif isinstance(event, MoveEvent):
             if event.execution_info:
                 self.sender.send_event(
-                    {
-                        "execution_info": event.execution_info,
-                        "func_groups": event.codeElementWindow.func_groups if event.codeElementWindow else []
-                    }
+                    Game2DebuggerEvent(
+                        execution_info = event.execution_info
+                    )
                 )
 
-                if (move_result := self.sender.receive_json()) is None:
+                if (received_event := self.sender.receive_json()) is None:
                     return False
 
-                if move_result['status'] == "ok":
+                if received_event['status'] == "ok":
                     self.add_skipped_funcs(
-                        move_result["skipped_function_list"], 
+                        received_event["skipped_function_list"], 
                         mymap.name, 
                         event.func, 
                         event.execution_info["line"]
                     )
+
                     # 関数のスキップ
-                    if move_result.get('skipCond', False):
-                        MSGWND.set(move_result['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
+                    if (func_skip_index := received_event.get("func_skip")) is not None:
+                        self.set_checking_function(event, func_skip_index)
+                        MSGWND.set(
+                            received_event['message'], 
+                            (
+                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                                'func_skip'
+                            )
+                        )
                         return True
                     
                     # 繰り返し文のスキップ
-                    if move_result.get('skip', False):
-                        MSGWND.set(move_result['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
+                    if received_event.get("loop_skip", False):
+                        MSGWND.set(
+                            received_event['message'], 
+                            (
+                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                                'loop_skip'
+                            )
+                        )
                     else:
                         self.set_completed_checked_func_location(mymap.name, event.func, event.execution_info["line"])
                     
@@ -2283,14 +2311,11 @@ class Player(Character):
 
                     self.fp.write("jump, " + dest_map + "," + str(self.x)+", " + str(self.y) + "\n")
                 else:
-                    MSGWND.set(move_result['message'])
+                    MSGWND.set(received_event['message'])
 
                 return True
             # 便宜上のワープ ( = execution_infoがない )
             else:
-                self.sender.send_event({"execution_info": None})
-                self.sender.receive_json()
-
                 dest_map = event.dest_map
                 dest_x = event.dest_x
                 dest_y = event.dest_y
@@ -2400,30 +2425,36 @@ class Player(Character):
 
             if (comment := chara.comments.get(str(chara.linenum), None)):
                 self.sender.send_event(
-                    {
-                        "execution_info": comment["execution_info"],
-                        "func_groups": comment["expr"]["func_groups"]
-                    }
+                    Game2DebuggerEvent(
+                        execution_info = comment["execution_info"]
+                    )
                 )
-                charaExpressionResult = self.sender.receive_json()
+                received_event = self.sender.receive_json()
 
-                if charaExpressionResult is None:
+                if received_event is None:
                     return False
                 
-                if charaExpressionResult['status'] == "ng":
-                    MSGWND.set(charaExpressionResult['message'])
+                if received_event['status'] == "ng":
+                    MSGWND.set(received_event['message'])
                     return True
 
                 if comment["execution_info"]["line"]:
                     self.add_skipped_funcs(
-                        charaExpressionResult["skipped_function_list"], 
+                        received_event["skipped_function_list"], 
                         mymap.name, 
                         chara.func, 
                         comment["execution_info"]["line"]
                     )
                 
-                if charaExpressionResult.get('skipCond', False):
-                    MSGWND.set(charaExpressionResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'exp_func_skip'))
+                if (func_skip_index := received_event.get("func_skip")) is not None:
+                    self.set_checking_function(chara, func_skip_index)
+                    MSGWND.set(
+                        received_event['message'], 
+                        (
+                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                            'func_skip'
+                        )
+                    )
                     return True
                 
                 item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
@@ -2432,7 +2463,7 @@ class Player(Character):
                 var_quiz_list: list[tuple[tuple[str,...], bool]] = []
 
                 # 変数の値の更新に対するコメント(例: 「a++: aの値を1増やす」)があれば、アイテムウィンドウに白ハイライトと共に登録する
-                for item_w_value_changed in charaExpressionResult["vars_w_value_changed"]:
+                for item_w_value_changed in received_event["vars_w_value_changed"]:
                     varname = item_w_value_changed["item"]["name"]
                     line = item_w_value_changed["item"]["line"]
                     if (varname, line) in item_info_dict:
@@ -2477,8 +2508,8 @@ class Player(Character):
                     f"{chara.linenum}行目の計算式「{log_comment}」を実行しました"
                 )
 
-                if len(charaExpressionResult.get("vars_w_value_unchanged", [])):
-                    for var_w_value_unchanged in charaExpressionResult["vars_w_value_unchanged"]:
+                if len(received_event.get("vars_w_value_unchanged", [])):
+                    for var_w_value_unchanged in received_event["vars_w_value_unchanged"]:
                         var_quiz_list.append(((var_w_value_unchanged["item"]["name"], *var_w_value_unchanged["path"]), False))
                     ''' 
                     変数の値が更新されたかどうかのクイズを設定する。選択は共通して「はい」、「いいえ」のみなので、これだけ渡しておく。
@@ -2490,9 +2521,7 @@ class Player(Character):
                     # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
                     MSGWND.set(chara.message)
             else:
-                self.sender.send_event({"itemsetall": True})
-                itemsetAllResult = self.sender.receive_json()
-                MSGWND.set(itemsetAllResult['message'])
+                sys.exit(f"chara expression info in line {chara.linenum} is not found")
             
             chara.linenum = None
         elif isinstance(chara, CharaCheckCondition):
@@ -2509,18 +2538,17 @@ class Player(Character):
                 return True
             
             self.sender.send_event(
-                {
-                    "execution_info": chara.execution_info, 
-                    "func_groups": chara.codeElementWindow.func_groups
-                }
+                Game2DebuggerEvent(
+                    execution_info = chara.execution_info
+                )
             )
-            CCCharacterResult = self.sender.receive_json()
+            received_event = self.sender.receive_json()
 
-            if CCCharacterResult is None: # 結果を取得できない場合
+            if received_event is None: # 結果を取得できない場合
                 MSGWND.set("You did a different action" if ISENGLISH else "異なる行動をしようとしています")
                 return False
 
-            if CCCharacterResult['status'] == "ng": # 間違った行動をした場合
+            if received_event['status'] == "ng": # 間違った行動をした場合
                 if mymap.name in ("tutorial", "tutorial_en"):
                     MSGWND.set(
                         "HP -10 if you do a wrong action for a C step execution... \fKeep your HP above 0!!"
@@ -2528,19 +2556,26 @@ class Player(Character):
                         "間違ったアクションを実行すると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
                     )
                 else:
-                    MSGWND.set(CCCharacterResult['message'])
+                    MSGWND.set(received_event['message'])
             else:
                 self.add_skipped_funcs(
-                    CCCharacterResult["skipped_function_list"], 
+                    received_event["skipped_function_list"], 
                     mymap.name, 
                     chara.func, 
                     chara.execution_info["line"]
                 )
 
-                if CCCharacterResult.get('skipCond', False):
-                    MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'cond_func_skip'))
-                elif CCCharacterResult.get('skip', False):
-                    MSGWND.set(CCCharacterResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
+                if (func_skip_index := received_event.get("func_skip")) is not None:
+                    self.set_checking_function(chara, func_skip_index)
+                    MSGWND.set(
+                        received_event['message'], 
+                        (
+                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                            'func_skip'
+                        )
+                    )
+                elif received_event.get("loop_skip", False):
+                    MSGWND.set(received_event['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
                     self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
                     self.ccchara = chara.set_checked()
                 else:
@@ -2553,25 +2588,31 @@ class Player(Character):
         elif isinstance(chara, CharaReturn):
             # main以外のreturnキャラ
             # void関数のreturnについては後で考える
-            if self.move_history:
-                self.sender.send_event(
-                    {
-                        "execution_info": chara.execution_info,
-                        "func_groups": chara.codeElementWindow.func_groups
-                    }
+            self.sender.send_event(
+                Game2DebuggerEvent(
+                    execution_info = chara.execution_info
                 )
-                returnResult = self.sender.receive_json()
+            )
+            received_event = self.sender.receive_json()
 
-                if returnResult['status'] == 'ok':
+            if self.move_history:
+                if received_event['status'] == 'ok':
                     self.add_skipped_funcs(
-                        returnResult["skipped_function_list"], 
+                        received_event["skipped_function_list"], 
                         mymap.name,
                         chara.func,
                         chara.execution_info["line"]
                     )
                     
-                    if returnResult.get("skip", False):
-                        MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
+                    if (func_skip_index := received_event.get("func_skip")) is not None:
+                        self.set_checking_function(chara, func_skip_index)
+                        MSGWND.set(
+                            received_event['message'], 
+                            (
+                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                                'func_skip'
+                            )
+                        )
                     else:
                         self.set_completed_checked_func_location(
                             mymap.name, 
@@ -2593,20 +2634,15 @@ class Player(Character):
                         move = self.move_history.pop(-1)
                         self.itembag.items.pop(-1)
                         self.remove_itemvalue()
-                        self.add_log(f"Came back to {returnResult["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{returnResult["backToFunc"]}に戻りました")
+                        self.add_log(f"Came back to {received_event["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{received_event["backToFunc"]}に戻りました")
                         
-                        for variable_info in returnResult["items"]:
+                        for variable_info in received_event["items"]:
                             if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
                                 item.update_value(variable_info["value"])
                         
-                        checked_func_location = CheckedFuncLocation(
-                            map_name = move['mapname'], 
-                            func_name = move["func"], 
-                            line = move["line"]
-                        )
-                        self.append_analyzed_func_state(checked_func_location, returnResult["function_return_info"])
+                        self.append_analyzed_func_state(received_event["return_value"])
 
-                        self.func =  move["func"]
+                        self.func = move["func"]
                         self.waitingMove = chara
                         self.waitingMove.dest_map = move['mapname']
                         self.waitingMove.dest_x = move['x']
@@ -2616,43 +2652,39 @@ class Player(Character):
                     return True
             # mainのreturnキャラ
             else:
-                self.sender.send_event(
-                    {
-                        "execution_info": chara.execution_info,
-                        "func_groups": chara.codeElementWindow.func_groups,
-                        'main': True
-                    }
-                )
-
-                returnResult = self.sender.receive_json()
-
-                if returnResult['status'] == 'ok':
+                if received_event['status'] == 'ok':
                     self.add_skipped_funcs(
-                        returnResult["skipped_function_list"], 
+                        received_event["skipped_function_list"], 
                         mymap.name, 
                         chara.func, 
                         chara.execution_info["line"]
                     )
 
-                    print(returnResult)
-                    if returnResult.get("skip", False):
-                        MSGWND.set(returnResult['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'return_func_skip'))
-                    elif returnResult.get('is_finished', False):
+                    if (func_skip_index := received_event.get("func_skip")) is not None:
+                        self.set_checking_function(chara, func_skip_index)
+                        MSGWND.set(
+                            received_event['message'], 
+                            (
+                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                                'func_skip'
+                            )
+                        )
+                    elif received_event.get('is_finished', False):
                         SMANAGER.stop_bgm()
                         SMANAGER.play_se("goal")
                         self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
                         if mymap.name in ("tutorial", "tutorial_en"):
                             if ISENGLISH:
-                                returnResult['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
+                                received_event['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
                             else:
-                                returnResult['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
-                        MSGWND.set(returnResult['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
+                                received_event['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                        MSGWND.set(received_event['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
                         self.fp.write("finished\n")
                     else:
                         sys.exit("is_finished is not found in a sent event of return statement")
                     return True
             
-            MSGWND.set(returnResult['message'])
+            MSGWND.set(received_event['message'])
         
         return True
     
@@ -2778,27 +2810,46 @@ class Player(Character):
         if checked_func_location in self.checked_funcs:
             self.completed_checked_func_location = checked_func_location
 
-    def append_analyzed_func_state(self, location: tuple[str, str, int, str | None], state: FunctionReturnInfo):
+    def append_analyzed_func_state(self, return_value: str):
         '''
         location: 
             map_name, func_name, line, var_name
         state:
             func_name, return_value, checked
         '''
-        checked_func_location = CheckedFuncLocation(*location)
+
+        if len(self.checking_func) == 0:
+            sys.exit("checking functions is not found")
+
+        checking_func = self.checking_func.pop(-1)
+        checked_func_location = checking_func[0]
         checked_func_state = CheckedFuncState(
-            func_name = state["func_name"], 
-            return_value = state["return_value"], 
+            func_name = checking_func[1]["name"], 
+            return_value = return_value, 
             checked = True
         )
 
         if checked_func_location not in self.checked_funcs:
             self.checked_funcs[checked_func_location] = []
 
-        if (lacked_state_layer_num := state["index"] - len(self.checked_funcs[checked_func_location]) + 1) >= 1:
+        if (lacked_state_layer_num := checking_func[2] - len(self.checked_funcs[checked_func_location]) + 1) >= 1:
             self.checked_funcs[checked_func_location].extend([[] for _ in range(lacked_state_layer_num)])
             
-        self.checked_funcs[checked_func_location][state["index"]].append(checked_func_state)
+        self.checked_funcs[checked_func_location][checking_func[2]].append(checked_func_state)
+
+    def set_checking_function(self, object: Event | Character, index: int):
+        if isinstance(object, Treasure) or isinstance(object, MoveEvent):
+            if (codeElementWindow := object.codeElementWindow) is None:
+                sys.exit("code element window is not found in function resource of event")
+        elif isinstance(object, CharaCheckCondition) or isinstance(object, CharaReturn):
+            codeElementWindow = object.codeElementWindow
+        elif isinstance(object, CharaExpression):
+            if (codeElementWindow := object.codeElementWindow_dict.get(str(object.linenum), None)) is None:
+                sys.exit("code element window is not found in function resource of chara-expression")
+        else:
+            sys.exit("resource of function is not found")
+
+        self.checking_func.append((codeElementWindow.location, codeElementWindow.get_latest_function(index), index))
 
     def get_func_index_to_check(self, location: tuple[str, str, int, str | None]):
         checked_func_location = CheckedFuncLocation(*location)
@@ -3063,7 +3114,7 @@ class DimWindow:
         else:
             self.target_df = 0
             self.df = 0
-            if self.sound_type in ('skip', 'rollback'):
+            if self.sound_type in ("skip", 'rollback'):
                 SMANAGER.unpause_bgm()
             self.hide()
         self.surface.fill(Color(0, 0, 0, self.df))
@@ -3074,7 +3125,7 @@ class DimWindow:
         self.target_df = df
         if sound_type == 'warp':
             SMANAGER.play_se("warp")
-        elif sound_type == 'skip':
+        elif sound_type == "skip":
             SMANAGER.pause_bgm()
             SMANAGER.play_se("skip")
         elif sound_type == 'rollback':
@@ -3266,7 +3317,7 @@ class MessageWindow(Window):
                         varname += '.' + var_path_element
                 message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
 
-        if len(message_list):
+        if len(message_list) or selectMessages:
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -3289,7 +3340,6 @@ class MessageWindow(Window):
                     self.text += ch
                     p += 1
 
-        if len(message_list) or selectMessages:
             self.show()
 
     def update(self):
@@ -3364,157 +3414,87 @@ class MessageWindow(Window):
     def next(self, fieldmap: Map):
         # メッセージを先に進める。ただし、選択メッセージの場合、全てのメッセージが表示されるまで次には行けないようにする (暴発阻止のため)
         if self.sender is not None and (self.selectMsgText and self.hide_flag):
-            if self.select_type == 'loop_skip':
+            if self.select_type == "loop_skip":
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # 暗転
-                    DIMWND.show(200, 'skip')
+                    DIMWND.show(200, "skip")
                     startLine = self.sender.programCodeWindow.linenum
-                    self.sender.send_event({"skip": True})
-                    skipResult = self.sender.receive_json()
-                    self.sender.programCodeWindow.linenum = skipResult["finalLine"]
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            skip = True
+                        )
+                    )
+                    skip_result = self.sender.receive_json()
+                    self.sender.programCodeWindow.linenum = skip_result["finalLine"]
                     # スキップした先がbreak文だった場合 ( = breakでループを抜ける場合 )
-                    if startLine != skipResult["finalLine"]:
+                    if startLine != skip_result["finalLine"]:
                         for event in fieldmap.events:
-                            if isinstance(event, MoveEvent) and event.execution_info and event.execution_info["line"] == skipResult["finalLine"]:
+                            if isinstance(event, MoveEvent) and event.execution_info and event.execution_info["line"] == skip_result["finalLine"]:
                                 fieldmap.warp_player(fieldmap.name, *event.pos())
-                                skipResult['message'] += f'\fmoved to break statement of line {skipResult["finalLine"]} !!' if ISENGLISH else f'\f{skipResult["finalLine"]}行のbreak前まで遷移しました!!'
+                                skip_result['message'] += f'\fmoved to break statement of line {skip_result["finalLine"]} !!' if ISENGLISH else f'\f{skip_result["finalLine"]}行のbreak前まで遷移しました!!'
                                 break
-                    self.set(skipResult['message'])
+                    self.set(skip_result['message'])
                     PLAYER.remove_itemvalue()
-                    for variable_info in skipResult["items"]:
+                    for variable_info in skip_result["items"]:
                         if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
                             item.update_value(variable_info["value"])
                 else:
-                    self.sender.send_event({"skip": False})
-                    skipResult = self.sender.receive_json()
-                    self.set(skipResult['message'])
-            elif self.select_type == 'func_skip':
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            skip = False
+                        )
+                    )
+                    skip_result = self.sender.receive_json()
+                    self.set(skip_result['message'])
+            elif self.select_type == "func_skip":
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
-                    self.sender.send_event({"skip": True})
-                    skipResult = self.sender.receive_json()
-                    self.set(skipResult['message'])
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            skip = True
+                        )
+                    )
+
+                    DIMWND.show(200, "skip")
+                    skip_result = self.sender.receive_json()
+                    self.set(skip_result['message'])
                     PLAYER.remove_itemvalue()
-                    for variable_info in skipResult["items"]:
+
+                    for variable_info in skip_result["items"]:
                         if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
                             item.update_value(variable_info["value"])
-                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                    if isinstance(event, Treasure):
-                        PLAYER.append_analyzed_func_state(
-                            (fieldmap.name, event.func, event.start, event.item), 
-                            skipResult["function_return_info"]
-                        )
-                    # 暗転
-                    DIMWND.show(200, 'skip')
-                    fieldmap.warp_player(fieldmap.name, *PLAYER.pos())
+
+                    PLAYER.append_analyzed_func_state(skip_result["return_value"])
                 else:
-                    self.sender.send_event({"skip": False})
-                    skipResult = self.sender.receive_json()
-                    self.set(skipResult['message'])
-                    # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
-                    dest_map = fieldmap.name
-                    dest_x = skipResult["next_func"]["x"]
-                    dest_y = skipResult["next_func"]["y"]
+                    if len(PLAYER.checking_func) == 0:
+                        sys.exit("checking func info is not found")
 
-                    PLAYER.func = skipResult["next_func"]["name"]
+                    checking_func = PLAYER.checking_func[-1]
 
-                    from_map = fieldmap.name
-                    PLAYER.append_move5History(
-                        {
-                            'mapname': from_map, 
-                            'x': PLAYER.x, 
-                            'y': PLAYER.y, 
-                            'cItems': PLAYER.common_itembag.get_current_item_layer(), 
-                            'items': PLAYER.itembag.get_current_item_layer(), 
-                            'return': False
-                        }
-                    )
-
-                    PLAYER.move_history.append(
-                        PlayerFuncHistory(
-                            mapname = from_map,
-                            x = PLAYER.x,
-                            y = PLAYER.y,
-                            line = skipResult["from_line"],
-                            func = skipResult["next_func"]["name"]
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            skip = False,
+                            func_warp = checking_func[1]
                         )
                     )
-                    
-                    PLAYER.add_local_item_layer(
-                        [
-                            Item(
-                                arg_item_info["name"], 
-                                arg_item_info["line"], 
-                                arg_item_info,
-                            )
-                            for arg_index, arg_item_info in enumerate(skipResult["next_func"]["items"])
-                        ]
-                    )
-                    # 暗転
-                    DIMWND.show(200, 'warp')
-                    fieldmap.warp_player(dest_map, dest_x, dest_y)
-
-                    PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
-            elif self.select_type in ['cond_func_skip', 'exp_func_skip', 'return_func_skip']:
-                if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
-                    self.sender.send_event({"skip": True})
-                    DIMWND.show(200, 'skip')
-                    skipResult = self.sender.receive_json()
-                    self.set(skipResult['message'])
-                    PLAYER.remove_itemvalue()
-                    for variable_info in skipResult["items"]:
-                        if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
-                            item.update_value(variable_info["value"])
-                    event = fieldmap.get_event(PLAYER.x, PLAYER.y)
-                    if isinstance(event, MoveEvent):
-                        PLAYER.append_analyzed_func_state(
-                            (fieldmap.name, event.func, event.execution_info["line"], None),
-                            skipResult["function_return_info"]
-                        )
-
-                    if PLAYER.direction == DOWN:
-                        x = PLAYER.x
-                        y = PLAYER.y+1
-                    elif PLAYER.direction == LEFT:
-                        x = PLAYER.x-1
-                        y = PLAYER.y
-                    elif PLAYER.direction == RIGHT:
-                        x = PLAYER.x+1
-                        y = PLAYER.y
-                    else:
-                        x = PLAYER.x
-                        y = PLAYER.y-1
-                    
-                    chara = fieldmap.get_chara(x, y)
-                    if (isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn)):
-                        PLAYER.append_analyzed_func_state(
-                            (fieldmap.name, chara.func, chara.execution_info["line"], None), 
-                            skipResult["function_return_info"]
-                        )
-                    elif isinstance(chara, CharaExpression):
-                        PLAYER.append_analyzed_func_state(
-                            (fieldmap.name, chara.func, chara.comments[str(chara.linenum)]["execution_info"]["line"], None), 
-                            skipResult["function_return_info"]
-                        )
-                else:
-                    self.sender.send_event({"skip": False})
-                    skipResult = self.sender.receive_json()
+                    skip_result = self.sender.receive_json()
 
                     PLAYER.add_local_item_layer(
                         [
                             Item(
-                                arg_item_info["name"], 
-                                arg_item_info["line"], 
+                                arg_item_info["name"],
+                                arg_item_info["line"],
                                 arg_item_info["value"]
                             )
-                            for arg_item_info in skipResult["next_func"]["items"]
+                            for arg_item_info in skip_result["next_func"]["items"]
                         ]
                     )
 
-                    self.set(skipResult['message'])
+                    self.set(skip_result['message'])
                     # 今は一つのファイルだけに対応しているので、マップ名は現在のマップと同じ
                     dest_map = fieldmap.name
-                    dest_x = skipResult["next_func"]["x"]
-                    dest_y = skipResult["next_func"]["y"]
+                    dest_x = skip_result["next_func"]["x"]
+                    dest_y = skip_result["next_func"]["y"]
+                    PLAYER.func = skip_result["next_func"]["name"]
 
                     PLAYER.append_move5History(
                         {
@@ -3532,14 +3512,13 @@ class MessageWindow(Window):
                             mapname = dest_map,
                             x = PLAYER.x,
                             y = PLAYER.y,
-                            line = skipResult["from_line"],
-                            func = skipResult["next_func"]["name"]
+                            line = skip_result["from_line"],
+                            func = skip_result["next_func"]["name"]
                         )
                     )
                     
                     DIMWND.show(200, 'warp')
                     fieldmap.warp_player(dest_map, dest_x, dest_y)
-
                     PLAYER.fp.write("jump, " + dest_map + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             elif self.select_type == 'var_quiz':
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
@@ -3570,8 +3549,13 @@ class MessageWindow(Window):
                 self.sender.programCodeWindow.scrollY = 0
                 self.sender.programCodeWindow.scrollX = 0
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
-                    self.sender.send_event({"rollback": True, "index": self.sender.programCodeWindow.rollback_index-1})
-                    rollbackResult = self.sender.receive_json()
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            rollback = True,
+                            index = self.sender.programCodeWindow.rollback_index-1
+                        )
+                    )
+                    rollback_result = self.sender.receive_json()
                     player_history = self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index]
                     self.sender.programCodeWindow.linenum = player_history[1]
                     # 暗転
@@ -3585,7 +3569,7 @@ class MessageWindow(Window):
                     PLAYER.common_itembag = ItemBag()
 
                     # items = ast.literal_eval(config.get("game", "items"))
-                    for gvar_info in rollbackResult["gvars"]:
+                    for gvar_info in rollback_result["gvars"]:
                         PLAYER.common_itembag.add(
                             Item(
                                 gvar_info["name"], 
@@ -3595,10 +3579,10 @@ class MessageWindow(Window):
                         )
 
                     PLAYER.itembag = ItemBag()
-                    if len(rollbackResult["vars"]) != 0:
+                    if len(rollback_result["vars"]) != 0:
                         PLAYER.itembag.items.pop(0)
                     
-                    for i, variable_info_list in enumerate(rollbackResult["vars"]):
+                    for i, variable_info_list in enumerate(rollback_result["vars"]):
                         PLAYER.add_local_item_layer(
                             [
                                 Item(
@@ -3629,7 +3613,11 @@ class MessageWindow(Window):
 
                     MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
                 else:
-                    self.sender.send_event({"rollback": False})
+                    self.sender.send_event(
+                        Game2DebuggerEvent(
+                            rollback = False
+                        )
+                    )
                     self.sender.receive_json()
                     MSGWND.set("巻き戻しを取り止めました")
                 self.sender.programCodeWindow.rollback_index = None
@@ -4318,7 +4306,7 @@ class CharaExpression(Character):
         super().__init__(name, pos, direction, movetype, message)
         self.func = func
         self.comments = comments
-        self.linenum = None
+        self.linenum: int | None = None
         self.codeElementWindow_dict: dict[str, CodeElementWindow] = {line: CodeElementWindow(expr["expr"], (mapname, self.func, int(line), None)) for line, expr in comments.items()}
 
     def draw(self, screen, offset):
@@ -4834,6 +4822,23 @@ class CodeElementWindow(Window):
             PLAYER.codeElementWindow_index = 0
 
         return None
+
+    def get_latest_function(self, index: int):
+        if len(self.func_groups) <= index:
+            sys.exit(f"there is no function in layer index {index}")
+
+        if (func_warp_group := self.func_groups[index]) is None:
+            sys.exit(f"no function is found in layer index {index}")
+
+        latest_func_index = 0
+        if len(checked_funcs := PLAYER.checked_funcs.get(self.location, [])) > index:
+            latest_func_index = len(checked_funcs[index])
+
+        if len(func_warp_group) <= latest_func_index:
+            sys.exit(f"no {latest_func_index} function is not found in layer {index}")
+
+        return func_warp_group["func_warps"][latest_func_index]
+            
 
 #                                                                                                                                 
 # 88888888ba  88                                                               88888888888                                        
@@ -5712,10 +5717,10 @@ class ControllerGuideWindow(ScrollableWindow):
         else:
             self.draw_string(x, y, "cmd+q: quit game" if ISENGLISH else "cmd+q: ゲームを止める")
             y += self.FONT_SIZE + 4
-            if PLAYER.isFootActionValid:
+            if PLAYER.is_foot_action_valid:
                 self.draw_string(x, y, "f: action on foot" if ISENGLISH else "f: 足元へのアクション")
                 y += self.FONT_SIZE + 4
-            if PLAYER.isFowardActionValid:
+            if PLAYER.is_foward_action_valid:
                 self.draw_string(x, y, "space: action to forward" if ISENGLISH else "space: 前方へのアクション")
                 y += self.FONT_SIZE + 4
             self.draw_string(x, y, "move with shift: dash" if ISENGLISH else "shift押下中に移動: ダッシュ")
@@ -6083,7 +6088,7 @@ class EventSender:
             print(f"[Client] 接続失敗: {last_error}")
             raise TimeoutError(f"{host}:{port} に {wait_timeout:.1f} 秒以内に接続できませんでした。")
 
-    def send_event(self, event: dict):
+    def send_event(self, event: Game2DebuggerEvent):
         self.sock.sendall(json.dumps(event).encode() + b'\n')  # 改行区切りで複数送信可能
 
     def receive_json(self):
@@ -6095,7 +6100,7 @@ class EventSender:
                         raise ConnectionError("Connection closed by remote host.")
                     buffer += data.decode()
                     try:
-                        msg: SendEvent = json.loads(buffer)
+                        msg: Debugger2GameEvent = json.loads(buffer)
                         break  # 成功したら抜ける
                     except json.JSONDecodeError:
                         continue  # JSONがまだ途中なら続けて読む
@@ -6114,7 +6119,7 @@ class EventSender:
                     #     SMANAGER.stop_se("hp_warning")
                     return msg
                 
-                if msg["status"] == "rollback":
+                if msg["status"] == "rollback_accept":
                     self.programCodeWindow.set_rollback_mode()
                     MSGWND.set("Will you go back to rightly before blue-white line ?" if ISENGLISH else "水色の行の処理直前まで巻き戻しますか?", (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'rollback'))
                     return msg
@@ -6134,16 +6139,16 @@ class EventSender:
                                 "ccchara": PLAYER.ccchara, 
                                 "checked_funcs": PLAYER.checked_funcs.copy(), 
                                 "func": PLAYER.func,
-                                "isLoopStatementInBefore": PLAYER.isLoopStatementInBefore, 
+                                "is_before_loop_statement_in": PLAYER.is_before_loop_statement_in, 
                                 "logLists": PLAYER.log_lists.copy()
                             }
                         )
                     )
                     
-                    if 'skip' in msg or 'skipReturn' in msg or 'skipCond' in msg:
+                    if "loop_skip" in msg or 'skipReturn' in msg or "func_skip" in msg:
                         self.programCodeWindow.history_index_not_allowed_chosen_list.append(len(self.programCodeWindow.history))
                     
-                    PLAYER.isLoopStatementInBefore = False
+                    PLAYER.is_before_loop_statement_in = False
 
                 if "line" in msg:
                     self.programCodeWindow.update_code_line(msg["line"])
@@ -6204,7 +6209,7 @@ class EventSender:
                         # PLAYER.address_to_size.pop(memory_info["address"], None)
                 
                 if "type" in msg:
-                    PLAYER.isLoopStatementInBefore = True
+                    PLAYER.is_before_loop_statement_in = True
 
                 if ITEMWND:
                     ITEMWND.file_window.read_filelines()
