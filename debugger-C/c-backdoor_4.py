@@ -1618,6 +1618,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
         def reset_state(self):
             self.is_end = False
+            self.line_number: int = 0
+            self.next_line_number: int = 0
             self.line_loop_list: list[LoopLineInfo] = []
             self.dynamic_comment_handler_being_checked: list[DynamicCommentHandler] = []
             self.std_messages: list[str] = []
@@ -1751,7 +1753,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 return
 
             # ここでswitch文の下処理(defaultの場合)を行う
-            print("checked:", self.switch_expr_status_handler)
             if self.switch_expr_status_handler is not None and self.frame_num == self.next_frame_num:
                 if (matched_line := self.switch_expr_status_handler.get_matched_group_line()) is not None:
                     if self.next_line_number < matched_line:
@@ -2254,7 +2255,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             if isinstance(expr_status_handler, SwitchStatusHandler):
                 self.switch_expr_status_handler = expr_status_handler
-                print("checking:", self.switch_expr_status_handler)
 
         # 次の処理の内容を取得する
         def set_expr_status(self, expr: NonVarComment, line: int):
@@ -2433,7 +2433,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 if check_result == "correct":
                     if (dynamic_comment_handler := self.dynamic_comment_handler_being_checked[-1] if len(self.dynamic_comment_handler_being_checked) else None) is not None:
                         send_event["return_value"] = current_expr_status_handler.result
+                        send_event["items"] = self.vars_tracker.get_value()
                         dynamic_comment_handler.set_function_comment(current_expr_status_handler.result)
+                        
 
                     self.expr_status_handler_dict_by_frame.pop(-1)
 
@@ -2573,10 +2575,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     index_scanned_currently_before = current_comment_handler.index_scanned_currently
 
                     while True:
-                        if self.analyze_frame():
-                            if index_scanned_currently_before + 1 == current_comment_handler.index_scanned_currently:
-                                break
+                        if self.analyze_frame(back_line_number):
                             continue
+
+                        if index_scanned_currently_before < current_comment_handler.index_scanned_currently:
+                            break
 
                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
                             break
@@ -2607,7 +2610,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     
             return None
 
-        def analyze_frame(self) -> int: # Literal[PROGRESS, CONTINUE]
+        def analyze_frame(self, line_number_to_back: int | None = None) -> int: # Literal[PROGRESS, CONTINUE]
             if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
                 if (event := self.event_receiver()) is None:
                     return CONTINUE
@@ -2624,6 +2627,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             )
                         )
                         return CONTINUE
+                    
                 else:
                     self.event_sender(
                         Debugger2GameEvent(
@@ -2634,7 +2638,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     return CONTINUE
 
             self.step_conditionally()
-            self.vars_checker()
+
+            if line_number_to_back != self.line_number:
+                self.vars_checker()
 
             # if not len(self.expr_status_handler_list):
             #     return PROGRESS
@@ -2650,7 +2656,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             #     return PROGRESS
             
             # current_expr_status_handler.required_var_list = None
-
             return PROGRESS
 
         def event_receiver(self):

@@ -570,8 +570,8 @@ class MapInfo:
         for chara_return in self.chara_returns:
             characters.append(
                 {
-                    "type": "CHARARETURN", 
-                    "name": "15161" if chara_return.func_name else "15084", 
+                    "type": "CHARARETURN",
+                    "name": "15161" if chara_return.func_name == "main" else "15084", 
                     "x": int(chara_return.local_pos[1]+self.offset["x"]), 
                     "y": int(chara_return.local_pos[0]+self.offset["y"]),
                     "dir": 0, 

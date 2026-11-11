@@ -2634,7 +2634,7 @@ class Player(Character):
                         move = self.move_history.pop(-1)
                         self.itembag.items.pop(-1)
                         self.remove_itemvalue()
-                        self.add_log(f"Came back to {received_event["backToFunc"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{received_event["backToFunc"]}に戻りました")
+                        self.add_log(f"Came back to {move["func"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{move["func"]}に戻りました")
                         
                         for variable_info in received_event["items"]:
                             if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
@@ -3494,6 +3494,7 @@ class MessageWindow(Window):
                     dest_map = fieldmap.name
                     dest_x = skip_result["next_func"]["x"]
                     dest_y = skip_result["next_func"]["y"]
+                    func_name = PLAYER.func
                     PLAYER.func = skip_result["next_func"]["name"]
 
                     PLAYER.append_move5History(
@@ -3513,7 +3514,7 @@ class MessageWindow(Window):
                             x = PLAYER.x,
                             y = PLAYER.y,
                             line = skip_result["from_line"],
-                            func = skip_result["next_func"]["name"]
+                            func = func_name
                         )
                     )
                     
