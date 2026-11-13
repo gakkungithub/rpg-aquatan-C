@@ -9,6 +9,8 @@ type ExprDescriptionPart = (
     | StructVariablePart
     | ArrayVariablePart
     | MacroPart
+    | UnaryExprPart
+    | AssignmentExprPart
 )
 
 class FuncReference(TypedDict):
@@ -38,6 +40,20 @@ class ArrayVariablePart(TypedDict):
 class MacroPart(TypedDict):
     macro: str
     replacement: ExprIdPart | TextPart
+
+class UnaryExprPart(TypedDict):
+    operator: Literal["++", "--"]
+    operand_id: int
+    is_front_operator: bool
+
+class AssignmentExprPart(TypedDict):
+    operator: Literal[
+        "=",
+        "+=", "-=", "*=", "/=", "%=",
+        "&=", "|=", "^=", "<<=", ">>="
+    ]
+    left_operand_id: int
+    right_operand_id: int
 
 '''
 関数コメントはexprリスト, descriptionリストのどちらに含まれているか、is_customの真偽によってexpr_descriptionによるコメントの構築の仕方を変える
@@ -147,7 +163,8 @@ class SwitchCaseComment(TypedDict):
 # # ControlFlowInfo
 # # break, continueまたはgotoラベルの行番をキーとして登録する (gotoラベルはまだ対応していない。今後余裕があれば対応する)
 class ControlFlowComment(TypedDict):
-    type: Literal["break"] | Literal["continue"]
+    type: Literal["break", "continue"]
+    condition_line: int
 
 # # ExpressionExecutionInfo
 # # expressionの行番をキーとして登録する

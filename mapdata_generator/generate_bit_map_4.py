@@ -16,6 +16,7 @@ import_lib.ensure_package("astar", "astar.search")
 
 import pydot
 import numpy as np
+from numpy.typing import NDArray
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 from astar.search import AStar, Tile
@@ -255,14 +256,19 @@ class ExecutionCommentHandler:
 
         self.switch_condition_comments[line]["default_index"] = index
 
-    def register_control_flow_comment(self, line: int, type: Literal["break"] | Literal["continue"]):
+    def register_control_flow_comment(self, execution_info: ControlFlowInfo):
+        line = execution_info["line"]
+        type = execution_info["type"]
+        condition_line = execution_info["condition_line"]
+
         if line <= 0:
             sys.exit("line has to be 1 or bigger integer")
         if line in self.control_flow_comments:
             sys.exit("some comments are already registered in the line")
 
         self.control_flow_comments[line] = ControlFlowComment(
-            type=type
+            type = type,
+            condition_line = condition_line
         )
 
     def register_expression_comment(self, line: int, expression: list[Comment]):
@@ -439,21 +445,20 @@ class MapInfo:
         self.event_map[pos[0], pos[1]] = self.ISEVENT
 
     # 条件文キャラの生成
-    # self.map_info.setCharaCheckCondition(self.func_name, path[i], 0, execution_info, comment_window_info, expr_node_info=self.getExprNodeInfo(exprNodeID))
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, execution_info: ExecutionInfo, comment_window_info: TempCommentWindowInfo):
         absolute_pos = (pos[0] - self.offset["y"], pos[1] - self.offset["x"])
 
         self.chara_checkConditions.append(CharaCheckCondition(func_name, absolute_pos, dir, execution_info, comment_window_info))
         self.event_map[pos[0], pos[1]] = self.ISEVENT
 
-    def addExpressionToCharaExpression(self, crntRoomID: str, detail: TempExpressionDetail, line: int, func_name: str):
-        if crntRoomID not in self.chara_expressions:
+    def addExpressionToCharaExpression(self, crnt_room_nodeID: str, detail: TempExpressionDetail, line: int, func_name: str):
+        if crnt_room_nodeID not in self.chara_expressions:
             # まだ現在の部屋の計算式キャラが作られていなかったら作る
-            local_y, local_x, height, width = self.room_info[crntRoomID]["room_size"]
+            local_y, local_x, height, width = self.room_info[crnt_room_nodeID]["room_size"]
             y, x = self.pick_random_space_pos_from_map(self.event_map[local_y+self.offset["y"]+1:local_y+self.offset["y"]+height-1, local_x+self.offset["x"]+1:local_x+self.offset["x"]+width-1])
             self.event_map[local_y+self.offset["y"]+y+1, local_x+self.offset["x"]+x+1] = self.ISEVENT
-            self.chara_expressions[crntRoomID] = CharaExpression((local_y+y+1, local_x+x+1), func_name)
-        self.chara_expressions[crntRoomID].detail_by_line[line] = detail
+            self.chara_expressions[crnt_room_nodeID] = CharaExpression((local_y+y+1, local_x+x+1), func_name)
+        self.chara_expressions[crnt_room_nodeID].detail_by_line[line] = detail
 
     # マップデータの生成
     def mapdata_generator(self, program_name: str, gvar_str: str, floor_map, is_universal: bool, line_info: dict[str, LineInfo], wall_chip_type: int):
@@ -513,7 +518,7 @@ class MapInfo:
             hover = temp_comment_window_info["hover"],
             func_groups = [
                 FuncWarpGroup(
-                    name = func_group["name"], 
+                    name = func_group["name"],
                     func_warps = self.create_func_warp(func_group["func"])
                 ) if func_group else None
                 for func_group in temp_comment_window_info["func_groups"]
@@ -525,7 +530,7 @@ class MapInfo:
         func_groups: list[FuncWarpGroup | None] = []
         self.create_treasure_func_warp(treasure.var_info["varNode"], func_groups)
 
-        treasure_event = TreasureInfo(
+        treasure_event = TreasureData(
             type = "TREASURE",
             x = int(treasure.local_pos[1]+self.offset["x"]),
             y = int(treasure.local_pos[0]+self.offset["y"]),
@@ -539,49 +544,51 @@ class MapInfo:
         return treasure_event
 
     def writeMapJson(self, program_name: str, bit_map, is_universal: bool, default_mapchip: int, floor_mapchip: int):
-        events = []
-        characters = []
+        events: list[MoveEventData | TreasureData | SDoorData] = []
+        characters: list[CharaReturnData | CharaCheckConditionData | CharaExpressionData] = []
 
         # カラーユニバーサルデザインの色
         universal_colors = [15000, 15001, 15089, 15120, 15157, 15162, 15164]
 
         # 変数アイテム宝箱の情報
-        for treasure in self.treasures:
-            events.append(self.create_treasure_event_info(treasure))
+        events.extend(
+            self.create_treasure_event_info(treasure)
+            for treasure in self.treasures
+        )
 
         # ワープイベントの情報
-        for move_event in self.move_events:
-            events.append(
-                {
-                    "type": "MOVE", 
-                    "x": int(move_event.local_from_pos[1]+self.offset["x"]), 
-                    "y": int(move_event.local_from_pos[0]+self.offset["y"]),
-                    "func": move_event.func_name,
-                    "dest_x": int(move_event.local_to_pos[1]+self.offset["x"]), 
-                    "dest_y": int(move_event.local_to_pos[0]+self.offset["y"]), 
-                    "dest_map": program_name,
-                    "execution_info": move_event.execution_info,
-                    "detail": self.convert_to_comment_window_info(move_event.comment_window_info),
-                    "mapchip": move_event.mapchip
-                }
+        events.extend(
+            TreasureData(
+                type = "MOVE", 
+                x = int(move_event.local_from_pos[1]+self.offset["x"]), 
+                y = int(move_event.local_from_pos[0]+self.offset["y"]),
+                func = move_event.func_name,
+                dest_x = int(move_event.local_to_pos[1]+self.offset["x"]), 
+                dest_y = int(move_event.local_to_pos[0]+self.offset["y"]), 
+                dest_map = program_name,
+                execution_info = move_event.execution_info,
+                detail = self.convert_to_comment_window_info(move_event.comment_window_info),
+                mapchip = move_event.mapchip
             )
+            for move_event in self.move_events
+        )
 
         # 関数の戻りに応じたキャラクターの情報
-        for chara_return in self.chara_returns:
-            characters.append(
-                {
-                    "type": "CHARARETURN",
-                    "name": "15161" if chara_return.func_name == "main" else "15084", 
-                    "x": int(chara_return.local_pos[1]+self.offset["x"]), 
-                    "y": int(chara_return.local_pos[0]+self.offset["y"]),
-                    "dir": 0, 
-                    "movetype": 1, 
-                    "message": ("Congraturations !! Here is A Goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!") if chara_return.func_name == "main" else (f"This is the end of function {chara_return.func_name} !!" if self.is_english else f"ここが {chara_return.func_name} の終了地点です!!"), 
-                    "execution_info": chara_return.execution_info,
-                    "detail": self.convert_to_comment_window_info(chara_return.comment_window_info),
-                    "func": chara_return.func_name
-                }
-            )
+        characters.extend(
+            CharaReturnData(
+                type = "CHARARETURN",
+                name = "15161" if chara_return.func_name == "main" else "15084", 
+                x = int(chara_return.local_pos[1]+self.offset["x"]), 
+                y = int(chara_return.local_pos[0]+self.offset["y"]),
+                dir = 0, 
+                movetype = 1, 
+                message = ("Congraturations !! Here is A Goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!") if chara_return.func_name == "main" else (f"This is the end of function {chara_return.func_name} !!" if self.is_english else f"ここが {chara_return.func_name} の終了地点です!!"), 
+                execution_info = chara_return.execution_info,
+                detail = self.convert_to_comment_window_info(chara_return.comment_window_info),
+                func = chara_return.func_name
+            ) 
+            for chara_return in self.chara_returns
+        )
 
         # 状態遷移のチェックキャラクターの情報
         for chara_checkCondition in self.chara_checkConditions:
@@ -602,73 +609,74 @@ class MapInfo:
                 move_dir_list.append(3)
 
             move_dir = random.choice(move_dir_list)
+            
             characters.append(
-                {
-                    "type": "CHARACHECKCONDITION", 
-                    "name": str(color), 
-                    "x": pos[1], 
-                    "y": pos[0], 
-                    "dir": chara_checkCondition.dir, 
-                    "moveDir": move_dir,
-                    "movetype": 1, 
-                    "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", 
-                    "func": chara_checkCondition.func,
-                    "execution_info": chara_checkCondition.execution_info, 
-                    "detail": self.convert_to_comment_window_info(chara_checkCondition.comment_window_info)
-                }
-            )
-
-        for chara_expression in self.chara_expressions.values():
-            detail_by_line: dict[int, ExpressionDetail] = {}
-            for firstLine, detail in chara_expression.detail_by_line.items():
-                detail_by_line[firstLine] = ExpressionDetail(
-                    expr = self.convert_to_comment_window_info(detail["expr"]), 
-                    execution_info = detail["execution_info"],
-                    vars = [
-                        VarReference(
-                            name = var_reference[0], 
-                            line = var_reference[1]
-                        )
-                        for var_reference in detail["vars"]
-                    ]
+                CharaCheckConditionData(
+                    type = "CHARACHECKCONDITION", 
+                    name = str(color), 
+                    x = pos[1], 
+                    y = pos[0], 
+                    dir = chara_checkCondition.dir, 
+                    moveDir = move_dir,
+                    movetype = 1, 
+                    message = "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", 
+                    func = chara_checkCondition.func,
+                    execution_info = chara_checkCondition.execution_info, 
+                    detail = self.convert_to_comment_window_info(chara_checkCondition.comment_window_info)
                 )
+            )
 
-            characters.append(
-                {
-                    "type": "CHARAEXPRESSION", 
-                    "name": "15165", 
-                    "x": int(chara_expression.local_pos[1]+self.offset["x"]), 
-                    "y": int(chara_expression.local_pos[0]+self.offset["y"]), 
-                    "dir": 0,
-                    "movetype": 1, 
-                    "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", 
-                    "func": chara_expression.func, 
-                    "comments": detail_by_line
+        # 計算式キャラを追加
+        characters.extend(
+            CharaExpressionData(
+                type = "CHARAEXPRESSION", 
+                name = "15165", 
+                x = int(chara_expression.local_pos[1]+self.offset["x"]), 
+                y = int(chara_expression.local_pos[0]+self.offset["y"]), 
+                dir = 0,
+                movetype = 1, 
+                message = "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", 
+                func = chara_expression.func, 
+                comments = {
+                    firstLine: ExpressionDetail(
+                        expr = self.convert_to_comment_window_info(detail["expr"]), 
+                        execution_info = detail["execution_info"],
+                        vars = [
+                            VarReference(
+                                name = var_reference[0], 
+                                line = var_reference[1]
+                            )
+                            for var_reference in detail["vars"]
+                        ]
+                    )
+                    for firstLine, detail in chara_expression.detail_by_line.items()
                 }
             )
+            for chara_expression in self.chara_expressions.values()
+        )
 
         # 入口用のドアの情報 (開けようとする時に行数を確認する)
-        for door in self.doors:
-            events.append(
-                {
-                    "type": "SDOOR", 
-                    "x": int(door.local_pos[1]+self.offset["x"]), 
-                    "y": int(door.local_pos[0]+self.offset["y"]), 
-                    "door_name": door.name, 
-                    "dir": door.dir
-                }
+        events.extend(
+            SDoorData(
+                type = "SDOOR",
+                x = int(door.local_pos[1]+self.offset["x"]), 
+                y = int(door.local_pos[0]+self.offset["y"]), 
+                door_name = door.name, 
+                dir = door.dir
             )
+            for door in self.doors
+        )
 
         with open(f'{DATA_DIR}/{program_name}/{program_name}.json', 'w') as f:
-            fileContent = {
-                "row": bit_map.shape[0], 
-                "col": bit_map.shape[1], 
-                "default": default_mapchip, 
-                "floor": floor_mapchip, 
-                "map": bit_map.astype(int).tolist(), 
-                "characters": characters, 
-                "events": events
-            }
+            fileContent = MapData(
+                row = bit_map.shape[0], 
+                col = bit_map.shape[1], 
+                default = default_mapchip, 
+                floor = floor_mapchip, 
+                map = bit_map.astype(int).tolist(), 
+                characters = characters, 
+                events = events
+            )
 
             self.check_data_format_is_true(fileContent)
             json.dump(fileContent, f) 
@@ -822,7 +830,7 @@ class GenBitMap:
             var_info: dict[str, VarInfo], 
             expr_node_info: dict[str, ExprNodeInfo], 
             room_size_info: dict[str, dict[str, int]], 
-            gotoRoom_list: dict[str, dict[str, GotoRoomInfo]], 
+            goto_room_list: dict[str, dict[str, GotoRoomInfo]], 
             execution_info: dict[str, ExecutionInfo], 
             is_english: bool
         ):
@@ -833,9 +841,9 @@ class GenBitMap:
         self.var_info = var_info
         self.expr_node_info = expr_node_info
         self.room_size_info = room_size_info
-        self.floor_map = np.ones((20,20))
-        self.only_room_map = np.ones((20,20))
-        self.gotoRoom_list: dict[str, dict[str, GotoRoomInfo]] = gotoRoom_list # gotoラベルによるワープゾーンを作るための変数
+        self.floor_map: NDArray[np.float64] = np.ones((20,20))
+        self.only_room_map: NDArray[np.float64] = np.ones((20,20))
+        self.goto_room_list: dict[str, dict[str, GotoRoomInfo]] = goto_room_list # gotoラベルによるワープゾーンを作るための変数
         self.map_info = MapInfo(execution_info, is_english)
         self.func_name: str = ""
         self.is_english = is_english
@@ -844,18 +852,18 @@ class GenBitMap:
         # 上方向
         top = np.argmax(~np.all(self.floor_map == 1, axis=1))
         # 下方向（反転して調べる）
-        bottom = self.floor_map.shape[0] - np.argmax(~np.all(self.floor_map[::-1] == 1, axis=1)) - 1
+        bottom: np.intp = self.floor_map.shape[0] - np.argmax(~np.all(self.floor_map[::-1] == 1, axis=1)) - 1
         # 左方向
         left = np.argmax(~np.all(self.floor_map == 1, axis=0))
         # 右方向
-        right = self.floor_map.shape[1] - np.argmax(~np.all(self.floor_map[:, ::-1] == 1, axis=0)) - 1
+        right: np.intp = self.floor_map.shape[1] - np.argmax(~np.all(self.floor_map[:, ::-1] == 1, axis=0)) - 1
         self.floor_map = self.floor_map[top-self.PADDING:bottom+self.PADDING2+1, left-self.PADDING:right+self.PADDING2+1]
         self.map_info.offset["y"] -= top-self.PADDING
         self.map_info.offset["x"] -= left-self.PADDING
 
     def set_mapchip(self, program_name: str, line_info_dict: dict[str, LineInfo], is_universal: bool):
         self.trim_map_padding()
-        wallFlags = np.zeros(8, dtype=int)
+        wallFlags: NDArray[np.int_] = np.zeros(8, dtype=int)
         height, width = self.floor_map.shape
         # ここで壁パネルの種類を選択する
         wall_chip_type = random.randint(0, 3)
@@ -1067,16 +1075,16 @@ class GenBitMap:
     def set_gvar(self):
         gvar_string_list: list[str] = []
 
-        for gvarNodeID in self.gvar_info:
-            varName = self.getNodeLabel(gvarNodeID)
-            var_info = self.var_info[gvarNodeID]
-            gvar_string_list.append(f"'{varName}' : {var_info["varNode"]}")
+        for gvar_nodeID in self.gvar_info:
+            var_name = self.get_node_label(gvar_nodeID)
+            var_info = self.var_info[gvar_nodeID]
+            gvar_string_list.append(f"'{var_name}' : {var_info["varNode"]}")
 
         return ''.join(["{", *gvar_string_list, "}"])
 
     def track_function_entry(self, func_info: FuncInfo):
         nodeID = func_info.start_nodeID
-        self.createRoom(nodeID)
+        self.create_room(nodeID)
         
         # 関数呼び出しのワープ情報を更新
         # キャラクターではなくなるが、この情報は流用可能
@@ -1087,15 +1095,15 @@ class GenBitMap:
             line = func_info.start
         )
 
-        for to_nodeID, edgeLabel in self.getNextNodeInfo(nodeID):
+        for to_nodeID, edgeLabel in self.get_next_node_info(nodeID):
             self.track_function_body(nodeID, to_nodeID)
         
-        for labelName, gotoRoom in self.gotoRoom_list[self.func_name].items():
+        for labelName, goto_room in self.goto_room_list[self.func_name].items():
             # gotoラベルの処理は後々考える
             sys.exit("our game still cannot accept c programs which have goto labels")
 
-            to_nodeID = gotoRoom["to_nodeID"]
-            fromNodeID_list = gotoRoom["fromNodeID"]
+            to_nodeID = goto_room["to_nodeID"]
+            fromNodeID_list = goto_room["fromNodeID"]
             for fromNodeID in fromNodeID_list:
                 self.map_info.setWarpZone(
                     fromNodeID, 
@@ -1118,14 +1126,14 @@ class GenBitMap:
                 self.func_name = func_name
                 self.track_function_entry(next_func_info)
 
-    # 繰り返し文の終わりだけはgetNextNodeInfoメソッドではなく、next_node_info.get(nodeID, [])で取得する
-    def track_function_body(self, crntRoomID: str, nodeID: str, condition_comment_window_info: TempCommentWindowInfo | None = None):
+    # 繰り返し文の終わりだけはget_next_node_infoメソッドではなく、next_node_info.get(nodeID, [])で取得する
+    def track_function_body(self, crnt_room_nodeID: str, nodeID: str, condition_comment_window_info: TempCommentWindowInfo | None = None):
         # if文とdo_while文とswitch文
-        if self.getNodeShape(nodeID) == 'diamond':
+        if self.get_node_shape(nodeID) == 'diamond':
             next_track_list: list[tuple[str, str, TempCommentWindowInfo | None]] = []
 
-            if self.getNodeLabel(nodeID) == 'if':
-                to_nodeID_info = self.getNextNodeInfo(nodeID)
+            if self.get_node_label(nodeID) == 'if':
+                to_nodeID_info = self.get_next_node_info(nodeID)
 
                 if len(to_nodeID_info) == 0:
                     return
@@ -1133,7 +1141,7 @@ class GenBitMap:
                 if len(to_nodeID_info) != 2:
                     sys.exit("number of nodes connected from an if node has to be 2")
 
-                node_shapes = tuple([self.getNodeShape(to_nodeID) for to_nodeID, _ in to_nodeID_info])
+                node_shapes = tuple([self.get_node_shape(to_nodeID) for to_nodeID, _ in to_nodeID_info])
                 # (circle, diamond), (circle, doublecircle), (circle, terminator)
                 if node_shapes[1] == "circle":
                     to_nodeID_info.reverse()
@@ -1145,10 +1153,10 @@ class GenBitMap:
                     sys.exit("a wrong node for false condition is included")
                 
                 to_nodeID = to_nodeID_info[0][0]
-                self.createRoom(to_nodeID, crntRoomID)
+                self.create_room(to_nodeID, crnt_room_nodeID)
                 
                 # 今までのif条件を繋げる
-                if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+                if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                     sys.exit(f"flowchart node of a true condition in if statement is not found")
 
                 func_reference_group = FuncReferenceGroup(
@@ -1159,9 +1167,9 @@ class GenBitMap:
                 comment_window_info = self.create_comment_window_info(
                     "cond-check",
                     detail = [
-                        [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is true"] 
+                        [f"{self.get_node_label(nodeID)}", f"of line {expr_node_info["line"]} is true"] 
                         if self.is_english else 
-                        [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が真"]
+                        [f"{expr_node_info["line"]}行目の{self.get_node_label(nodeID)}文の", "が真"]
                     ], 
                     hover = [
                         expr_node_info["comments"]
@@ -1177,8 +1185,8 @@ class GenBitMap:
                     expr_node_info["comments"]
                 )
                     
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     to_nodeID, 
                     comment_window_info
                 ) # 条件文の計算式を確かめる
@@ -1187,8 +1195,8 @@ class GenBitMap:
 
                 to_nodeID = to_nodeID_info[1][0]
 
-                self.createRoom(to_nodeID, crntRoomID)
-                if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+                self.create_room(to_nodeID, crnt_room_nodeID)
+                if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                     sys.exit("false node in if statement is not found")
 
                 # else if の条件への繋がり
@@ -1197,9 +1205,9 @@ class GenBitMap:
                     comment_window_info = self.create_comment_window_info(
                         "cond-check", 
                         detail = [
-                            [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
+                            [f"{self.get_node_label(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
                             if self.is_english else 
-                            [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が偽"]
+                            [f"{expr_node_info["line"]}行目の{self.get_node_label(nodeID)}文の", "が偽"]
                         ], 
                         hover = [
                             expr_node_info["comments"]
@@ -1208,15 +1216,15 @@ class GenBitMap:
                         base_comment_window_info=condition_comment_window_info
                     )
                 
-                    next_track_list.append((crntRoomID, to_nodeID, comment_window_info))
+                    next_track_list.append((crnt_room_nodeID, to_nodeID, comment_window_info))
                 # else
                 elif node_shapes[1] == "doublecircle":
                     comment_window_info = self.create_comment_window_info(
                         "cond-check", 
                         detail=[
-                            [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
+                            [f"{self.get_node_label(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
                             if self.is_english else 
-                            [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が偽"]
+                            [f"{expr_node_info["line"]}行目の{self.get_node_label(nodeID)}文の", "が偽"]
                         ], 
                         hover=[
                             expr_node_info["comments"]
@@ -1225,8 +1233,8 @@ class GenBitMap:
                         base_comment_window_info=condition_comment_window_info
                     )
 
-                    self.createPath(
-                        crntRoomID, 
+                    self.create_path(
+                        crnt_room_nodeID, 
                         to_nodeID, 
                         comment_window_info
                     ) # 条件文の計算式を確かめる
@@ -1237,9 +1245,9 @@ class GenBitMap:
                     comment_window_info = self.create_comment_window_info(
                         "cond-check", 
                         detail = [
-                            [f"{self.getNodeLabel(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
+                            [f"{self.get_node_label(nodeID)}", f"of line {expr_node_info["line"]} is false"] 
                             if self.is_english else 
-                            [f"{expr_node_info["line"]}行目の{self.getNodeLabel(nodeID)}文の", "が偽"]
+                            [f"{expr_node_info["line"]}行目の{self.get_node_label(nodeID)}文の", "が偽"]
                         ], 
                         hover = [
                             expr_node_info["comments"]
@@ -1248,29 +1256,27 @@ class GenBitMap:
                         base_comment_window_info=condition_comment_window_info
                     )
 
-                    # self.track_function_body(crntRoomID, to_nodeID, comment_window_info)
-                    next_track_list.append((crntRoomID, to_nodeID, comment_window_info))
+                    next_track_list.append((crnt_room_nodeID, to_nodeID, comment_window_info))
+            elif self.get_node_label(nodeID) == 'do':
+                self.create_room(nodeID, crnt_room_nodeID)
 
-            elif self.getNodeLabel(nodeID) == 'do':
-                self.createRoom(nodeID, crntRoomID)
-
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     nodeID, 
                     None
                 )
 
-                to_nodeID_info = self.getNextNodeInfo(nodeID)
+                to_nodeID_info = self.get_next_node_info(nodeID)
 
                 if len(to_nodeID_info) == 0:
                     return
                 
-                if len(to_nodeID_info) != 2 or (self.getNodeShape(to_nodeID_info[0][0]), self.getNodeShape(to_nodeID_info[1][0])) not in ("circle", "doublecircle"):
+                if len(to_nodeID_info) != 2 or (self.get_node_shape(to_nodeID_info[0][0]), self.get_node_shape(to_nodeID_info[1][0])) not in (("circle", "doublecircle"), ("doublecircle", "circle")):
                     sys.exit("wrong number or type nodes are connected from a do-while condition node")
 
-                crntRoomID = nodeID
+                crnt_room_nodeID = nodeID
 
-                if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+                if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                     sys.exit(f"flowchart node of a false condition in do-while statement is not found")
                 
                 func_reference_group = FuncReferenceGroup(   
@@ -1279,16 +1285,16 @@ class GenBitMap:
                 ) if len(expr_node_info["funcs"]) else None
 
                 for to_nodeID, edgeLabel in to_nodeID_info:
-                    self.createRoom(to_nodeID, crntRoomID)
+                    self.create_room(to_nodeID, crnt_room_nodeID)
 
-                    if self.getNodeShape(to_nodeID) == 'circle':
+                    if self.get_node_shape(to_nodeID) == 'circle':
                         self.map_info.execution_comment_handler.register_do_while_condition_comment(
                             self.map_info.execution_info[to_nodeID]["line"], 
                             expr_node_info["comments"]
                         )
 
                         self.map_info.setWarpZone(
-                            crntRoomID, 
+                            crnt_room_nodeID, 
                             to_nodeID,
                             self.create_comment_window_info(
                                 "cond-check",
@@ -1306,8 +1312,8 @@ class GenBitMap:
                         )
                         
                     else: # double circle node (while false)
-                        self.createPath(
-                            crntRoomID, 
+                        self.create_path(
+                            crnt_room_nodeID, 
                             to_nodeID, 
                             self.create_comment_window_info(
                                 "cond-check",
@@ -1324,17 +1330,16 @@ class GenBitMap:
                         )
                     
                     next_track_list.append((to_nodeID, to_nodeID, None))
-
             else: # switch
-                if (switch_expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+                if (switch_expr_node_info := self.get_expr_node_info(nodeID)) is None:
                     sys.exit("flowchart node of a switch statement condition is not found")
                 
-                to_nodeID_info = self.getNextNodeInfo(nodeID)
+                to_nodeID_info = self.get_next_node_info(nodeID)
 
                 if len(to_nodeID_info) == 0:
                     return
 
-                if any(self.getNodeShape(to_nodeID) != "invtriangle" for to_nodeID, _ in to_nodeID_info):
+                if any(self.get_node_shape(to_nodeID) != "invtriangle" for to_nodeID, _ in to_nodeID_info):
                     sys.exit("wrong type nodes are connected from a switch condition node")
 
                 self.map_info.execution_comment_handler.register_switch_condition_comment(
@@ -1354,7 +1359,7 @@ class GenBitMap:
                 case_group_list: list[tuple[str, list[ExprNodeInfo], int | None]] = []
 
                 for to_nodeID, _ in to_nodeID_info:
-                    if self.getNodeLabel(to_nodeID) == "end":
+                    if self.get_node_label(to_nodeID) == "end":
                         end_nodeID = to_nodeID
                         continue
 
@@ -1364,7 +1369,7 @@ class GenBitMap:
                         if (temp_node_info := self.nextNodeInfo.get(to_nodeID, None)) is None:
                             break
                         temp_nodeID, _ = temp_node_info[0]
-                        expr_node_info = self.getExprNodeInfo(to_nodeID)
+                        expr_node_info = self.get_expr_node_info(to_nodeID)
 
                         # caseラベルノード
                         if expr_node_info is not None:
@@ -1374,7 +1379,7 @@ class GenBitMap:
                             if has_default:
                                 sys.exit("default label cannot be overlapped")
 
-                            default_label = self.getNodeLabel(to_nodeID)
+                            default_label = self.get_node_label(to_nodeID)
                             if len(default_label) < 4:
                                 sys.exit("default label for switch statement is not found")
                             split_label_str = default_label[1:-1].split(',')
@@ -1387,7 +1392,7 @@ class GenBitMap:
                                 sys.exit("line of default label is not found")
                             has_default = True
 
-                        if self.getNodeShape(temp_nodeID) != 'invtriangle':
+                        if self.get_node_shape(temp_nodeID) != 'invtriangle':
                             break
 
                         to_nodeID = temp_nodeID
@@ -1474,16 +1479,16 @@ class GenBitMap:
                         func_reference_group = func_reference_group
                     )
 
-                    self.createRoom(to_nodeID, crntRoomID)
+                    self.create_room(to_nodeID, crnt_room_nodeID)
 
                     self.map_info.setWarpZone(
-                        crntRoomID,
+                        crnt_room_nodeID,
                         to_nodeID, 
                         comment_window_info, 
                         self.func_name, 
                     )
 
-                    in_case_nodeID_info = self.getNextNodeInfo(to_nodeID)
+                    in_case_nodeID_info = self.get_next_node_info(to_nodeID)
                     if len(in_case_nodeID_info) != 1:
                         sys.exit("number of child nodes connected from case node has to be 1")
 
@@ -1506,13 +1511,13 @@ class GenBitMap:
                     )
 
                     self.map_info.setWarpZone(
-                        crntRoomID, 
+                        crnt_room_nodeID, 
                         end_nodeID, 
                         comment_window_info, 
                         self.func_name, 
                     )
 
-                    in_case_nodeID_info = self.getNextNodeInfo(end_nodeID)
+                    in_case_nodeID_info = self.get_next_node_info(end_nodeID)
                     if len(in_case_nodeID_info) != 1:
                         sys.exit("number of child nodes connected from case node has to be 1")
 
@@ -1524,8 +1529,8 @@ class GenBitMap:
             return
 
         # if文の終点でワープゾーンを作る
-        elif self.getNodeShape(nodeID) == 'terminator':
-            to_nodeID_info = self.getNextNodeInfo(nodeID)
+        elif self.get_node_shape(nodeID) == 'terminator':
+            to_nodeID_info = self.get_next_node_info(nodeID)
 
             if len(to_nodeID_info) != 1:
                 sys.exit("number of child nodes connected from a terminator node has to be 1")
@@ -1535,14 +1540,14 @@ class GenBitMap:
             next_of_if_end_conclusion_node_info: list[tuple[str, str]] | None = None
             # 今まではifの終了ごとにワープゾーンを作っていたが、ifの終了が連続する場合に対応できなかったので、連続するノードは飛ばすようにした
             while True:
-                # ifの終点ノードは再び通ることが必要な場合が存在するので、ノード情報をポップしてしまうgetNextNodeInfoメソッドは使わない
+                # ifの終点ノードは再び通ることが必要な場合が存在するので、ノード情報をポップしてしまうget_next_node_infoメソッドは使わない
                 if (next_of_if_end_conclusion_node_info := self.nextNodeInfo.get(to_nodeID, None)) is None:
                     break
                 if len(next_of_if_end_conclusion_node_info) != 1:
                     sys.exit("number of nodes which are derived from a if-end conclusion node has to be 1")
                 next_nodeID, _ = next_of_if_end_conclusion_node_info[0]
-                if self.getNodeShape(next_nodeID) != 'terminator':
-                    self.createRoom(to_nodeID, crntRoomID)
+                if self.get_node_shape(next_nodeID) != 'terminator':
+                    self.create_room(to_nodeID, crnt_room_nodeID)
                     break
                 # if-endノードの次は同じ階層のif-endノードをまとめるノードに繋がっている
                 if (if_end_conclusion_node_info := self.nextNodeInfo.get(next_nodeID, None)) is None:
@@ -1552,7 +1557,7 @@ class GenBitMap:
                 to_nodeID, _ = if_end_conclusion_node_info[0]
 
             self.map_info.setWarpZone(
-                crntRoomID, 
+                crnt_room_nodeID, 
                 to_nodeID, 
                 condition_comment_window_info, 
                 self.func_name,
@@ -1562,25 +1567,35 @@ class GenBitMap:
             '''
             next_of_if_end_conclusion_node_infoがある場合 = if文の終了ノード以降のノードを初めて通る場合なので、そこからASTのトラッキングを再開する
             二回目以降(他のif条件でこの終了ノードを辿る時)にまたnext_of_if_end_conclusion_node_infoが存在すると、上の繰り返し処理で再び同じ部屋を作ってしまうので、
-            next_of_if_end_conclusion_node_infoを取得したto_nodeIDをgetNextNodeInfoにかけて再びそのnext_of_if_end_conclusion_node_infoを取得できないようにする
+            next_of_if_end_conclusion_node_infoを取得したto_nodeIDをget_next_node_infoにかけて再びそのnext_of_if_end_conclusion_node_infoを取得できないようにする
             '''
             if next_of_if_end_conclusion_node_info is not None:
-                self.track_function_body(to_nodeID, self.getNextNodeInfo(to_nodeID)[0][0])
+                self.track_function_body(to_nodeID, self.get_next_node_info(to_nodeID)[0][0])
 
             return
         
         # while文とfor文は最終ノードからワープで戻る必要があるので、現在の部屋ノードのID(戻り先)を取得する
-        elif self.getNodeShape(nodeID) == 'pentagon':
-            condition_type = self.getNodeLabel(nodeID)
+        elif self.get_node_shape(nodeID) == 'pentagon':
+            condition_type = self.get_node_label(nodeID)
             if condition_type not in ("while", "for"):
                 sys.exit("label of a pentagon node is incorrect")
 
             # 条件文以前の処理を同部屋に含めてはいけない
-            self.createRoom(nodeID, crntRoomID)
+            self.create_room(nodeID, crnt_room_nodeID)
 
-            to_nodeID_info = self.getNextNodeInfo(nodeID)
+            # while or forの領域に入る (ワープ条件は設定しない)
+            self.create_path(
+                crnt_room_nodeID, 
+                nodeID, 
+                None
+            )
+
+            to_nodeID_info = self.get_next_node_info(nodeID)
+
+            if len(to_nodeID_info) == 0:
+                return
             
-            if len(to_nodeID_info) != 2 or (self.getNodeShape(to_nodeID_info[0][0]), self.getNodeShape(to_nodeID_info[1][0])) not in ("circle", "doublecircle"):
+            if len(to_nodeID_info) != 2 or (self.get_node_shape(to_nodeID_info[0][0]), self.get_node_shape(to_nodeID_info[1][0])) not in (("circle", "doublecircle"), ("doublecircle", "circle")):
                 sys.exit(f"wrong number or type nodes are connected from a {condition_type} condition node ")
 
             # 一回目ではWhileのTrueとFalseノードを取得できるので解析する
@@ -1588,7 +1603,7 @@ class GenBitMap:
 
             # condition_typeがforの場合は、expr_node_infoがない場合もある? (今後考える必要あり?)
             # → conditionがなくてもline情報だけを持つexpr_node_infoを登録することにした
-            if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+            if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                 sys.exit(f"flowchart node of {condition_type} condition is not found")
 
             func_reference_group = FuncReferenceGroup(
@@ -1610,13 +1625,13 @@ class GenBitMap:
 
             # エッジの順番がランダムで想定通りに解析されない可能性があるので入れ替える
             for to_nodeID, edgeLabel in to_nodeID_info:
-                self.createRoom(to_nodeID, nodeID)
+                self.create_room(to_nodeID, nodeID)
 
-                shape = self.getNodeShape(to_nodeID)
+                shape = self.get_node_shape(to_nodeID)
 
                 is_true = shape == "circle"
 
-                self.createPath(
+                self.create_path(
                     nodeID, 
                     to_nodeID, 
                     self.create_comment_window_info(
@@ -1636,21 +1651,14 @@ class GenBitMap:
                 )
 
                 nodeID_list.insert(0, to_nodeID) if is_true else nodeID_list.append(to_nodeID)
-                    
-            # while or forの領域に入る (whileIn or forIn) (ただし、今後 whileIn, forInの確認キャラを消去する見込み)
-            self.createPath(
-                crntRoomID, 
-                nodeID, 
-                None
-            )
-
+        
             # true
             self.track_function_body(nodeID_list[0], nodeID_list[0])
             # false
             self.track_function_body(nodeID_list[1], nodeID_list[1])
 
         # while文とfor文のワープ元である部屋のIDを取得する
-        elif self.getNodeShape(nodeID) == 'parallelogram':
+        elif self.get_node_shape(nodeID) == 'parallelogram':
             loopBack_nodeID_info = self.nextNodeInfo.get(nodeID)
 
             if loopBack_nodeID_info is None:
@@ -1660,25 +1668,25 @@ class GenBitMap:
             
             loopBackID, _ = loopBack_nodeID_info[0]
 
-            if self.getNodeShape(loopBackID) != "pentagon":
+            if self.get_node_shape(loopBackID) != "pentagon":
                 sys.exit("shape of loopBack node has to be pentagon")
-            if (loopBack_expr_node_info := self.getExprNodeInfo(loopBackID)) is None:
-                sys.exit(f"flowchart node of change expression statement in {self.getNodeLabel(loopBackID)} is not found")
-            if int(self.getNodeLabel(nodeID)) != loopBack_expr_node_info["line"]:
+            if (loopBack_expr_node_info := self.get_expr_node_info(loopBackID)) is None:
+                sys.exit(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
+            if int(self.get_node_label(nodeID)) != loopBack_expr_node_info["line"]:
                 sys.exit("line of execution looped back is incorrect")
 
             # for(A; B; C) について、Cがある場合　と　それ以外 (forでCがない場合と、whileの場合)で区別する
-            change_expr_node_info = self.getExprNodeInfo(nodeID)
+            change_expr_node_info = self.get_expr_node_info(nodeID)
             if change_expr_node_info is not None:
                 comment_window_info = self.create_comment_window_info(
                     "cond-in-change",
                     detail = [
-                        [f"if next is check of {self.getNodeLabel(loopBackID)}", f"in line {loopBack_expr_node_info["line"]}"], 
+                        [f"if next is check of {self.get_node_label(loopBackID)}", f"in line {loopBack_expr_node_info["line"]}"], 
                         ["execute", f"of line {loopBack_expr_node_info["line"]}"]
                     ]
                     if self.is_english else 
                     [
-                        [f"次が{loopBack_expr_node_info["line"]}行目の{self.getNodeLabel(loopBackID)}文の", "の真偽の確認処理なら"], 
+                        [f"次が{loopBack_expr_node_info["line"]}行目の{self.get_node_label(loopBackID)}文の", "の真偽の確認処理なら"], 
                         [f"{loopBack_expr_node_info["line"]}行目の", "を実行して"]
                     ], 
                     hover = [
@@ -1699,7 +1707,7 @@ class GenBitMap:
                 comment_window_info = None
             
             self.map_info.setWarpZone(
-                crntRoomID, 
+                crnt_room_nodeID, 
                 loopBackID, 
                 comment_window_info, 
                 self.func_name,
@@ -1707,8 +1715,8 @@ class GenBitMap:
             )
 
         # 話しかけると関数の遷移元に戻るようにする
-        elif self.getNodeShape(nodeID) == 'lpromoter':
-            if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+        elif self.get_node_shape(nodeID) == 'lpromoter':
+            if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                 sys.exit(f"flowchart node of change expression statement in return statement is not found")
 
             # まだvoidができていない? 後でvoidのやり方を考える
@@ -1732,7 +1740,7 @@ class GenBitMap:
             )
 
             self.map_info.setCharaReturn(
-                crntRoomID,
+                crnt_room_nodeID,
                 nodeID,
                 comment_window_info,
                 self.func_name, 
@@ -1744,32 +1752,32 @@ class GenBitMap:
             )
 
         # 変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
-        elif self.getNodeShape(nodeID) == 'signature':
+        elif self.get_node_shape(nodeID) == 'signature':
             var_info = self.var_info[nodeID]
-            self.createRoom(nodeID, crntRoomID)
+            self.create_room(nodeID, crnt_room_nodeID)
             # 変数用に部屋を作る必要があるなら作る
             if nodeID in self.map_info.room_info:
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     nodeID, 
                     None
                 )
-                crntRoomID = nodeID
-            self.map_info.setItemBox(crntRoomID, self.getNodeLabel(nodeID), var_info, self.func_name)
+                crnt_room_nodeID = nodeID
+            self.map_info.setItemBox(crnt_room_nodeID, self.get_node_label(nodeID), var_info, self.func_name)
             self.map_info.execution_comment_handler.register_variable_comment(var_info)
         
         # for文の初期値で変数の初期化がある場合はアイテムを作る
-        elif self.getNodeShape(nodeID) == 'invhouse':
-            to_nodeID_info = self.getNextNodeInfo(nodeID)
+        elif self.get_node_shape(nodeID) == 'invhouse':
+            to_nodeID_info = self.get_next_node_info(nodeID)
 
             if len(to_nodeID_info) == 0:
                 return
 
-            self.createRoom(nodeID, crntRoomID)
+            self.create_room(nodeID, crnt_room_nodeID)
 
             next_nodeID: str | None = None
             # (変数宣言ではない)初期化式がある場合
-            if (initializer_expr_node_info := self.getExprNodeInfo(nodeID)) is not None:
+            if (initializer_expr_node_info := self.get_expr_node_info(nodeID)) is not None:
                 self.map_info.execution_comment_handler.register_for_comment(
                     initializer_expr_node_info["line"],
                     "initializer",
@@ -1794,43 +1802,43 @@ class GenBitMap:
                     ) if len(initializer_expr_node_info["funcs"]) else None
                 )
 
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     nodeID,
                     comment_window_info
                 )
                 
-                crntRoomID = nodeID
+                crnt_room_nodeID = nodeID
 
                 if len(to_nodeID_info) != 1:
                     sys.exit("number of nodes which are connected from a for-initializer node has to be 1")
 
                 next_nodeID = to_nodeID_info[0][0]
-                if self.getNodeShape(to_nodeID) != 'pentagon':
+                if self.get_node_shape(next_nodeID) != 'pentagon':
                     sys.exit("shape of nodes connected from a for-initializer node without var-initializer have to be 'pentagon")
             # (変数宣言ではない)初期化式がない場合 → 変数宣言があるなら、その変数に当たる宝箱を作る。
             else:
                 var_decl_nodeID: str | None = None
                 for to_nodeID, _ in to_nodeID_info:
-                    if self.getNodeShape(to_nodeID) == 'signature':
+                    if self.get_node_shape(to_nodeID) == 'signature':
                         sys.exit("this game does not allow variable initializers in for statement initializer")
                         if var_decl_nodeID is not None:
                             sys.exit("number of signature nodes which are connected from a for-initializer node has to be 1")
                         var_decl_nodeID = to_nodeID
-                    elif self.getNodeShape(to_nodeID) == 'pentagon':
+                    elif self.get_node_shape(to_nodeID) == 'pentagon':
                         if next_nodeID is not None:
                             sys.exit("number of nodes which are connected from a for-initializer node execpt of a signature node has to be 1")
                         next_nodeID = to_nodeID
                     else:
                         sys.exit("shape of nodes connected from a for-initializer node have to be 'signature' or 'pentagon")
 
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     nodeID,
                     None
                 )
                 
-                crntRoomID = nodeID
+                crnt_room_nodeID = nodeID
 
                 if var_decl_nodeID is not None:
                     to_nodeID = var_decl_nodeID
@@ -1839,25 +1847,25 @@ class GenBitMap:
                     while True:
                         if (var_info := self.var_info.get(to_nodeID)) is None:
                             sys.exit("var_info of a variable declaration of for initializer is not found")
-                        if (var_expr_node_info := self.getExprNodeInfo(to_nodeID)) is None:
+                        if (var_expr_node_info := self.get_expr_node_info(to_nodeID)) is None:
                             sys.exit("expr node info in scalar varialbe is not found")
                         # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
-                        self.map_info.setItemBox(crntRoomID, self.getNodeLabel(to_nodeID), var_info, self.func_name)
+                        self.map_info.setItemBox(crnt_room_nodeID, self.get_node_label(to_nodeID), var_info, self.func_name)
                         var_info_list.append(var_info)
 
-                        var_nodeID_info = self.getNextNodeInfo(nodeID)
+                        var_nodeID_info = self.get_next_node_info(nodeID)
                         if len(var_nodeID_info) == 0:
                             break
                         if len(var_nodeID_info) != 1:
                             sys.exit("error in number of nodes connected fron var node")
 
                         to_nodeID, _ = var_nodeID_info[0]
-                        if self.getNodeShape(to_nodeID) != 'signature':
+                        if self.get_node_shape(to_nodeID) != 'signature':
                             sys.exit("error in shape of node \"signature\"")
 
                     if len(var_info_list):
                         self.map_info.execution_comment_handler.register_for_var_initializer_comment(
-                            int(self.getNodeLabel(nodeID)),
+                            int(self.get_node_label(nodeID)),
                             var_info_list
                         )
                 
@@ -1866,24 +1874,24 @@ class GenBitMap:
                 sys.exit("next node of a for initializer node is not found")
 
             # 条件文の解析に進んでいく
-            self.track_function_body(crntRoomID, next_nodeID)
+            self.track_function_body(crnt_room_nodeID, next_nodeID)
             return
 
         # break, continue
-        elif self.getNodeShape(nodeID) == 'hexagon':
+        elif self.get_node_shape(nodeID) == 'hexagon':
             # warpNodeIDが必要なのでここで解析する
             if nodeID not in self.map_info.execution_info:
                 sys.exit("an execution information of a line breaker is not found")
 
-            next_nodeID_info = self.getNextNodeInfo(nodeID)
+            next_nodeID_info = self.get_next_node_info(nodeID)
 
             if len(next_nodeID_info) != 1:
                 sys.exit("only one node has to be connected from a hexagon node")
 
             nextNodeID, edgeLabel = next_nodeID_info[0]
 
-            if self.getNodeLabel(nodeID) == "continue":
-                if self.getNodeShape(nextNodeID) == 'parallelogram':
+            if self.get_node_label(nodeID) == "continue":
+                if self.get_node_shape(nextNodeID) == 'parallelogram':
                     loopBack_nodeID_info = self.nextNodeInfo.get(nodeID)
 
                     if loopBack_nodeID_info is None:
@@ -1893,18 +1901,18 @@ class GenBitMap:
                     
                     loopBackID, _ = loopBack_nodeID_info[0]
 
-                    if self.getNodeShape(loopBackID) != "pentagon":
+                    if self.get_node_shape(loopBackID) != "pentagon":
                         sys.exit("shape of loopBack node has to be pentagon")
-                    if (expr_node_info := self.getExprNodeInfo(loopBackID)) is None:
-                        sys.exit(f"flowchart node of change expression statement in {self.getNodeLabel(loopBackID)} is not found")
-                    if int(self.getNodeLabel(nextNodeID)) != expr_node_info["line"]:
+                    if (expr_node_info := self.get_expr_node_info(loopBackID)) is None:
+                        sys.exit(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
+                    if int(self.get_node_label(nextNodeID)) != expr_node_info["line"]:
                         sys.exit("line of execution looped back is incorrect")
 
                     if condition_comment_window_info is not None:
                         sys.exit("there has not be comment_window_info here")
 
                     self.map_info.setWarpZone(
-                        crntRoomID, 
+                        crnt_room_nodeID, 
                         loopBackID, 
                         self.create_comment_window_info(
                             "end",
@@ -1921,16 +1929,16 @@ class GenBitMap:
                     nextNodeID = loopBackID
 
                 # continue → doWhile構文の場合
-                elif self.getNodeShape(nextNodeID) == 'diamond':
-                    self.createRoom(nextNodeID, crntRoomID)
-                    if (expr_node_info := self.getExprNodeInfo(nextNodeID)) is None:
+                elif self.get_node_shape(nextNodeID) == 'diamond':
+                    self.create_room(nextNodeID, crnt_room_nodeID)
+                    if (expr_node_info := self.get_expr_node_info(nextNodeID)) is None:
                         sys.exit(f"flowchart node of change expression statement in do-while statement is not found")
 
                     if condition_comment_window_info is not None:
                         sys.exit("there has not be comment_window_info here")
 
                     self.map_info.setWarpZone(
-                        crntRoomID, 
+                        crnt_room_nodeID, 
                         nextNodeID, 
                         self.create_comment_window_info(
                             "end",
@@ -1948,15 +1956,14 @@ class GenBitMap:
                     sys.exit("impossible node is found")
 
                 self.map_info.execution_comment_handler.register_control_flow_comment(
-                    self.map_info.execution_info[nodeID]["line"], 
-                    "continue"
+                    self.map_info.execution_info[nodeID]
                 )
 
             # breakのノードの場合
-            elif self.getNodeLabel(nodeID) == "break":
-                self.createRoom(nextNodeID, crntRoomID)
+            elif self.get_node_label(nodeID) == "break":
+                self.create_room(nextNodeID, crnt_room_nodeID)
                 self.map_info.setWarpZone(
-                    crntRoomID, 
+                    crnt_room_nodeID, 
                     nextNodeID,
                     self.create_comment_window_info(
                         "end",
@@ -1973,8 +1980,7 @@ class GenBitMap:
                 )
 
                 self.map_info.execution_comment_handler.register_control_flow_comment(
-                    self.map_info.execution_info[nodeID]["line"], 
-                    "break"
+                    self.map_info.execution_info[nodeID]
                 )
             else:
                 sys.exit("unknown node is found")
@@ -1983,25 +1989,27 @@ class GenBitMap:
             return
         
         # do while構文の最初の1回
-        elif self.getNodeShape(nodeID) == 'invtrapezium':
-            true_nodeID_info = self.getNextNodeInfo(nodeID)
+        elif self.get_node_shape(nodeID) == 'invtrapezium':
+            true_nodeID_info = self.get_next_node_info(nodeID)
+            
             if len(true_nodeID_info) != 1:
                 sys.exit("number of child nodes of do-while entry node has to be 1")
-            trueNodeID, _ = true_nodeID_info
+            trueNodeID, _ = true_nodeID_info[0]
+            
             # do-whileの条件真の部屋を作る
-            self.createRoom(trueNodeID, crntRoomID)
+            self.create_room(trueNodeID, crnt_room_nodeID)
             self.map_info.setWarpZone(
-                crntRoomID, 
+                crnt_room_nodeID, 
                 trueNodeID,
                 None,
                 self.func_name,
                 warpNodeID=nodeID
             )
             nodeID = trueNodeID
-            crntRoomID = trueNodeID
+            crnt_room_nodeID = trueNodeID
 
         # switch構文の途中のcaseまたは末尾に接続する
-        elif self.getNodeShape(nodeID) == 'invtriangle':
+        elif self.get_node_shape(nodeID) == 'invtriangle':
             case_expr_node_info_list = []
             to_nodeID = nodeID
 
@@ -2010,25 +2018,25 @@ class GenBitMap:
                     break
                 temp_nodeID, _ = tempNode_info[0]
 
-                if (expr_node_info := self.getExprNodeInfo(to_nodeID)) is not None:
+                if (expr_node_info := self.get_expr_node_info(to_nodeID)) is not None:
                     case_expr_node_info_list.append(expr_node_info["comments"])
                 else:
                     case_expr_node_info_list = []
 
-                if self.getNodeShape(temp_nodeID) != 'invtriangle' or self.getNodeLabel(to_nodeID) == 'end':
+                if self.get_node_shape(temp_nodeID) != 'invtriangle' or self.get_node_label(to_nodeID) == 'end':
                     break
 
                 to_nodeID = temp_nodeID
  
-            self.createRoom(to_nodeID, crntRoomID)
+            self.create_room(to_nodeID, crnt_room_nodeID)
             self.map_info.setWarpZone(
-                crntRoomID,
+                crnt_room_nodeID,
                 to_nodeID, 
                 None, 
                 self.func_name
             )
 
-            next_nodeID_info = self.getNextNodeInfo(to_nodeID)
+            next_nodeID_info = self.get_next_node_info(to_nodeID)
             if len(next_nodeID_info) == 0:
                 return
 
@@ -2036,20 +2044,20 @@ class GenBitMap:
             return
 
         # 計算式が単独で出た場合は、その部屋にキャラクターを配置する (計算内容は lineをキーとする辞書として追加していく)
-        elif self.getNodeShape(nodeID) == 'rect':
-            self.createRoom(nodeID, crntRoomID)
+        elif self.get_node_shape(nodeID) == 'rect':
+            self.create_room(nodeID, crnt_room_nodeID)
             if nodeID in self.map_info.room_info:
-                self.createPath(
-                    crntRoomID, 
+                self.create_path(
+                    crnt_room_nodeID, 
                     nodeID, 
                     None
                 )
-                crntRoomID = nodeID
+                crnt_room_nodeID = nodeID
 
             if (execution_info := self.map_info.execution_info.get(nodeID)) is None:
                 sys.exit("execution_info is not found")
 
-            if (expr_node_info := self.getExprNodeInfo(nodeID)) is None:
+            if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
                 sys.exit("expr_node_info is not found")
 
             detail = TempExpressionDetail(
@@ -2077,24 +2085,24 @@ class GenBitMap:
                 expr_node_info["comments"]
             )
 
-            self.map_info.addExpressionToCharaExpression(crntRoomID, detail, expr_node_info["line"], self.func_name)
+            self.map_info.addExpressionToCharaExpression(crnt_room_nodeID, detail, expr_node_info["line"], self.func_name)
 
-        for to_nodeID, edgeLabel in self.getNextNodeInfo(nodeID):
-            self.track_function_body(crntRoomID, to_nodeID)
+        for to_nodeID, edgeLabel in self.get_next_node_info(nodeID):
+            self.track_function_body(crnt_room_nodeID, to_nodeID)
 
     # ノードの形を確認する
-    def getNodeShape(self, nodeID: str) -> str:
+    def get_node_shape(self, nodeID: str) -> str:
         #IDが重複する場合にも対応しているのでリストを得る。ゆえに、リストの最初の要素を取得する。
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
         return attrs['shape']
     
     # ノード内のラベルを確認する
-    def getNodeLabel(self, nodeID: str) -> str:
+    def get_node_label(self, nodeID: str) -> str:
         #IDが重複する場合にも対応しているのでリストを得る。ゆえに、リストの最初の要素を取得する。
         attrs = self.graph.get_node(nodeID)[0].obj_dict['attributes']
         return attrs['label']
     
-    # getNextNodeInfo用にノード情報を格納する
+    # get_next_node_info用にノード情報を格納する
     def set_next_node_info(self):
         for edge in self.graph.get_edges():
             label = edge.get_attributes().get("label", "")
@@ -2104,88 +2112,88 @@ class GenBitMap:
                 self.nextNodeInfo[edgeSource] = [(edge.get_destination(), label)]
 
     # 次のノードを取得する(複数ある場合にも対応できるようにリストで取得する)
-    def getNextNodeInfo(self, nodeID: str):
+    def get_next_node_info(self, nodeID: str):
         return self.nextNodeInfo.pop(nodeID, [])
     
     # 計算式, 変数の参照リスト、関数の参照リスト、計算式のコメントリスト、計算式の行数を取得
     # 型はExprNodeInfo
-    def getExprNodeInfo(self, nodeID: str) -> ExprNodeInfo | None:
+    def get_expr_node_info(self, nodeID: str) -> ExprNodeInfo | None:
         return self.expr_node_info.get(nodeID)
 
-    def createRoom(self, nodeID: str, prevRoomID: str | None = None):
+    def create_room(self, nodeID: str, prev_room_nodeID: str | None = None):
         if (size := self.room_size_info[self.func_name].pop(nodeID, None)):
             height = random.randint(4, size-4)
             width = size - height
             mapHeight, mapWidth = self.floor_map.shape
             kernel = np.ones((height+self.PADDING2,width+self.PADDING2))
-            if prevRoomID:
-                if self.map_info.room_info[prevRoomID]["direction"] == "left":
+            if prev_room_nodeID:
+                if self.map_info.room_info[prev_room_nodeID]["direction"] == "left":
                     direction = random.choice(['left', 'up'])
-                elif self.map_info.room_info[prevRoomID]["direction"] == "up":
+                elif self.map_info.room_info[prev_room_nodeID]["direction"] == "up":
                     direction = random.choice(['left', 'right'])
                 else:
                     direction = random.choice(['up', 'right'])
             else:
                 direction = None
             self.map_info.room_info[nodeID] = RoomInfo(
-                room_size = self.findRoomArea((height, width), (mapHeight, mapWidth), kernel, (prevRoomID, direction) if direction else None), 
+                room_size = self.find_room_area((height, width), (mapHeight, mapWidth), kernel, (prev_room_nodeID, direction) if direction else None), 
                 direction = direction or random.choice(['left', 'up', 'right'])
             )
 
-    def findRoomArea(self, roomSize: tuple[int, int], mapSize: tuple[int, int], kernel, prevRoom_info: tuple[str, str] | None, add_size: dict = {"x": 0, "y": 0}):
-        def expand_map(original, map_size, new_shape, fill_value, direction: str | None):
-            new_map = np.full(new_shape, fill_value, dtype=original.dtype)
-            if direction:
-                if direction == "left":
-                    new_map[self.SIZE_EXPAND:new_shape[0], self.SIZE_EXPAND:new_shape[1]] = original
-                elif direction == "up":
-                    new_map[self.SIZE_EXPAND:new_shape[0], self.SIZE_EXPAND:map_size[1]+self.SIZE_EXPAND] = original
-                else:
-                    new_map[self.SIZE_EXPAND:new_shape[0], 0:map_size[1]] = original
+    def expand_map(self, original, map_size: tuple[int, int], new_shape: tuple[int, int], fill_value: int, direction: str | None):
+        new_map = np.full(new_shape, fill_value, dtype=original.dtype)
+        if direction:
+            if direction == "left":
+                new_map[self.SIZE_EXPAND:new_shape[0], self.SIZE_EXPAND:new_shape[1]] = original
+            elif direction == "up":
+                new_map[self.SIZE_EXPAND:new_shape[0], self.SIZE_EXPAND:map_size[1]+self.SIZE_EXPAND] = original
             else:
-                new_map[:map_size[0], :map_size[1]] = original
-            return new_map
-    
+                new_map[self.SIZE_EXPAND:new_shape[0], 0:map_size[1]] = original
+        else:
+            new_map[:map_size[0], :map_size[1]] = original
+        return new_map
+        
+    def find_room_area(self, room_size: tuple[int, int], map_size: tuple[int, int], kernel: NDArray[np.float64], prev_room_info: tuple[str, str] | None, add_size: dict = {"x": 0, "y": 0}):
         candidate_squares: list[tuple[int, int]] = []
         convolved = ndimage.convolve(self.floor_map, kernel, mode='constant', cval=0)
 
-        if prevRoom_info:
-            if prevRoom_info[1] == "left":
-                range_x = (1, self.map_info.room_info[prevRoom_info[0]]["room_size"][1]+self.map_info.offset["x"]-roomSize[1]-self.PADDING2)
-                range_y = (self.map_info.room_info[prevRoom_info[0]]["room_size"][0]+self.map_info.offset["y"]-roomSize[0], self.map_info.room_info[prevRoom_info[0]]["room_size"][0]+self.map_info.offset["y"]+self.map_info.room_info[prevRoom_info[0]]["room_size"][2]-roomSize[0])
-            elif prevRoom_info[1] == "up":
-                range_x = (self.map_info.room_info[prevRoom_info[0]]["room_size"][1]+self.map_info.offset["x"]-roomSize[1], self.map_info.room_info[prevRoom_info[0]]["room_size"][1]+self.map_info.offset["x"]+self.map_info.room_info[prevRoom_info[0]]["room_size"][3]-roomSize[1])
-                range_y = (1, self.map_info.room_info[prevRoom_info[0]]["room_size"][0]+self.map_info.offset["y"]-self.PADDING2)
+        if prev_room_info:
+            if prev_room_info[1] == "left":
+                range_x = (1, self.map_info.room_info[prev_room_info[0]]["room_size"][1]+self.map_info.offset["x"]-room_size[1]-self.PADDING2)
+                range_y = (self.map_info.room_info[prev_room_info[0]]["room_size"][0]+self.map_info.offset["y"]-room_size[0], self.map_info.room_info[prev_room_info[0]]["room_size"][0]+self.map_info.offset["y"]+self.map_info.room_info[prev_room_info[0]]["room_size"][2]-room_size[0])
+            elif prev_room_info[1] == "up":
+                range_x = (self.map_info.room_info[prev_room_info[0]]["room_size"][1]+self.map_info.offset["x"]-room_size[1], self.map_info.room_info[prev_room_info[0]]["room_size"][1]+self.map_info.offset["x"]+self.map_info.room_info[prev_room_info[0]]["room_size"][3]-room_size[1])
+                range_y = (1, self.map_info.room_info[prev_room_info[0]]["room_size"][0]+self.map_info.offset["y"]-self.PADDING2)
             else:
-                range_x = (self.map_info.room_info[prevRoom_info[0]]["room_size"][1]+self.map_info.offset["x"]+self.map_info.room_info[prevRoom_info[0]]["room_size"][3]+self.PADDING2, mapSize[0]-roomSize[0])
-                range_y = (self.map_info.room_info[prevRoom_info[0]]["room_size"][0]+self.map_info.offset["y"]-roomSize[0], self.map_info.room_info[prevRoom_info[0]]["room_size"][0]+self.map_info.offset["y"]+self.map_info.room_info[prevRoom_info[0]]["room_size"][2]-roomSize[0])
+                range_x = (self.map_info.room_info[prev_room_info[0]]["room_size"][1]+self.map_info.offset["x"]+self.map_info.room_info[prev_room_info[0]]["room_size"][3]+self.PADDING2, map_size[0]-room_size[0])
+                range_y = (self.map_info.room_info[prev_room_info[0]]["room_size"][0]+self.map_info.offset["y"]-room_size[0], self.map_info.room_info[prev_room_info[0]]["room_size"][0]+self.map_info.offset["y"]+self.map_info.room_info[prev_room_info[0]]["room_size"][2]-room_size[0])
             if range_x[0] >= range_x[1]:
                 range_x = (range_x[0], range_x[0]+1)
             if range_y[0] >= range_y[1]:
                 range_y = (range_y[0], range_y[0]+1)
 
             for y in range(range_y[0], range_y[1]):
-                if y < 1 or mapSize[0] <= y:
+                if y < 1 or map_size[0] <= y:
                     continue
                 for x in range(range_x[0], range_x[1]):
-                    if 1 <= x < mapSize[1] and convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+roomSize[0]+self.PADDING, x-self.PADDING:x+roomSize[1]+self.PADDING] == 1):
+                    if 1 <= x < map_size[1] and convolved[y,x] == (room_size[0]+self.PADDING2)*(room_size[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+room_size[0]+self.PADDING, x-self.PADDING:x+room_size[1]+self.PADDING] == 1):
                         candidate_squares.append((y,x))
         else:
-            for y in range(1, mapSize[0]-roomSize[0]-self.PADDING2):
-                for x in range(1, mapSize[1]-roomSize[1]-self.PADDING2):
-                    if convolved[y,x] == (roomSize[0]+self.PADDING2)*(roomSize[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+roomSize[0]+self.PADDING, x-self.PADDING:x+roomSize[1]+self.PADDING] == 1):
+            for y in range(1, map_size[0]-room_size[0]-self.PADDING2):
+                for x in range(1, map_size[1]-room_size[1]-self.PADDING2):
+                    if convolved[y,x] == (room_size[0]+self.PADDING2)*(room_size[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+room_size[0]+self.PADDING, x-self.PADDING:x+room_size[1]+self.PADDING] == 1):
                         candidate_squares.append((y,x))
         
         if candidate_squares:
             # region choose room pos with weight
             # # 重みづけをする (部屋の位置のランダム性は増すが、道が長くなる可能性がある)
-            # if prevRoom_info is None:
+            # if prev_room_info is None:
             #     # fallback: 均等重み
             #     w = list(range(len(candidate_squares), 0, -1))
-            # elif prevRoom_info[1] == "left":
+            # elif prev_room_info[1] == "left":
             #     # x が大きい方が優先されるように
             #     w = [x for (_, x) in candidate_squares]
-            # elif prevRoom_info[1] == "up":
+            # elif prev_room_info[1] == "up":
             #     # y が大きい方が優先されるように
             #     w = [y for (y, _) in candidate_squares]
             # else:
@@ -2198,167 +2206,171 @@ class GenBitMap:
             # endregion 
             
             # directionに応じて重みを変える
-            if prevRoom_info is None:
+            if prev_room_info is None:
                 y, x = random.choice(candidate_squares)
-            elif prevRoom_info[1] == "left":
+            elif prev_room_info[1] == "left":
                 # x が大きい方が優先されるように
                 y, x = max(candidate_squares, key=lambda c: c[1])
-            elif prevRoom_info[1] == "up":
+            elif prev_room_info[1] == "up":
                 # y が大きい方が優先されるように
                 y, x = max(candidate_squares, key=lambda c: c[0])
             else:
                 # x が小さい方が優先されるように
                 y, x = min(candidate_squares, key=lambda c: c[1])
             # 部屋を配置
-            self.floor_map[y:y+roomSize[0], x:x+roomSize[1]] = 0
-            self.only_room_map[y:y+roomSize[0], x:x+roomSize[1]] = 0
-            return (y - self.map_info.offset["y"], x - self.map_info.offset["x"], roomSize[0], roomSize[1])
+            self.floor_map[y:y+room_size[0], x:x+room_size[1]] = 0
+            self.only_room_map[y:y+room_size[0], x:x+room_size[1]] = 0
+            return (y - self.map_info.offset["y"], x - self.map_info.offset["x"], room_size[0], room_size[1])
         else:
-            if prevRoom_info:
+            if prev_room_info:
                 # 拡張サイズの計算
-                if prevRoom_info[1] == "left":
-                    new_height = mapSize[0] + self.SIZE_EXPAND
-                    new_width = mapSize[1] + self.SIZE_EXPAND
+                if prev_room_info[1] == "left":
+                    new_height = map_size[0] + self.SIZE_EXPAND
+                    new_width = map_size[1] + self.SIZE_EXPAND
                     self.map_info.offset["y"] += self.SIZE_EXPAND
                     self.map_info.offset["x"] += self.SIZE_EXPAND
-                elif prevRoom_info[1] == "up":
-                    new_height = mapSize[0] + self.SIZE_EXPAND
-                    new_width = mapSize[1] + self.SIZE_EXPAND * 2
+                elif prev_room_info[1] == "up":
+                    new_height = map_size[0] + self.SIZE_EXPAND
+                    new_width = map_size[1] + self.SIZE_EXPAND * 2
                     self.map_info.offset["y"] += self.SIZE_EXPAND
                     self.map_info.offset["x"] += self.SIZE_EXPAND
                 else:
-                    new_height = mapSize[0] + self.SIZE_EXPAND
-                    new_width = mapSize[1] + self.SIZE_EXPAND
+                    new_height = map_size[0] + self.SIZE_EXPAND
+                    new_width = map_size[1] + self.SIZE_EXPAND
                     self.map_info.offset["y"] += self.SIZE_EXPAND
                 new_shape = (new_height, new_width)
                 # 各マップを更新
-                self.floor_map = expand_map(self.floor_map, mapSize, new_shape, fill_value=1, direction=prevRoom_info[1])
-                self.only_room_map = expand_map(self.only_room_map, mapSize, new_shape, fill_value=1, direction=prevRoom_info[1])
-                self.map_info.event_map = expand_map(self.map_info.event_map, mapSize, new_shape, fill_value=0, direction=prevRoom_info[1])
-                return self.findRoomArea(roomSize, new_shape, kernel, prevRoom_info, add_size)
+                self.floor_map = self.expand_map(self.floor_map, map_size, new_shape, fill_value=1, direction=prev_room_info[1])
+                self.only_room_map = self.expand_map(self.only_room_map, map_size, new_shape, fill_value=1, direction=prev_room_info[1])
+                self.map_info.event_map = self.expand_map(self.map_info.event_map, map_size, new_shape, fill_value=0, direction=prev_room_info[1])
+                return self.find_room_area(room_size, new_shape, kernel, prev_room_info, add_size)
             else:
                 # 拡張サイズの計算
-                new_height = mapSize[0] + self.SIZE_EXPAND
-                new_width = mapSize[1] + self.SIZE_EXPAND
+                new_height = map_size[0] + self.SIZE_EXPAND
+                new_width = map_size[1] + self.SIZE_EXPAND
                 new_shape = (new_height, new_width)
                 # 各マップを更新
-                self.floor_map = expand_map(self.floor_map, mapSize, new_shape, fill_value=1, direction=None)
-                self.only_room_map = expand_map(self.only_room_map, mapSize, new_shape, fill_value=1, direction=None)
-                self.map_info.event_map = expand_map(self.map_info.event_map, mapSize, new_shape, fill_value=0, direction=None)
-                return self.findRoomArea(roomSize, (new_height, new_width), kernel, prevRoom_info, add_size)
+                self.floor_map = self.expand_map(self.floor_map, map_size, new_shape, fill_value=1, direction=None)
+                self.only_room_map = self.expand_map(self.only_room_map, map_size, new_shape, fill_value=1, direction=None)
+                self.map_info.event_map = self.expand_map(self.map_info.event_map, map_size, new_shape, fill_value=0, direction=None)
+                return self.find_room_area(room_size, (new_height, new_width), kernel, prev_room_info, add_size)
 
-    def createPath(self, start_nodeID: str, goal_nodeID: str, comment_window_info: TempCommentWindowInfo | None):
-        def get_edge_point(start, goal):
-            # start, goalはローカル座標
-            def random_edge_point(dir, room_pos):
-                local_ry, local_rx, rheight, rwidth = room_pos
-                ry = local_ry + self.map_info.offset["y"]
-                rx = local_rx + self.map_info.offset["x"]
-                candidates: list[tuple[int,int]] = []
-                # top edge (y = ry - 1)
-                if dir == 'u':
-                    y = ry - 1
-                    for x in range(rx, rx + rwidth):
-                        if (0 <= y < h and 0 <= x < w and self.floor_map[y, x] != 0 and 
-                            0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
-                            0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
-                            x+1 < w and self.map_info.event_map[y, x+1] == 0):
-                            candidates.append((y, x))
-                # bottom edge (y = ry + height)
-                elif dir == 'd':
-                    y = ry + rheight
-                    for x in range(rx, rx + rwidth):
-                        if (0 <= y < h and 0 <= x < w and self.floor_map[y, x] != 0 and 
-                            0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
-                            y+1 < h and self.map_info.event_map[y+1, x] == 0 and 
-                            x+1 < w and self.map_info.event_map[y, x+1] == 0):
-                            candidates.append((y, x))
-                # left edge (x = rx - 1)
-                elif dir == 'l':
-                    x = rx - 1
-                    for y in range(ry, ry + rheight):
-                        if (0 <= y < h and 0 <= x < w and self.floor_map[y, x] != 0 and 
-                            0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
-                            0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
-                            y+1 < h and self.map_info.event_map[y+1, x] == 0):
-                            candidates.append((y, x))
-                # right edge (x = rx + width)
-                elif dir == 'r':
-                    x = rx + rwidth
-                    for y in range(ry, ry + rheight):
-                        if (0 <= y < h and 0 <= x < w and self.floor_map[y, x] != 0 and 
-                            0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
-                            x+1 < w and self.map_info.event_map[y, x+1] == 0 and 
-                            y+1 < h and self.map_info.event_map[y+1, x] == 0):
-                            candidates.append((y, x))
 
-                if not candidates:
-                    return None
+    def random_edge_point(self, dir: Literal['u', 'd', 'l', 'r'], room_pos: tuple[int, int, int, int], x_max: int, y_max: int):
+        local_ry, local_rx, rheight, rwidth = room_pos
+        ry = local_ry + self.map_info.offset["y"]
+        rx = local_rx + self.map_info.offset["x"]
+        candidates: list[tuple[int,int]] = []
+        # top edge (y = ry - 1)
+        if dir == 'u':
+            y = ry - 1
+            for x in range(rx, rx + rwidth):
+                if (0 <= y < y_max and 0 <= x < x_max and self.floor_map[y, x] != 0 and 
+                    0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
+                    0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
+                    x+1 < x_max and self.map_info.event_map[y, x+1] == 0):
+                    candidates.append((y, x))
+        # bottom edge (y = ry + height)
+        elif dir == 'd':
+            y = ry + rheight
+            for x in range(rx, rx + rwidth):
+                if (0 <= y < y_max and 0 <= x < x_max and self.floor_map[y, x] != 0 and 
+                    0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
+                    y+1 < y_max and self.map_info.event_map[y+1, x] == 0 and 
+                    x+1 < x_max and self.map_info.event_map[y, x+1] == 0):
+                    candidates.append((y, x))
+        # left edge (x = rx - 1)
+        elif dir == 'l':
+            x = rx - 1
+            for y in range(ry, ry + rheight):
+                if (0 <= y < y_max and 0 <= x < x_max and self.floor_map[y, x] != 0 and 
+                    0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
+                    0 <= x-1 and self.map_info.event_map[y, x-1] == 0 and 
+                    y+1 < y_max and self.map_info.event_map[y+1, x] == 0):
+                    candidates.append((y, x))
+        # right edge (x = rx + width)
+        elif dir == 'r':
+            x = rx + rwidth
+            for y in range(ry, ry + rheight):
+                if (0 <= y < y_max and 0 <= x < x_max and self.floor_map[y, x] != 0 and 
+                    0 <= y-1 and self.map_info.event_map[y-1, x] == 0 and 
+                    x+1 < x_max and self.map_info.event_map[y, x+1] == 0 and 
+                    y+1 < y_max and self.map_info.event_map[y+1, x] == 0):
+                    candidates.append((y, x))
 
-                return random.choice(candidates)
+        if not candidates:
+            return None
 
-            h, w = self.floor_map.shape
+        return random.choice(candidates)
+        
+    def get_edge_point(self, start, goal):
+        # start, goalはローカル座標
+        h, w = self.floor_map.shape
 
-            sy, sx, sheight, swidth = start
-            gy, gx, gheight, gwidth = goal
+        sy, sx, sheight, swidth = start
+        gy, gx, gheight, gwidth = goal
 
-            center_s = (sy + sheight / 2, sx + swidth / 2)
-            center_g = (gy + gheight / 2, gx + gwidth / 2)
+        center_s = (sy + sheight / 2, sx + swidth / 2)
+        center_g = (gy + gheight / 2, gx + gwidth / 2)
 
-            dy = center_g[0] - center_s[0]
-            dx = center_g[1] - center_s[1]
+        dy = center_g[0] - center_s[0]
+        dx = center_g[1] - center_s[1]
 
-            start_edge_point = None
-            goal_edge_point = None
-            dir = None
+        start_edge_point = None
+        goal_edge_point = None
+        dir = None
 
-            # DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
+        # DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3
+        if abs(dy) > abs(dx):
+            if dy > 0:
+                start_edge_point = self.random_edge_point('d', start, w, h)
+                dir = 0
+            else:
+                start_edge_point = self.random_edge_point('u', start, w, h)
+                dir = 3
+        else:
+            if dx > 0:
+                start_edge_point = self.random_edge_point('r', start, w, h)
+                dir = 2
+            else:
+                start_edge_point = self.random_edge_point('l', start, w, h)
+                dir = 1
+
+        if start_edge_point is None:
             if abs(dy) > abs(dx):
-                if dy > 0:
-                    start_edge_point = random_edge_point('d', start)
-                    dir = 0
-                else:
-                    start_edge_point = random_edge_point('u', start)
-                    dir = 3
-            else:
                 if dx > 0:
-                    start_edge_point = random_edge_point('r', start)
+                    start_edge_point = self.random_edge_point('r', start, w, h)
                     dir = 2
                 else:
-                    start_edge_point = random_edge_point('l', start)
+                    start_edge_point = self.random_edge_point('l', start, w, h)
                     dir = 1
-
-            if start_edge_point is None:
-                if abs(dy) > abs(dx):
-                    if dx > 0:
-                        start_edge_point = random_edge_point('r', start)
-                        dir = 2
-                    else:
-                        start_edge_point = random_edge_point('l', start)
-                        dir = 1
+            else:
+                if dy > 0:
+                    start_edge_point = self.random_edge_point('d', start, w, h)
+                    dir = 0
                 else:
-                    if dy > 0:
-                        start_edge_point = random_edge_point('d', start)
-                        dir = 0
-                    else:
-                        start_edge_point = random_edge_point('u', start)
-                        dir = 3
-            
-            if start_edge_point is not None:
-                if dir == 0:
-                    goal_edge_point = random_edge_point('u', goal)
-                elif dir == 1:
-                    goal_edge_point = random_edge_point('r', goal)
-                elif dir == 2:
-                    goal_edge_point = random_edge_point('l', goal)
-                else: # dir == 3
-                    goal_edge_point = random_edge_point('d', goal)
-            
-            return start_edge_point, goal_edge_point, dir
+                    start_edge_point = self.random_edge_point('u', start, w, h)
+                    dir = 3
+        
+        if start_edge_point is not None:
+            if dir == 0:
+                goal_edge_point = self.random_edge_point('u', goal, w, h)
+            elif dir == 1:
+                goal_edge_point = self.random_edge_point('r', goal, w, h)
+            elif dir == 2:
+                goal_edge_point = self.random_edge_point('l', goal, w, h)
+            else: # dir == 3
+                goal_edge_point = self.random_edge_point('d', goal, w, h)
+        
+        return start_edge_point, goal_edge_point, dir
+        
+    def create_path(self, start_nodeID: str, goal_nodeID: str, comment_window_info: TempCommentWindowInfo | None):
+        check_map: NDArray[np.float64] = 1 - self.only_room_map
 
-        check_map = 1 - self.only_room_map
-
-        start, goal, dir = get_edge_point(self.map_info.room_info[start_nodeID]["room_size"], self.map_info.room_info[goal_nodeID]["room_size"])
+        start, goal, dir = self.get_edge_point(
+            self.map_info.room_info[start_nodeID]["room_size"], 
+            self.map_info.room_info[goal_nodeID]["room_size"]
+        )
 
         if start is None or goal is None:
             self.map_info.setWarpZone(
@@ -2444,6 +2456,7 @@ class GenBitMap:
                         self.map_info.setCharaCheckCondition(self.func_name, path[i], 1, execution_info, comment_window_info)
 
         self.only_room_map = 1 - check_map
+
 
     # 引数は空リストになるものが多いので、デフォルト値を設定できるようにしている
     def create_comment_window_info(self, info_type: str, detail: list[list[str]] | None = None, hover: list[list[Comment]] | None = None, func_reference_group: FuncReferenceGroup | None = None, base_comment_window_info: TempCommentWindowInfo | None = None) -> TempCommentWindowInfo:

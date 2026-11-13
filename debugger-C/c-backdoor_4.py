@@ -30,7 +30,6 @@ class LoopLineInfo(TypedDict):
     type: Literal["while", "do_while", "for"]
     top_edge: int
     bottom_edge: int
-    frame_num: int
 
 class DynamicVarInfo(TypedDict):
     dynamic_var_node: DynamicVarNode
@@ -62,6 +61,7 @@ class DynamicNonVarStatusHandler:
 
     def check_expr_automatically(self) -> Literal["progress", "end", "next_function"]:
         return "end"
+
 
 class IfStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, conditions: list[IfConditionComment], is_english: bool):
@@ -161,6 +161,7 @@ class IfStatusHandler(DynamicNonVarStatusHandler):
 
         return "next_function"
 
+
 class WhileStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, condition: list[Comment], is_english: bool):
         super().__init__(line, is_english)
@@ -207,7 +208,8 @@ class WhileStatusHandler(DynamicNonVarStatusHandler):
             return "end"
 
         return "next_function"
-    
+
+
 class DoWhileStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, condition: list[Comment], is_english: bool):
         super().__init__(line, is_english)
@@ -254,7 +256,8 @@ class DoWhileStatusHandler(DynamicNonVarStatusHandler):
             return "end"
 
         return "next_function"
-    
+
+
 class ForStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, expr: ForComment, is_english: bool):
         super().__init__(line, is_english)
@@ -456,6 +459,7 @@ class ForChangeStatus(TypedDict):
     dynamic_expr: DynamicCommentHandler | None
     is_not_completed: bool
 
+
 class SwitchStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, expr: SwitchConditionComment, is_english: bool):
         super().__init__(line, is_english)
@@ -597,10 +601,12 @@ class CaseStatus(TypedDict):
     result: str | None
     line: int
 
+
 class ControlFlowStatusHandler(DynamicNonVarStatusHandler):
-    def __init__(self, line: int, type: Literal["break", "continue"], is_english: bool):
+    def __init__(self, line: int, type: Literal["break", "continue"], condition_line: int, is_english: bool):
         super().__init__(line, is_english)
         self.type = type
+        self.condition_line = condition_line
 
     def check_status(self, send_event: Debugger2GameEvent):
         # lineがあっている時点で正しい → 正しいcontinueまたはbreakを選んでいる
@@ -623,6 +629,7 @@ class ControlFlowStatusHandler(DynamicNonVarStatusHandler):
             )
         ]
         return "correct"
+
 
 class ExpressionStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, expr: list[Comment], is_english: bool):
@@ -708,11 +715,13 @@ class ReturnStatusHandler(DynamicNonVarStatusHandler):
 
         return "end"
 
+class VariableValueStrAfterSideEffect(TypedDict):
+    current_value_str: str
+    result_value_str: str
 
 class DynamicCommentHandler:
     def __init__(self, comments: list[Comment]):
         self.index_scanned_currently = 0
-        # [ {"id": 1, "description": [{"name": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]} ]
         # a + b (=9) のような、途中式(comment)の結果を記録する 
         self.expr_result_by_id: list[str | None] = [None] * len(comments) 
         # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
@@ -726,18 +735,13 @@ class DynamicCommentHandler:
 
         self.current_function_comment: FunctionComment | None = None
 
+        # 演算子による副作用後の値を登録する (計算中に使われる値と、計算後の値)
+        self.variable_value_str_after_side_effect_dict: dict[str, VariableValueStrAfterSideEffect] = {}
+
     def get_str_base(self, comments: list[Comment]):
         expr_str_base_list: list[str] = []
 
         for comment in comments:
-            '''{
-            "id": 1, 
-            "description": [{"name": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], 
-            "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]
-            "execution_condition": dict[int, bool]
-            }
-            '''
-
             expr_description = comment["comment"]
 
             if "func_name" in expr_description:
@@ -752,13 +756,23 @@ class DynamicCommentHandler:
             else:
                 expr_str_base_list_by_part: list[str] = []
 
-                for expr_part in expr_description["expr"]: # "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                for expr_part in expr_description["expr"]:
                     if "type" in expr_part:
                         expr_str_base_list_by_part.append(self.get_reference_str_base(expr_part, expr_str_base_list))
                     elif "text" in expr_part:
                         expr_str_base_list_by_part.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
                         expr_str_base_list_by_part.append(expr_part["macro"])
+                    elif "operator" in expr_part:
+                        if "is_front_operator" in expr_part:
+                            expr_str_base = (
+                                f"{expr_part["operator"]}{expr_str_base_list[expr_part["operand_id"]]}" # 前置
+                                if expr_part["is_front_operator"] else 
+                                f"{expr_str_base_list[expr_part["operand_id"]]}{expr_part["operator"]}" # 後置
+                            )
+                        else:
+                            expr_str_base = f"{expr_str_base_list[expr_part["left_operand_id"]]} {expr_part["operator"]} {expr_str_base_list[expr_part["right_operand_id"]]}"
+                        expr_str_base_list_by_part.append(expr_str_base)
                     else: # expr_id
                         expr_str_base_list_by_part.append(expr_str_base_list[expr_part["expr_id"]])
 
@@ -790,13 +804,6 @@ class DynamicCommentHandler:
         self.current_function_comment = None
         
         while self.index_scanned_currently < len(self.expr_description_to_show_by_id):
-            '''{
-            "id": 1, 
-            "description": [{"name": "day"}, {"text": "\u3068"}, {"text": "1.2f"}, {"text": "\u3092\u639b\u3051\u307e\u3059"}], 
-            "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]
-            "execution_condition": dict[int, bool]
-            }
-            '''
             comment = self.expr_description_to_show_by_id[self.index_scanned_currently]
 
             if isinstance(comment, str):
@@ -853,9 +860,10 @@ class DynamicCommentHandler:
                 str_to_show_list: list[str] = []
                 special_operator: Literal["||", "&&", "?"] | None = None
 
-                for expr_part in expr_description["expr"]: # "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                for expr_part in expr_description["expr"]:
                     if "type" in expr_part:
                         reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, frame)
+
                         str_for_evaluation_list.append(reference_str_base)
                         str_to_show_list.append(f"<{reference_str_to_show}>(={frame.EvaluateExpression(reference_str_base).GetValue()})")
                     elif "text" in expr_part:
@@ -868,14 +876,68 @@ class DynamicCommentHandler:
                         str_to_show_list.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
                         if "text" in expr_part["replacement"]:
+
                             str_for_evaluation_list.append(expr_part["replacement"]["text"])
                             str_to_show_list.append(f"<{expr_part["macro"]}>(={expr_part["replacement"]["text"]})")
                         else: # expr_id
+                            
                             str_for_evaluation_list.append(self.get_expr_result(expr_part["replacement"]["expr_id"]))
                             str_to_show_list.append(f"<{expr_part["macro"]}>(={self.get_expr_result(expr_part["replacement"]["expr_id"]) or "not to evaluate"})")
+                    elif "operator" in expr_part:
+                        if "is_front_operator" in expr_part:
+                            str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
+                            if (operand_str := self.get_expr_result(expr_part["operand_id"])) is None:
+                                sys.exit(f"result of {str_to_show_base} is not found")
+
+                            if expr_part["is_front_operator"]:
+                                current_value_str = f"{operand_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
+                                result_value_str = current_value_str
+
+                            else:
+                                current_value_str = operand_str
+                                result_value_str = f"{current_value_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
+
+                            # 未定義動作を弾く
+                            if operand_str in self.variable_value_str_after_side_effect_dict:
+                                sys.exit("undefined expression is found")
+
+                            self.variable_value_str_after_side_effect_dict[operand_str] = VariableValueStrAfterSideEffect(
+                                current_value_str = current_value_str,
+                                result_value_str = result_value_str
+                            )
+                        else:
+                            str_to_show_base = self.get_expr_to_show(expr_part["right_operand_id"] + 1)
+                            if expr_part["operator"] == "=":
+                                if (left_operand_str := self.get_expr_result(expr_part["left_operand_id"])) is None:
+                                    sys.exit(f"result of {str_to_show_base} is not found")
+                                if (right_operand_str := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit(f"result of {str_to_show_base} is not found")
+                                current_value_str = right_operand_str
+                            else:
+                                if (left_operand_str := self.get_expr_result(expr_part["left_operand_id"])) is None:
+                                    sys.exit(f"result of {str_to_show_base} is not found")
+                                if (right_operand_str := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit(f"result of {str_to_show_base} is not found")
+                                current_value_str = f"{left_operand_str} {expr_part["operator"][:-1]} {right_operand_str}"
+
+                            # 未定義動作を弾く
+                            if left_operand_str in self.variable_value_str_after_side_effect_dict:
+                                sys.exit("undefined expression is found")
+
+                            self.variable_value_str_after_side_effect_dict[left_operand_str] = VariableValueStrAfterSideEffect(
+                                current_value_str = current_value_str,
+                                result_value_str = current_value_str
+                            )
+                        
+                        str_for_evaluation_list.append(current_value_str)
+                        str_to_show_list.append(f"<{str_to_show_base}>(={current_value_str})")
                     else: # expr_id
-                        str_for_evaluation_list.append(self.get_expr_result(expr_part["expr_id"]))
-                        str_to_show_list.append(f"<{self.get_expr_to_show(expr_part["expr_id"])}>(={self.get_expr_result(expr_part["expr_id"]) or "not to evaluate"})")
+                        str_to_show_base = self.get_expr_to_show(expr_part["expr_id"])
+                        if (result := self.get_expr_result(expr_part["expr_id"])) is None:
+                            sys.exit(f"result of {str_to_show_base} is not found")
+
+                        str_for_evaluation_list.append(result)
+                        str_to_show_list.append(f"<{str_to_show_base}>(={result})")
 
                 '''
                 ここで"||", "&&", "?"の演算子の処理を行う
@@ -896,6 +958,9 @@ class DynamicCommentHandler:
                             description_to_show_list.append(f"{expr_part["macro"]}(={expr_part["replacement"]["text"]})")
                         else:
                             description_to_show_list.append(f"{expr_part["macro"]}(={self.get_expr_result(expr_part["replacement"]["expr_id"])})")
+                    # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
+                    elif "operator" in expr_part:
+                        sys.exit("description parts cannot include side-effect part")
                     else: # expr_id
                         description_to_show_list.append(self.get_expr_result(expr_part["expr_id"]))
 
@@ -996,9 +1061,7 @@ class DynamicCommentHandler:
             sys.exit("current function comment is not found")
 
         return [
-            self.get_expr_result(expr_part["expr_id"]) 
-            if "expr_id" in expr_part else
-            None
+            self.get_expr_result(expr_part["expr_id"]) if "expr_id" in expr_part else None
             for expr_part in self.current_function_comment["description"]
         ]
 
@@ -1032,13 +1095,13 @@ class DynamicCommentHandler:
 def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
     # エラーハンドリング
     class ProgramFinished(Exception):
-        print("プログラムが終了しました")
+        print("program finished" if args.english else "プログラムが終了しました")
 
     class RollBack(Exception):
-        print("処理の巻き戻しを実行します")
+        print("starting rollback" if args.english else "処理の巻き戻しを実行します")
     
     class NoConnection(Exception):
-        print("クライアントとの接続が切れました")
+        print("Disconnected from the client" if args.english else "クライアントとの接続が切れました")
 
     class VarPreviousValue:
         def __init__(self, value=None, address=None):
@@ -1621,6 +1684,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.line_number: int = 0
             self.next_line_number: int = 0
             self.line_loop_list: list[LoopLineInfo] = []
+            self.line_loop_dict_by_frame: list[dict[int, LoopLineInfo]] = [{}]
             self.dynamic_comment_handler_being_checked: list[DynamicCommentHandler] = []
             self.std_messages: list[str] = []
             self.input_check_num = {}
@@ -1676,76 +1740,77 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.vars_tracker.start_tracking(self.frame)
             self.vars_checker()
 
-        def step_conditionally(self) -> None:
-            # scanf フォーマット → Python 正規表現パターンの対応表
-            scanf_patterns = {
-                "%d": (r"[-+]?\d+", "符号付き10進整数"),
-                "%i": (r"[-+]?(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)", "符号付き整数(何進数かは自動判定)"),
-                "%u": (r"\d+", "符号なし10進整数"),
-                "%o": (r"[0-7]+", "8進整数"),
-                "%x": (r"[0-9a-f]+", "16進整数(小文字)"),
-                "%X": (r"[0-9A-F]+", "16進整数(大文字)"),
-                "%f": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点"),
-                "%F": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点(INF, NANも可)"),
-                "%e": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(小文字)"),
-                "%E": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(大文字)"),
-                "%g": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(小文字)"),
-                "%G": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(大文字)"),
-                "%c": (r".", "1文字"),
-                "%s": (r"\S+", "文字列(区切りとなる空白以外)"),
-                "%p": (r"0x[0-9a-fA-F]+", "ポインタ"),
-                "%n": (r"", "出力された文字の個数")
-            }
+        # scanf フォーマット → Python 正規表現パターンの対応表
+        scanf_patterns = {
+            "%d": (r"[-+]?\d+", "符号付き10進整数"),
+            "%i": (r"[-+]?(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)", "符号付き整数(何進数かは自動判定)"),
+            "%u": (r"\d+", "符号なし10進整数"),
+            "%o": (r"[0-7]+", "8進整数"),
+            "%x": (r"[0-9a-f]+", "16進整数(小文字)"),
+            "%X": (r"[0-9A-F]+", "16進整数(大文字)"),
+            "%f": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点"),
+            "%F": (r"[-+]?\d*(\.\d+)?([eE][-+]?\d+)?", "固定小数点(INF, NANも可)"),
+            "%e": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(小文字)"),
+            "%E": (r"[-+]?\d+(\.\d+)?[eE][-+]?\d+", "指数表記(大文字)"),
+            "%g": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(小文字)"),
+            "%G": (r"[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", "固定小数点または指数表記の短い方(大文字)"),
+            "%c": (r".", "1文字"),
+            "%s": (r"\S+", "文字列(区切りとなる空白以外)"),
+            "%p": (r"0x[0-9a-fA-F]+", "ポインタ"),
+            "%n": (r"", "出力された文字の個数")
+        }
 
-            def skip_whitespace(text, pos):
-                """空白・改行・タブをスキップ"""
-                while pos < len(text) and text[pos].isspace():
-                    pos += 1
-                return pos
+        def skip_whitespace(self, text, pos):
+            """空白・改行・タブをスキップ"""
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            return pos
 
-            def match_scanf(fmt: str, text: str):
-                tokens = re.findall(r"%\*?[diuoxXfFeEgGcspn]", fmt)
-                pos = 0
-                results = []
+        def match_scanf(self, fmt: str, text: str):
+            tokens = re.findall(r"%\*?[diuoxXfFeEgGcspn]", fmt)
+            pos = 0
+            results = []
 
-                for i, token in enumerate(tokens):
-                    if token.endswith("c"):
-                        pass
-                    elif token.endswith("n"):
-                        results.append(str(pos))
-                        continue
-                    else:
-                        pos = skip_whitespace(text, pos)
+            for i, token in enumerate(tokens):
+                if token.endswith("c"):
+                    pass
+                elif token.endswith("n"):
+                    results.append(str(pos))
+                    continue
+                else:
+                    pos = self.skip_whitespace(text, pos)
 
-                    pat = scanf_patterns.get(token.lstrip("*"), (None, None))[0]
-                    if not pat:
-                        raise ValueError(f"Unsupported format specifier: {token}")
+                pat = self.scanf_patterns.get(token.lstrip("*"), (None, None))[0]
+                if not pat:
+                    raise ValueError(f"Unsupported format specifier: {token}")
 
-                    if pos >= len(text):
-                        return "incomplete", results, "", {"incomplete": [f'{t}: {scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i:]]}
-                    
-                    regex = re.compile(pat)
-                    match = regex.match(text, pos)
-                    # mismatchしたらscanfは終了して、mismatch以降の変数にはランダムな値が入るので、解析を終了する
-                    if not match:
-                        return "mismatch", results, text[pos:], {"mismatch": f'{token}: {scanf_patterns[token.lstrip("*")][1]}', "incomplete": [f'{t}: {scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i+1:]]}
+                if pos >= len(text):
+                    return "incomplete", results, "", {"incomplete": [f'{t}: {self.scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i:]]}
+                
+                regex = re.compile(pat)
+                match = regex.match(text, pos)
+                # mismatchしたらscanfは終了して、mismatch以降の変数にはランダムな値が入るので、解析を終了する
+                if not match:
+                    return "mismatch", results, text[pos:], {"mismatch": f'{token}: {self.scanf_patterns[token.lstrip("*")][1]}', "incomplete": [f'{t}: {self.scanf_patterns.get(t.lstrip("*"), (r"", "不明な指定子"))[1]}' for t in tokens[i+1:]]}
 
-                    value = match.group(0)
-                    # *がつく指定子では変数に代入しない
-                    if not token.startswith("%*"):
-                        results.append(value)
-                    pos = match.end()
+                value = match.group(0)
+                # *がつく指定子では変数に代入しない
+                if not token.startswith("%*"):
+                    results.append(value)
+                pos = match.end()
 
-                return "ok", results, text[pos:], {}
+            return "ok", results, text[pos:], {}
 
-            def is_complete_match(fmt: str, text: str):
-                """入力文字列がフォーマット全体に合致するかを確認"""
-                # stateは、incomplete, mismatch, okのどれか(これで入力の過不足一致不一致を確認する)
-                # resultsは一致した入力の結果
-                # remainingは入力の過分
-                state, results, remaining_text, errors = match_scanf(fmt, text)
-                return state, results, remaining_text, errors
-            
+        def is_complete_match(self, fmt: str, text: str):
+            """入力文字列がフォーマット全体に合致するかを確認"""
+            # stateは、incomplete, mismatch, okのどれか(これで入力の過不足一致不一致を確認する)
+            # resultsは一致した入力の結果
+            # remainingは入力の過分
+            state, results, remaining_text, errors = self.match_scanf(fmt, text)
+            return state, results, remaining_text, errors
+
+
+        def step_conditionally(self):
             # プロセスの状態を更新
             if self.is_end:
                 self.analyze_non_var_expr_comments(is_end = True)
@@ -1796,7 +1861,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if (new_stdin := event.get('stdin', None)) is not None:
                         
                         # ここの引数の型がis_complete_matchと合致するように後で修正する
-                        state, results, remaining, errors = is_complete_match(
+                        state, results, remaining, errors = self.is_complete_match(
                             self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0], 
                             self.stdin_buffer + new_stdin
                         )
@@ -1994,7 +2059,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             return state, frame, file_name, line_number, func_name, frame_num
 
-        def get_std_outputs(self) -> None:
+        def get_std_outputs(self):
             # 新しい出力だけ読む
             out_chunk = stdout_r.read()
             err_chunk = stderr_r.read()
@@ -2071,7 +2136,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             return start_line, end_line
 
-        def vars_checker(self, is_for_false: bool = False) -> None:
+        def vars_checker(self, is_for_false: bool = False):
             if self.is_end:
                 return
 
@@ -2087,7 +2152,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if (dynamic_variable_info["dynamic_var_node"]["name"], line_number) not in self.vars_tracker.vars_declared[-1]
                 ]
 
-            varsDeclLines_copy = varsDeclLines[:]
+            varsDeclLines_copy = varsDeclLines.copy()
 
             # やはり、変数は順番に取得させる
             while len(varsDeclLines_copy):
@@ -2262,13 +2327,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 expr_status_handler = IfStatusHandler(line, expr["conditions"], self.is_english)
             elif expr["type"] == "while":
                 expr_status_handler = WhileStatusHandler(line, expr["condition"], self.is_english)
+                self.append_line_loop("while", line)
             elif expr["type"] == "do_while":
                 expr_status_handler = DoWhileStatusHandler(line, expr["condition"], self.is_english)
-                # do_while_true用にここで追加する
                 self.append_line_loop("do_while", line)
             elif expr["type"] == "for":
                 expr_status_handler = ForStatusHandler(line, expr, self.is_english)
-
                 if "var_initializer" in expr:
                     self.vars_tracker.dynamic_variable_info_by_line[line] = [
                         DynamicVarInfo(
@@ -2279,10 +2343,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             current_comment = None
                         ) for var_info in expr["var_initializer"]
                     ]
+                self.append_line_loop("for", line)
             elif expr["type"] == "switch":
                 expr_status_handler = SwitchStatusHandler(line, expr, self.is_english)
             elif expr["type"] in ("continue", "break"):
-                expr_status_handler = ControlFlowStatusHandler(line, expr["type"], self.is_english)
+                expr_status_handler = ControlFlowStatusHandler(line, expr["type"], expr["condition_line"], self.is_english)
             elif expr["type"] == "expression":
                 expr_status_handler = ExpressionStatusHandler(line, expr["expr"], self.is_english)
             else: # return
@@ -2290,54 +2355,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             
             self.expr_status_handler_dict_by_frame[self.next_frame_num-2][line] = expr_status_handler
 
-        def append_line_loop(self, type: Literal["while", "do_while", "for"], line: int):
-            if (opposite_edge := self.line_data[self.func_name]["loops"].get(str(line), None)) is None:
-                sys.exit("opposite edge of a loop statement is not found")
-
-            if type in ("while", "for"):
-                if (len(self.line_loop_list) and self.line_loop_list[-1]["type"] == type and self.line_loop_list[-1]["top_edge"] == line and self.line_loop_list[-1]["frame_num"] == self.frame_num):
-                    return
-                
-                self.line_loop_list.append(
-                    LoopLineInfo(
-                        type = type,
-                        top_edge = line,
-                        bottom_edge = opposite_edge,
-                        frame_num = self.frame_num
-                    )
-                )
-            else:
-                if len(self.line_loop_list) and self.line_loop_list[-1]["type"] == type and self.line_loop_list[-1]["bottom_edge"] == line and self.line_loop_list[-1]["frame_num"] == self.frame_num:
-                    return
-                
-                self.line_loop_list.append(
-                    LoopLineInfo(
-                        type = type,
-                        top_edge = opposite_edge,
-                        bottom_edge = line,
-                        frame_num = self.frame_num
-                    )
-                )
-
-        def remove_line_loop(self, type: Literal["while", "do_while", "for", "break"], line: int):
-            if len(self.line_loop_list) == 0:
-                return
-            
-            if type in ("while", "for"):
-                if self.line_loop_list[-1]["type"] != type and self.line_loop_list[-1]["top_edge"] != line or self.line_loop_list[-1]["frame_num"] != self.frame_num:
-                    return
-            elif type == "do_while":
-                if self.line_loop_list[-1]["type"] != type and self.line_loop_list[-1]["bottom_edge"] != line or self.line_loop_list[-1]["frame_num"] != self.frame_num:
-                    return
-                
-            self.line_loop_list.pop(-1)
-
-        def check_expr_status(self, execution_info: ExecutionInfo):
+        def check_expr_status(self, execution_info: ExecutionInfo) -> Literal["correct", "incorrect", "after_loop_skip"]:
             if (current_expr_status_handler := self.expr_status_handler_dict_by_frame[self.frame_num-2].get(self.line_number, None)) is None:
-                return False
+                return "incorrect"
             
             if current_expr_status_handler.line != execution_info["line"]:
-                return False
+                return "incorrect"
             
             send_event = Debugger2GameEvent(
                 message = "",
@@ -2357,24 +2380,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_condition(send_event, execution_info["condition"])
                 if check_result == "correct":
                     if execution_info["condition"]:
-                        if execution_info["type"] == "while":
-                            start_line = self.line_number
-
-                            if self.line_number == self.next_line_number:
-                                if (end_line := self.line_data[self.func_name]["loops"].get(str(self.line_number))) is None:
-                                    sys.exit("end_line of while statement is not found")
-                            else: # self.line_number < self.next_line_numberにしかなり得ない
-                                end_line = self.next_line_number
-
-                            self.append_line_loop("while", self.line_number)
-                        else:
-                            if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number))) is None:
-                                sys.exit("end_line of do-while statement is not found")
-
-                            if self.line_number == self.next_line_number:
-                                end_line = self.line_number
-                            else: # self.next_line_number < self.line_numberにしかなり得ない
-                                end_line = self.next_line_number
+                        return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                     else: # falseなら、一番下の行をstart_lineに設定して、next_line_numberをend_lineに設定する
                         self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
 
@@ -2386,22 +2392,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             start_line = self.line_number
                             end_line = self.next_line_number
 
-                        self.remove_line_loop(execution_info["type"], self.line_number)
+                        self.remove_line_loop(self.line_number)
             elif isinstance(current_expr_status_handler, ForStatusHandler):
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 
                 # for falseの条件文チェックが完了した場合のみ、スキップされ得る次の変数リストを取得する
                 if check_result == "correct" and execution_info["type"] == "for":
                     if execution_info["condition"]:
-                        if self.line_number == self.next_line_number:
-                            start_line = self.line_number
-                            if (end_line := self.line_data[self.func_name]["loops"].get(str(self.line_number))) is None:
-                                sys.exit("end_line of for statement is not found")
-                        else:
-                            start_line = self.line_number
-                            end_line = self.next_line_number
-
-                        self.append_line_loop("for", self.line_number)
+                        return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                     else:
                         self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
 
@@ -2409,18 +2407,19 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             sys.exit("start_line of for statement is not found")
                         end_line = self.next_line_number
 
-                        self.remove_line_loop(execution_info["type"], self.line_number)
+                        self.remove_line_loop(self.line_number)
             elif isinstance(current_expr_status_handler, SwitchStatusHandler) and execution_info["type"] == "switch":
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 if check_result == "correct":
                     self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                     start_line = self.line_number
                     end_line = self.next_line_number
-            elif isinstance(current_expr_status_handler, ControlFlowStatusHandler) and execution_info["type"] in ("continue", "break"):
-                check_result = current_expr_status_handler.check_status(send_event)
-                self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
-                if execution_info["type"] == "break":
-                    self.remove_line_loop(execution_info["type"], self.line_number)
+            elif isinstance(current_expr_status_handler, ControlFlowStatusHandler):
+                if current_expr_status_handler.type == execution_info["type"]:
+                    check_result = current_expr_status_handler.check_status(send_event)
+                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                    if execution_info["type"] == "break":
+                        self.remove_line_loop(current_expr_status_handler.condition_line)
             elif isinstance(current_expr_status_handler, ExpressionStatusHandler) and execution_info["type"] == "expression":
                 check_result = current_expr_status_handler.check_expr(send_event)
                 if check_result == "correct":
@@ -2435,22 +2434,22 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         send_event["return_value"] = current_expr_status_handler.result
                         send_event["items"] = self.vars_tracker.get_value()
                         dynamic_comment_handler.set_function_comment(current_expr_status_handler.result)
-                        
 
+                    self.remove_line_loop_of_frame_by_return()
                     self.expr_status_handler_dict_by_frame.pop(-1)
 
                 if self.is_end:
                     send_event["message"] = "Congraturations!! Here is a goal!!" if self.is_english else "おめでとうございます!! ここがゴールです!!"
                     send_event["is_finished"] = True
             else:
-                return False
+                return "incorrect"
 
             if not self.is_end:
                 if check_result == "incorrect":
-                    return False
+                    return "incorrect"
                 elif check_result == "next_function":
                     self.analyze_next_function(current_expr_status_handler)
-                    return True
+                    return "correct"
 
             self.set_skipped_var_declaration(start_line, end_line)
 
@@ -2464,7 +2463,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             if self.is_end:
                 raise ProgramFinished()
 
-            return True
+            return "correct"
         
         def analyze_next_function(self, expression_info_being_analyzed: DynamicNonVarStatusHandler | DynamicVarInfo):
             if isinstance(expression_info_being_analyzed, DynamicNonVarStatusHandler):
@@ -2488,7 +2487,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             self.event_sender(
                 Debugger2GameEvent(
-                    message = f"Will you skip function \"{self.func_crnt_name}\" ?" if self.is_english else f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?",
+                    message = (f"Will you skip function \"{self.func_crnt_name}\" ?" 
+                               if self.is_english else 
+                               f"遷移先の関数 {self.func_crnt_name} の処理をスキップしますか?"
+                            ),
                     status = "ok", 
                     func_skip = index,
                     skipped_function_list = skipped_function_list
@@ -2507,6 +2509,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.step_conditionally()
 
                         if back_line_number == self.line_number and back_frame_num == self.frame_num:
+                            self.remove_line_loop_of_frame_by_return()
                             break
 
                         if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
@@ -2517,9 +2520,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 if isinstance(current_expr_status_handler, ReturnStatusHandler):
                                     self.expr_status_handler_dict_by_frame.pop(-1)
                                     return_value = current_expr_status_handler.result
+                                    self.remove_line_loop_of_frame_by_return()
                                     break
-                                else:
-                                    self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+
+                                if isinstance(current_expr_status_handler, WhileStatusHandler, DoWhileStatusHandler, ForStatusHandler):
+                                    self.remove_line_loop(current_expr_status_handler.line)
+                                
+                                self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                             elif result == "next_function":
                                 current_comment_w_index = current_expr_status_handler.get_next_function()
                                 current_comment_w_index[0].set_function_comment(self.analyze_next_function_in_skip())
@@ -2601,9 +2608,15 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if (result := current_expr_status_handler.check_expr_automatically()) == "end":
                         if isinstance(current_expr_status_handler, ReturnStatusHandler):
                             self.expr_status_handler_dict_by_frame.pop(-1)
+                            self.remove_line_loop_of_frame_by_return()
                             return current_expr_status_handler.result
-                        else:
-                            self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                        elif isinstance(current_expr_status_handler, WhileStatusHandler, DoWhileStatusHandler, ForStatusHandler):
+                            self.remove_line_loop(current_expr_status_handler.line)
+                        elif isinstance(current_expr_status_handler, ControlFlowStatusHandler):
+                            if current_expr_status_handler.type == "break":
+                                self.remove_line_loop(current_expr_status_handler.condition_line)
+
+                        self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                     elif result == "next_function":
                         current_comment_handler, index = current_expr_status_handler.get_next_function()
                         current_comment_handler.set_function_comment(self.analyze_next_function_in_skip())
@@ -2619,7 +2632,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 if execution_info is not None:
                     # ここで何が返されるかによって次のアクションに向かうか、今のアクションを解析するか、間違ったアクションをしたのかを解析する
-                    if self.check_expr_status(execution_info) is False:
+                    if (result := self.check_expr_status(execution_info)) == "incorrect":
                         self.event_sender(
                             Debugger2GameEvent(
                                 message = "You did a different action !!" if self.is_english else "異なる処理に対するアクションをしました!!", 
@@ -2627,7 +2640,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             )
                         )
                         return CONTINUE
-                    
+                    elif result == "after_loop_skip":
+                        return CONTINUE
                 else:
                     self.event_sender(
                         Debugger2GameEvent(
@@ -2690,7 +2704,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 event = json.loads(data.decode())
                 if event["rollback"]:
                     self.reset_state()
-                    self.events_history[:] = self.events_history[:event["index"]]
+                    del self.events_history[event["index"]:]
                     raise RollBack()
                 else:
                     self.event_sender(
@@ -2771,6 +2785,133 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             send_data = json.dumps(send_event)
             conn.sendall(send_data.encode('utf-8'))
 
+        def append_line_loop(self, type: Literal["while", "do_while", "for"], line: int):
+            if (opposite_edge := self.line_data[self.func_name]["loops"].get(str(line), None)) is None:
+                sys.exit("opposite edge of a loop statement is not found")
+
+            if len(self.line_loop_dict_by_frame) <= self.frame_num - 2:
+                self.line_loop_dict_by_frame.append({})
+
+            crnt_line_loop_dict = self.line_loop_dict_by_frame[self.frame_num - 2]
+
+            if line in crnt_line_loop_dict:
+                return
+            
+            if type in ("while", "for"):
+                crnt_line_loop_dict[line] = LoopLineInfo(
+                    type = type,
+                    top_edge = line,
+                    bottom_edge = opposite_edge
+                )
+            else:
+                crnt_line_loop_dict[line] = LoopLineInfo(
+                    type = type,
+                    top_edge = opposite_edge,
+                    bottom_edge = line
+                )
+
+        def remove_line_loop(self, line: int):
+            if len(self.line_loop_dict_by_frame) <= self.frame_num - 2:
+                sys.exit(f"line loop info is not found in frame layer no.{self.frame_num-2}")
+
+            if line not in self.line_loop_dict_by_frame[self.frame_num - 2]:
+                sys.exit(f"line loop info of line {line} is not found in frame layer no.{self.frame_num-2}")
+
+            return self.line_loop_dict_by_frame[self.frame_num - 2].pop(line)
+
+        def remove_line_loop_of_frame_by_return(self):
+            if len(self.line_loop_dict_by_frame) > self.frame_num - 3:
+                sys.exit(f"line loop info is not found in function in frame layer no.{self.frame_num-2}")
+
+            del self.line_loop_dict_by_frame[self.frame_num-2:]
+
+        def check_loop_statement_skip(self, send_event: Debugger2GameEvent, current_expr_status_handler: DynamicNonVarStatusHandler):
+            if (loop_line_info := self.line_loop_dict_by_frame[self.frame_num-2].get(current_expr_status_handler.line)
+                if len(self.line_loop_dict_by_frame) > self.self.frame_num - 2 else None) is None:
+                sys.exit(f"loop line info is not found in line of {current_expr_status_handler.line}")
+
+            send_event["message"] = (
+                f"Will you skip {loop_line_info["type"]} loop of line {loop_line_info["top_edge"]} to {loop_line_info["bottom_edge"]} ?" 
+                if self.is_english else 
+                f"{loop_line_info["top_edge"]}から{loop_line_info["bottom_edge"]}行の{loop_line_info["type"]}文の処理をスキップしますか?"
+            )
+            send_event["skipped_function_list"] = current_expr_status_handler.get_skipped_functions()
+            send_event["loop_skip"] = True
+
+            self.event_sender(send_event)
+
+            line_number_to_back = current_expr_status_handler.line
+            if (event := self.event_receiver()) is None:
+                raise ProgramFinished()
+
+            if event.get("skip", False):
+                send_event = Debugger2GameEvent(
+                    message = "loop skip is completed" if self.is_english else "スキップが完了しました",
+                    status = "ok"
+                )
+
+                while True:
+                    self.step_conditionally()
+
+                    if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
+                        if (current_expr_status_handler := self.expr_status_handler_dict_by_frame[self.frame_num-2].get(self.line_number, None)) is None:
+                            sys.exit("expr status handler is not found")
+
+                        if (result := current_expr_status_handler.check_expr_automatically()) == "end":
+                            if isinstance(current_expr_status_handler, ControlFlowStatusHandler) and current_expr_status_handler.type == "break":
+                                self.remove_line_loop(current_expr_status_handler.condition_line)
+                                # マップにて、該当するbreakのワープゾーンまで遷移させるために、current_expr_status_handler.lineをsend_eventに登録する
+                                send_event["break_line_after_loop_skip"] = current_expr_status_handler.line
+                                break
+                            elif isinstance(current_expr_status_handler, WhileStatusHandler, DoWhileStatusHandler, ForStatusHandler):
+                                self.remove_line_loop(current_expr_status_handler.line)
+                                # スキップ開始行に戻っているならスキップは終了目前であるため、スキップ終了の手続きを開始する
+                                if current_expr_status_handler.line == line_number_to_back:
+                                    break
+                            elif isinstance(current_expr_status_handler, ReturnStatusHandler):
+                                self.remove_line_loop_of_frame_by_return()
+                                # マップにて、該当するreturnのキャラまで遷移させるために、current_expr_status_handler.lineをsend_eventに登録する
+                                send_event["return_line_after_loop_skip"] = current_expr_status_handler.line
+                                break
+                            
+                            self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                        elif result == "next_function":
+                            current_comment_w_index = current_expr_status_handler.get_next_function()
+                            current_comment_w_index[0].set_function_comment(self.analyze_next_function_in_skip())
+                
+                self.event_sender(
+                    send_event
+                )
+
+                return True
+            else:
+                if isinstance(current_expr_status_handler, WhileStatusHandler):
+                    if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
+                        sys.exit("end_line of while statement is not found")
+                    end_line = self.next_line_number
+                elif isinstance(current_expr_status_handler, DoWhileStatusHandler):
+                    start_line = self.line_number
+                    end_line = self.next_line_number
+                elif isinstance(current_expr_status_handler, ForStatusHandler):
+                    if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
+                        sys.exit("start_line of for statement is not found")
+                    end_line = self.next_line_number
+                else:
+                    sys.exit("non-loop type expr status handler is found in loop skip process")
+
+                self.set_skipped_var_declaration(start_line, end_line)
+
+                self.event_sender(
+                    Debugger2GameEvent(
+                        message = f"skip is canceled" if self.is_english else f"スキップをキャンセルしました。",
+                        status = "ok",
+                        vars_w_value_changed = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())),
+                        vars_w_value_unchanged = self.get_vars_w_value_unchanged()
+                    )
+                )
+                
+                return False
+            
     print(f"[connected] {addr} is connected" if args.english else f"[接続] {addr} が接続しました")
 
     stdout_file = None
@@ -2839,6 +2980,9 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # 変数は次の行での値を見て考える(まず変数チェッカーで次の行に進み変数の更新を確認) => その行と前の行で構文や関数は比較する(構文内の行の移動及び関数の移動は次の行と前の行が共に必要)
             while process.GetState() == lldb.eStateStopped:
                 debug_manager.analyze_frame()
+        except ProgramFinished:
+            print(e)
+            break
         except Exception as e:
             # エラーの行番をトラックするためのコード
             tb = e.__traceback__

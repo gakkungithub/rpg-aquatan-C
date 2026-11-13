@@ -1210,6 +1210,7 @@ def load_image(imgdir, file, colorkey=None):
     except pygame.error as message:
         print("Cannot load image:", file)
         raise SystemExit(message)
+    
     if colorkey is not None:
         if colorkey == -1:
             image = image.convert_alpha()
@@ -1332,6 +1333,7 @@ class Map:
         endx = startx + SCR_RECT.width//GS + 1
         starty = offset_y // GS
         endy = starty + SCR_RECT.height//GS + 1
+
         # マップの描画
         for y in range(starty, endy):
             for x in range(startx, endx):
@@ -1380,22 +1382,32 @@ class Map:
         # マップ範囲内か？
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
             return False
+        
         if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
             return False
+        
         # マップチップは移動可能か？
         if self.movable_type[self.map[y][x]] == 0:
             return False
+        
         # キャラクターと衝突しないか？
         for chara in self.charas:
             if chara.pos() == (x, y):
                 return False
+            
         # イベントと衝突しないか？
         for event in self.events:
-            if self.movable_type[event.mapchip] == 0:
-                if event.pos() == (x, y):
-                    if isinstance(event, SmallDoor) and event.status == 1:
-                        break
-                    return False
+            if self.movable_type[event.mapchip] != 0:
+                continue
+
+            if event.pos() != (x, y):
+                continue
+
+            if isinstance(event, SmallDoor) and event.status == 1:
+                break
+
+            return False
+                
         return True
 
     def is_movable_but_chara(self, x: int, y: int):
@@ -1403,11 +1415,14 @@ class Map:
         # マップ範囲内か？
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
             return False
+        
         # マップチップは移動可能か？
         if 3200 <= self.map[y][x] <= 3299 or self.map[y][x] == 16000:
             return False
+        
         if self.movable_type[self.map[y][x]] == 0:
             return False
+        
         # イベントと衝突しないか？
         for event in self.events:
             # print(event.mapchip)
@@ -1439,10 +1454,12 @@ class Map:
         # ここのファイル名は後々変える -----------------------------------------------------------
         file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", self.name.lower(), self.name.lower() + ".json")
         with codecs.open(file, "r", "utf-8") as fp:
-            json_data = json.load(fp)
+            json_data: MapData = json.load(fp)
+
         self.row = json_data["row"]
         self.col = json_data["col"]
         self.default = json_data["default"]
+
         if self.floor != json_data["floor"]:
             # bgm設定
             SMANAGER.stop_bgm()
@@ -1456,10 +1473,12 @@ class Map:
                 SMANAGER.play_bgm("grass_stage_bgm", 0.3)
             else: # 402 = iron
                 SMANAGER.play_bgm("iron_stage_bgm")
+        
         self.floor = json_data["floor"]
         self.map = json_data["map"]
         self.events = []
         self.charas = []
+
         for chara in json_data["characters"]:
             chara_type = chara["type"]
             if chara_type == "CHARA":  # キャラクター
@@ -1474,6 +1493,7 @@ class Map:
                 self.create_npc_j(chara)
             elif chara_type == "NPCPATH":  # NPCPATH
                 self.create_npcpath_j(chara)
+        
         for event in json_data["events"]:
             event_type = event["type"]
             if event_type == "SIGN":  # 任意の文字を書く看板
@@ -1530,13 +1550,13 @@ class Map:
         text = data["text"]
         self.events.append(Sign((x,y),text))
 
-    def create_treasure_j(self, data):
+    def create_treasure_j(self, data: TreasureData):
         # 一度取得したアイテムの宝箱は現れないようにする
         if (PLAYER.find_item_belong_to_player(data["name"], data["start"])) is not None:
             return
 
         """宝箱を作成してeventsに追加する"""
-        x, y = int(data["x"]), int(data["y"])
+        x, y = data["x"], data["y"]
         name = data["name"]
         start = data["start"]
         end = data["end"]
@@ -1567,7 +1587,7 @@ class Map:
         door = Door((x, y), name)
         self.events.append(door)
 
-    def create_smalldoor_j(self, data):
+    def create_smalldoor_j(self, data: SDoorData):
         """ドアを作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         name = data["door_name"]
@@ -1575,20 +1595,7 @@ class Map:
         door = SmallDoor((x, y), name, direction)
         self.events.append(door)
 
-    # chara_return = {
-    #     "type": "CHARARETURN", 
-    #     "name": "15161" if chara_return.func_name else "15084", 
-    #     "x": int(chara_return.local_pos[1]+self.offset["x"]), 
-    #     "y": int(chara_return.local_pos[0]+self.offset["y"]),
-    #     "dir": 0, 
-    #     "movetype": 1, 
-    #     "message": ("Congraturations !! Here is A Goal !!" if self.is_english else "おめでとうございます!! ここがゴールです!!") if chara_return.func_name == "main" else (f"This is the end of function {chara_return.func_name} !!" if self.is_english else f"ここが {chara_return.func_name} の終了地点です!!"), 
-    #     "execution_info": chara_return.execution_info,
-    #     "detail": self.convert_to_comment_window_info(chara_return.comment_window_info),
-    #     "func": chara_return.func_name
-    # }
-
-    def create_charareturn_j(self, data):
+    def create_charareturn_j(self, data: CharaReturnData):
         """キャラクター(遷移元に戻る)を作成してcharasに追加する"""
         name = data["name"]
         x, y = int(data["x"]), int(data["y"])
@@ -1602,21 +1609,7 @@ class Map:
         # print(chara)
         self.charas.append(chara)
 
-    # chara_check_condition = {
-    #     "type": "CHARACHECKCONDITION", 
-    #     "name": str(color), 
-    #     "x": pos[1], 
-    #     "y": pos[0], 
-    #     "dir": chara_checkCondition.dir, 
-    #     "moveDir": move_dir,
-    #     "movetype": 1, 
-    #     "message": "Condition checked !! Get through here !!" if self.is_english else "条件文を確認しました！!　どうぞお通りください！!", 
-    #     "func": chara_checkCondition.func,
-    #     "execution_info": chara_checkCondition.execution_info, 
-    #     "detail": self.convert_to_comment_window_info(chara_checkCondition.comment_window_info)
-    # }
-
-    def create_characheckcondition_j(self, data):
+    def create_characheckcondition_j(self, data: CharaCheckConditionData):
         name = data["name"]
         x = int(data["x"]) 
         y = int(data["y"]) 
@@ -1643,31 +1636,7 @@ class Map:
         # print(chara)
         self.charas.append(chara)
 
-    # detail_by_line[firstLine] = {
-    #     "expr": self.convert_to_comment_window_info(detail["expr"]), 
-    #     "execution_info": detail["execution_info"],
-    #     "vars": [
-    #         {
-    #             "name": var_reference[0], 
-    #             "line": var_reference[1]
-    #         } 
-    #         for var_reference in detail["vars"]
-    #     ]
-    # }
-
-    # chara_expression = {
-    #     "type": "CHARAEXPRESSION", 
-    #     "name": "15165", 
-    #     "x": int(chara_expression.local_pos[1]+self.offset["x"]), 
-    #     "y": int(chara_expression.local_pos[0]+self.offset["y"]), 
-    #     "dir": 0,
-    #     "movetype": 1, 
-    #     "message": "updated values of items !!" if self.is_english else "変数の値を新しい値で更新できました!!", 
-    #     "func": chara_expression.func, 
-    #     "comments": detail_by_line
-    # }
-
-    def create_charaexpression_j(self, data):
+    def create_charaexpression_j(self, data: CharaExpressionData):
         """計算式を確認するキャラクターを追加する"""
         name = data["name"]
         x, y = int(data["x"]), int(data["y"])
@@ -1680,20 +1649,7 @@ class Map:
         # print(chara)
         self.charas.append(chara)
 
-    # move_event = {
-    #     "type": "MOVE", 
-    #     "x": int(move_event.local_from_pos[1]+self.offset["x"]), 
-    #     "y": int(move_event.local_from_pos[0]+self.offset["y"]),
-    #     "func": move_event.func_name,
-    #     "dest_x": int(move_event.local_to_pos[1]+self.offset["x"]), 
-    #     "dest_y": int(move_event.local_to_pos[0]+self.offset["y"]), 
-    #     "dest_map": program_name,
-    #     "execution_info": move_event.execution_info,
-    #     "detail": self.convert_to_comment_window_info(move_event.comment_window_info),
-    #     "mapchip": move_event.mapchip
-    # }
-
-    def create_move_j(self, data):
+    def create_move_j(self, data: MoveEventData):
         """移動イベントを作成してeventsに追加する"""
         x, y = int(data["x"]), int(data["y"])
         mapchip = int(data["mapchip"])
@@ -1718,16 +1674,6 @@ class Map:
         place_label = data["place_label"]
         place = PlacesetEvent((x, y), mapchip, place_label)
         self.events.append(place)
-
-    def create_help_j(self, data):
-        x, y = int(data["x"]), int(data["y"])
-        if (x, y) in PLAYER.helps_aquired:
-            return
-        raw_comments_list: list[list[str]] = data["comments"]
-        comments_list: list[str] = []
-        for raw_comments_by_page in raw_comments_list:
-            comments_list.append('\n'.join(raw_comments_by_page))
-        self.helps[(x, y)] = '\f'.join(comments_list)
 
     def create_auto_j(self, data):
         """自動イベントを作成してeventsに追加する"""
@@ -1906,6 +1852,26 @@ class PlayerFuncHistory(TypedDict):
     line: int
     func: str
 
+class PlayerStatus(TypedDict):
+    HP: int
+    MP: int
+    ATK: int
+    DEF: int
+    AGI: int
+
+class OpenedDoor(TypedDict):
+    x: int
+    y: int
+    direction: Literal[0,1,2,3]
+
+class MovingCharaCheckCondition(TypedDict):
+    x: int
+    y: int
+    avoiding_x: int
+    avoiding_y: int
+    avoiding_dir: Literal[0,1,2,3]
+
+
 #                                                              
 # 88888888ba  88                                               
 # 88      "8b 88                                               
@@ -1934,7 +1900,13 @@ class Player(Character):
         self.waitingMove = None
         self.move_history: list[PlayerFuncHistory] = []
         self.move5History: list[dict] = []
-        self.status = {"HP":100, "MP":20, "ATK":10, "DEF":10, "AGI":8}
+        self.status = PlayerStatus(
+            HP = 100,
+            MP = 20,
+            ATK = 10,
+            DEF = 10,
+            AGI = 8
+        )
         self.itembag = ItemBag()
         self.common_itembag = ItemBag()
         self.sender : EventSender = sender
@@ -1953,11 +1925,11 @@ class Player(Character):
                 }
             )
         )
-        self.itemNameShow = True
+        self.is_item_name_show: bool = True
         # スモールドアを扉を閉じるために記憶
-        self.door: dict | None = None 
+        self.opened_door: OpenedDoor | None = None 
         # プレイヤーが条件式通過した後に条件式確認キャラが元の位置に戻るために記憶する
-        self.ccchara: dict | None = None
+        self.ccchara: MovingCharaCheckCondition | None = None
 
         # 遷移済みの関数の情報を記憶
         # ワープゾーンまたは宝箱の計算式におけるチェック済みの関数を確認するための辞書
@@ -2028,13 +2000,13 @@ class Player(Character):
                 else:
                     SMANAGER.play_se("walk")
 
-                # if (self.door and 
-                #     ((self.door["direction"] == DOWN and (self.door["x"], self.door["y"]-1) == (self.x, self.y)) or (self.door["direction"] == UP and (self.door["x"], self.door["y"]+1) == (self.x, self.y)) or
-                #      (self.door["direction"] == LEFT and (self.door["x"]+1, self.door["y"]) == (self.x, self.y)) or (self.door["direction"] == RIGHT and (self.door["x"]-1, self.door["y"]) == (self.x, self.y)))):
-                #     door = mymap.get_event(self.door["x"], self.door["y"])
+                # if (self.opened_door and 
+                #     ((self.opened_door["direction"] == DOWN and (self.opened_door["x"], self.opened_door["y"]-1) == (self.x, self.y)) or (self.opened_door["direction"] == UP and (self.opened_door["x"], self.opened_door["y"]+1) == (self.x, self.y)) or
+                #      (self.opened_door["direction"] == LEFT and (self.opened_door["x"]+1, self.opened_door["y"]) == (self.x, self.y)) or (self.opened_door["direction"] == RIGHT and (self.opened_door["x"]-1, self.opened_door["y"]) == (self.x, self.y)))):
+                #     door = mymap.get_event(self.opened_door["x"], self.opened_door["y"])
                 #     if isinstance(door, SmallDoor):
                 #         door.close()
-                #         self.door = None
+                #         self.opened_door = None
         elif self.damage_motion:
             if self.damage_motion[0] == 0:
                 self.damage_label = ""
@@ -2354,8 +2326,7 @@ class Player(Character):
         elif self.direction == UP:
             nexty = self.y - 1
         # その方向にドアがあるか？
-        event = mymap.get_event(nextx, nexty)
-        if not isinstance(event, Door):
+        if not isinstance((event := mymap.get_event(nextx, nexty)), Door):
             return False
         
         # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
@@ -2368,7 +2339,11 @@ class Player(Character):
                 event.open()
                 # MSGWND.set(f"「{event.door_name}」への扉を開けた！")
                 self.close_opened_door(mymap)
-                self.door = {"x": event.x, "y": event.y, "direction": event.direction}
+                self.opened_door = OpenedDoor(
+                    x = event.x,
+                    y = event.y,
+                    direction = event.direction
+                )
             else:
                 MSGWND.set("Cannot open this door from this side !!" if ISENGLISH else "この方向から扉は開けられません!!")
         else:
@@ -2377,15 +2352,14 @@ class Player(Character):
         return True
 
     def close_opened_door(self, mymap: Map):
-        if self.door is None:
+        if self.opened_door is None:
             return
         
-        door = mymap.get_event(self.door["x"], self.door["y"])
-        if not isinstance(door, SmallDoor):
+        if not isinstance((door := mymap.get_event(self.opened_door["x"], self.opened_door["y"])), SmallDoor):
             return
         
         door.close()
-        self.door = None
+        self.opened_door = None
 
     def talk(self, mymap: Map):
         """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
@@ -2400,6 +2374,7 @@ class Player(Character):
             nextx = self.x + 1
         else: # UP
             nexty = self.y - 1
+        
         # その方向にキャラクターがいるか？
         chara = mymap.get_chara(nextx, nexty)
         # キャラクターがいればプレイヤーの方向へ向ける
@@ -2549,14 +2524,13 @@ class Player(Character):
                 return False
 
             if received_event['status'] == "ng": # 間違った行動をした場合
-                if mymap.name in ("tutorial", "tutorial_en"):
-                    MSGWND.set(
+                MSGWND.set(
+                    (
                         "HP -10 if you do a wrong action for a C step execution... \fKeep your HP above 0!!"
                         if ISENGLISH else
                         "間違ったアクションを実行すると10ダメージ受けてしまいます、、、\fHPが0になるとゲームオーバーなので気をつけましょう!!"
-                    )
-                else:
-                    MSGWND.set(received_event['message'])
+                    ) if mymap.name in ("tutorial", "tutorial_en") else received_event['message']
+                )
             else:
                 self.add_skipped_funcs(
                     received_event["skipped_function_list"], 
@@ -2673,11 +2647,14 @@ class Player(Character):
                         SMANAGER.stop_bgm()
                         SMANAGER.play_se("goal")
                         self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
+
                         if mymap.name in ("tutorial", "tutorial_en"):
-                            if ISENGLISH:
-                                received_event['message'] += "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
-                            else:
-                                received_event['message'] += "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                            received_event['message'] += (
+                                "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
+                                if ISENGLISH else
+                                "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                            )
+                        
                         MSGWND.set(received_event['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
                         self.fp.write("finished\n")
                     else:
@@ -2784,8 +2761,7 @@ class Player(Character):
         if skipped_functions_list is None:
             return
         
-        checked_func_location = CheckedFuncLocation(map_name, func_name, line, var_name)
-        if checked_func_location not in self.checked_funcs:
+        if (checked_func_location := CheckedFuncLocation(map_name, func_name, line, var_name)) not in self.checked_funcs:
             return
 
         # list[[a,b], [c,d]] に list[[], [], [e,f]]を追加
@@ -2806,8 +2782,7 @@ class Player(Character):
                 checked_funcs.append(checked_function_state_list)
 
     def set_completed_checked_func_location(self, map_name: str, func_name: str, line: int, var_name: str | None = None):
-        checked_func_location = CheckedFuncLocation(map_name, func_name, line, var_name)
-        if checked_func_location in self.checked_funcs:
+        if (checked_func_location := CheckedFuncLocation(map_name, func_name, line, var_name)) in self.checked_funcs:
             self.completed_checked_func_location = checked_func_location
 
     def append_analyzed_func_state(self, return_value: str):
@@ -2823,6 +2798,7 @@ class Player(Character):
 
         checking_func = self.checking_func.pop(-1)
         checked_func_location = checking_func[0]
+
         checked_func_state = CheckedFuncState(
             func_name = checking_func[1]["name"], 
             return_value = return_value, 
@@ -2890,7 +2866,7 @@ class Player(Character):
 
     def set_game_mode(self, type):
         if type == "item":
-            self.itemNameShow = not self.itemNameShow
+            self.is_item_name_show = not self.is_item_name_show
 
     def damage(self, amount: int = 10):
         SMANAGER.play_se("incorrect_action")
@@ -3595,7 +3571,7 @@ class MessageWindow(Window):
                             ]
                         )
 
-                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.opened_door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
                     PLAYER.checked_funcs = player_history[2]["checked_funcs"]
                     PLAYER.codeElementWindow_list = []
@@ -3606,7 +3582,7 @@ class MessageWindow(Window):
                     PLAYER.func = player_history[2]["func"]
                     PLAYER.log_lists = player_history[2]["logLists"]
 
-                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
+                    del self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index:]
 
                     fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
 
@@ -3633,7 +3609,7 @@ class MessageWindow(Window):
                     PLAYER.waitingMove = None
                     PLAYER.move_history = []
                     PLAYER.move5History = []
-                    PLAYER.door = player_history[2]["door"]
+                    PLAYER.opened_door = player_history[2]["door"]
                     PLAYER.ccchara = player_history[2]["ccchara"]
                     PLAYER.checked_funcs = player_history[2]["checked_funcs"]
                     PLAYER.codeElementWindow_list = []
@@ -3642,7 +3618,7 @@ class MessageWindow(Window):
                     PLAYER.address_to_fname = {}
                     PLAYER.address_to_size = {}
                     PLAYER.func = player_history[2]["func"]
-                    self.sender.programCodeWindow.history[:] = self.sender.programCodeWindow.history[:self.sender.programCodeWindow.rollback_index]
+                    del self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index:]
                     
                     fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
                     PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
@@ -4253,6 +4229,7 @@ class CharaCheckCondition(Character):
         super().draw(screen, offset)
         if self.execution_info["line"] != PLAYER.sender.programCodeWindow.linenum:
             return
+        
         offset_x, offset_y = offset
         px = self.rect.topright[0] - 14
         py = self.rect.topright[1] - 22
@@ -4261,23 +4238,25 @@ class CharaCheckCondition(Character):
     def set_checked(self):
         self.avoiding = True
         self.moving = True
-        if self.move_direction == DOWN:
-            self.vx, self.vy = 0, self.speed
-            self.direction = DOWN
-            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y+1, "avoiding_dir": UP}
-        elif self.move_direction == LEFT:
-            self.vx, self.vy = -self.speed, 0
-            self.direction = LEFT
-            return {"x": self.x, "y": self.y, "avoiding_x": self.x-1, "avoiding_y": self.y, "avoiding_dir": RIGHT}
-        elif self.move_direction == RIGHT:
-            self.vx, self.vy = self.speed, 0
-            self.direction = RIGHT
-            return {"x": self.x, "y": self.y, "avoiding_x": self.x+1, "avoiding_y": self.y, "avoiding_dir": LEFT}
-        else:
-            self.vx, self.vy = 0, -self.speed
-            self.direction = UP
-            return {"x": self.x, "y": self.y, "avoiding_x": self.x, "avoiding_y": self.y-1, "avoiding_dir": DOWN}
 
+        direction_info = {
+            DOWN:  (0, 1, UP,    0, self.speed),
+            LEFT:  (-1, 0, RIGHT, -self.speed, 0),
+            RIGHT: (1, 0, LEFT,   self.speed, 0),
+            UP:    (0, -1, DOWN,  0, -self.speed),
+        }
+
+        dx, dy, avoiding_dir, self.vx, self.vy = direction_info[self.move_direction]
+        self.direction = self.move_direction
+
+        return MovingCharaCheckCondition(
+            x = self.x,
+            y = self.y,
+            avoiding_x = self.x + dx,
+            avoiding_y = self.y + dy,
+            avoiding_dir = avoiding_dir
+        )
+    
     def back_to_init_pos(self):
         self.avoiding = False
         self.moving = True
@@ -4572,7 +4551,11 @@ class CodeElementWindow(Window):
             condition_description_list: list[str] = []
             for line, condition in comment["execution_condition"].items():
                 condition_str = expr_description_str_to_show[line]["expr"]
-                condition_description_list.append(f"{condition_str} is {"True" if condition else "False"}" if ISENGLISH else f"{condition_str}が{"真" if condition else "偽"}")
+                condition_description_list.append(
+                    f"{condition_str} is {"True" if condition else "False"}" 
+                    if ISENGLISH else 
+                    f"{condition_str}が{"真" if condition else "偽"}"
+                )
 
             if len(condition_description_list):
                 # # もし、評価されないと判断された場合、計算式の評価をスキップする
@@ -4605,13 +4588,15 @@ class CodeElementWindow(Window):
                 else:
                     str_to_show_list: list[str] = []
 
-                    for expr_part in expr_description["expr"]: # "expr": [{"name": "day"}, {"text": "*"}, {"text": "1.2f"}]}
+                    for expr_part in expr_description["expr"]: # you need to check here
                         if "type" in expr_part:
                             str_to_show_list.append(self.get_reference_expr_comments(expr_part, expr_description_str_to_show))
                         elif "text" in expr_part:
                             str_to_show_list.append(expr_part["text"])
                         elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
                             str_to_show_list.append(expr_part["macro"])
+                        elif "operator" in expr_part:
+                            pass
                         else: # expr_id
                             str_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["expr"])
 
@@ -4640,6 +4625,9 @@ class CodeElementWindow(Window):
                             else:
                                 # description_to_show_list.append(f"{expr_part["macro"]}(={value_list_from_send_event(expr_part["replacement"]["expr_id"])})")
                                 pass
+                        # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
+                        elif "operator" in expr_part:
+                            sys.exit("description parts cannot include side-effect part")
                         else: # expr_id
                             description_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["description"])
 
@@ -4755,13 +4743,12 @@ class CodeElementWindow(Window):
                     self.draw_arrow(self.surface, self.LINE_COLOR, (x_pos_start+10, y_pos_list[x_pos_index]+(self.FONT_SIZE+2)//2), (x_pos-10, y_pos+(self.FONT_SIZE+2)//2))
 
                 # 関数が遷移済みかどうかで背景色を変える
-                if j < len(checked_funcs):
-                    if checked_funcs[j].checked:
-                        highlightColor = self.CHECKED_COLOR
-                    else:
-                        highlightColor = self.SKIPPED_CHECK_COLOR
-                else:
-                    highlightColor = self.NOT_CHECKED_COLOR
+                highlightColor = (
+                    self.CHECKED_COLOR 
+                    if checked_funcs[j].checked else 
+                    self.SKIPPED_CHECK_COLOR
+                ) if j < len(checked_funcs) else self.NOT_CHECKED_COLOR
+
                 # 背景色をつける
                 pygame.draw.rect(self.surface, highlightColor, pygame.Rect(x_pos, y_pos, highlight_width, self.FONT_SIZE + 4))
                 
@@ -4790,6 +4777,7 @@ class CodeElementWindow(Window):
             self.is_bottom_edge = True
         else:
             self.is_bottom_edge = False
+        
         if not self.is_right_edge and right_edge <= self.rect[2]:
             self.is_right_edge = True
         else:
@@ -4813,14 +4801,18 @@ class CodeElementWindow(Window):
                     log_comment = '\f'.join([f"{h["expr"]} : {h["description"]}" for h in self.hoverComment_list[i]])
                     MSGWND.set(log_comment)
                     return None
+                
             if 10 <= local_pos[0] <= self.rect[2] and self.y <= local_pos[1] <= self.rect[3]:
                 return 'scroll'
+            
             return None
 
-        if len(PLAYER.codeElementWindow_list) >= 2:
-            PLAYER.codeElementWindow_index = (PLAYER.codeElementWindow_index + shift) % len(PLAYER.codeElementWindow_list)
-        else:
-            PLAYER.codeElementWindow_index = 0
+        window_count = len(PLAYER.codeElementWindow_list)
+
+        PLAYER.codeElementWindow_index = (
+            (PLAYER.codeElementWindow_index + shift) % window_count
+            if window_count >= 2 else 0
+        )
 
         return None
 
@@ -4925,7 +4917,7 @@ class Treasure(Event):
         screen.blit(self.image, (px-offset_x, py-offset_y))
 
         # アイテム名を描画（宝箱の上に）
-        if self.item and PLAYER.pos() == self.pos() or PLAYER.itemNameShow:
+        if self.item and PLAYER.pos() == self.pos() or PLAYER.is_item_name_show:
             # 文字色（白）とアルファ付き背景（例: 半透明黒）
             text_surface, text_rect = self.font.render(
                 self.item, 
@@ -6136,7 +6128,7 @@ class EventSender:
                             {
                                 "x": PLAYER.x, 
                                 "y": PLAYER.y, 
-                                "door": PLAYER.door, 
+                                "door": PLAYER.opened_door, 
                                 "ccchara": PLAYER.ccchara, 
                                 "checked_funcs": PLAYER.checked_funcs.copy(), 
                                 "func": PLAYER.func,

@@ -34,13 +34,17 @@ nameは階層の名前(変数名), funcは関数情報のリスト
 class FuncWarpGroup(TypedDict):
     name: str
     func_warps: list[FuncWarp]
+        
+class MapData(TypedDict):
+    row: int
+    col: int
+    default: int
+    floor: int
+    map: list[list[int]]
+    events: list[MoveEventData | TreasureData | SDoorData]
+    characters: list[CharaReturnData | CharaCheckConditionData | CharaExpressionData]
 
-class ExpressionDetail(TypedDict):
-    expr: CommentWindowInfo
-    execution_info: ExecutionInfo
-    vars: list[VarReference]
-
-class TreasureInfo(TypedDict):
+class TreasureData(TypedDict):
     type: Literal["TREASURE"]
     x: int
     y: int
@@ -50,7 +54,7 @@ class TreasureInfo(TypedDict):
     func_groups: list[FuncWarpGroup | None]
     func: str
 
-class MoveEventInfo(TypedDict):
+class MoveEventData(TypedDict):
     type: Literal["MOVE"]
     x: int
     y: int
@@ -62,7 +66,7 @@ class MoveEventInfo(TypedDict):
     detail: CommentWindowInfo | None
     mapchip: int
 
-class CharaReturn(TypedDict):
+class CharaReturnData(TypedDict):
     type: Literal["CHARARETURN"]
     name: str
     x: int
@@ -74,7 +78,7 @@ class CharaReturn(TypedDict):
     detail: CommentWindowInfo
     func: str
 
-class CharaCheckCondition(TypedDict):
+class CharaCheckConditionData(TypedDict):
     type: Literal["CHARACHECKCONDITION"]
     name: str
     x: int
@@ -87,7 +91,12 @@ class CharaCheckCondition(TypedDict):
     execution_info: ExecutionInfo
     detail: CommentWindowInfo
 
-class CharaExpression(TypedDict):
+class ExpressionDetail(TypedDict):
+    expr: CommentWindowInfo
+    execution_info: ExecutionInfo
+    vars: list[VarReference]
+
+class CharaExpressionData(TypedDict):
     type: Literal["CHARAEXPRESSION"]
     name: str
     x: int
@@ -97,6 +106,13 @@ class CharaExpression(TypedDict):
     message: str
     func: str
     comments: dict[int | str, ExpressionDetail]
+
+class SDoorData(TypedDict):
+    type: Literal["SDOOR"]
+    x: int 
+    y: int
+    door_name: str
+    dir: int
 
 class LineInfoDataByFunc(TypedDict):
     lines: list[int]
@@ -122,6 +138,8 @@ class Debugger2GameEvent(TypedDict):
     func: NotRequired[str]
     func_skip: NotRequired[int]
     loop_skip: NotRequired[Literal[True]]
+    break_line_after_loop_skip: NotRequired[int]
+    return_line_after_loop_skip: NotRequired[int]
     skipped_function_list: NotRequired[list[list[str]] | None]
     next_func: NotRequired[NextFunctionInfo]
     vars_w_value_changed: NotRequired[list[VariablePartWithValue]]

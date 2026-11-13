@@ -98,11 +98,13 @@ def create_switch_case_executioin_info(line: int, true_case_index: int):
 class ControlFlowInfo(TypedDict):
     type: Literal["continue", "break"]
     line: int
+    condition_line: int
 
-def create_control_flow_info(type: Literal["continue", "break"], line: int):
+def create_control_flow_info(type: Literal["continue", "break"], line: int, condition_line: int):
     return ControlFlowInfo(
         type = type, 
-        line = line
+        line = line,
+        condition_line = condition_line
     )
 
 class ExpressionExecutionInfo(TypedDict):
