@@ -1509,26 +1509,55 @@ class AST2Flowchart:
             if len(child_tokens) < 2:
                 sys.exit("error in number of child tokens of unary operator")
 
-            operand_expr = self.parse_expr(operand_cursor, expr_info, execution_condition)
-            if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in unary operator expression")
-
             potential_operator_offset: int = child_tokens[0].location.offset
 
             if not isinstance(potential_operator_offset, int):
                 sys.exit("value of operator offset has to be integer")
 
             is_front = potential_operator_offset < self.get_cursor_offset(operand_cursor)
+            operator_spell = self.get_token_spelling(child_tokens[0]) if is_front else self.get_token_spelling(child_tokens[-1])
+
+            is_inc_or_dec = operator_spell in ("++", "--")
+
+            operand_expr = self.parse_expr(
+                operand_cursor, 
+                expr_info, 
+                execution_condition, 
+                required_expr_description_type = {"expr_id"} if is_inc_or_dec else None
+            )
+
+            if expr_info.has_standard_func_reference:
+                sys.exit("this game does not allow standard function in unary operator expression")
 
             # 前置, 後置で分けてdescriptionを取得する
             # operator_spellが ++ や -- のときはexprはTextPartとの組み合わせではなく、副作用演算子ExprDescriptionPartに登録する
-            if is_front:
-                # ++ といった演算子
-                operator_spell = self.get_token_spelling(child_tokens[0])
-                expr = [TextPart(text = operator_spell), operand_expr]
-            else:
-                operator_spell = self.get_token_spelling(child_tokens[-1])
-                expr = [operand_expr, TextPart(text = operator_spell)]
+            expr = (
+                [
+                    UnaryExprPart(
+                        operator = operator_spell,
+                        operand_id = operand_expr["expr_id"],
+                        is_front_operator = True
+                    )
+                ]
+                if is_inc_or_dec else
+                [
+                    TextPart(text = operator_spell), 
+                    operand_expr
+                ]
+            ) if is_front else (
+                [
+                    UnaryExprPart(
+                        operator = operator_spell,
+                        operand_id = operand_expr["expr_id"],
+                        is_front_operator = False
+                    )
+                ]
+                if is_inc_or_dec else
+                [
+                    operand_expr, 
+                    TextPart(text = operator_spell)
+                ]
+            )
 
             description = expr_info.get_unary_operator_description(operator_spell, operand_expr, is_front)
             expr_description = expr_info.append_expr_description(description, expr, execution_condition)
@@ -1564,7 +1593,7 @@ class AST2Flowchart:
                 expr_crs[0], 
                 expr_info, 
                 execution_condition, 
-                required_expr_description_type = {"expr_id"} if operator_spell in ("&&", "||") else None
+                required_expr_description_type = {"expr_id"} if operator_spell in ("&&", "||", "=") else None
             )
 
             if expr_info.has_standard_func_reference:
@@ -1609,11 +1638,22 @@ class AST2Flowchart:
                 expr_crs[1], 
                 expr_info, 
                 {**execution_condition, left_expr["expr_id"]: operator_spell == "&&"} if operator_spell in ("&&", "||") else execution_condition, 
-                var_info_for_func
+                var_info_for_func,
+                required_expr_description_type = {"expr_id"} if operator_spell == "=" else None
             )
 
             # operator_spellが = のときはexprはTextPartとの組み合わせではなく、副作用演算子ExprDescriptionPartに登録する
-            expr: list[ExprDescriptionPart] = [left_expr, TextPart(text = operator_spell), right_expr]
+            if operator_spell == "=":
+                expr: list[ExprDescriptionPart] = [
+                    AssignmentExprPart(
+                        operator = operator_spell,
+                        left_operand_id = left_expr["expr_id"],
+                        right_operand_id = right_expr["expr_id"]
+                    )
+                ]
+            else:
+                expr: list[ExprDescriptionPart] = [left_expr, TextPart(text = operator_spell), right_expr]
+
             description = expr_info.get_binary_operator_description(operator_spell, left_expr, right_expr)
             expr_description = expr_info.append_expr_description(description, expr, execution_condition)
         # 複合代入演算子 (a += b など)
@@ -1628,13 +1668,31 @@ class AST2Flowchart:
             
             if operator_spell == "":
                 sys.exit("compound assignment operator is not found")
-                
-            left_expr = self.parse_expr(expr_crs[0], expr_info, execution_condition)
-            right_expr =  self.parse_expr(expr_crs[1], expr_info, execution_condition)
+
+            left_expr = self.parse_expr(
+                expr_crs[0], 
+                expr_info, 
+                execution_condition,
+                required_expr_description_type = {"expr_id"}
+            )
+
+            right_expr =  self.parse_expr(
+                expr_crs[1], 
+                expr_info, 
+                execution_condition,
+                required_expr_description_type = {"expr_id"}
+            )
 
             # 複合代入演算子の場合、このままのexprをEvaluateExpressionにかけると左項の値がlldbのメモリ上で変わってしまうので、lldbの動的解析の際には代入しない (例 left_expr += right_expr の場合、left_expr + right_epxr の結果を使う)
             # そのような演算子の場合は、副作用演算子ExprDescriptionPartに登録する
-            expr: list[ExprDescriptionPart] = [left_expr, TextPart(text = operator_spell), right_expr]
+            expr: list[ExprDescriptionPart] = [
+                AssignmentExprPart(
+                    operator = operator_spell,
+                    left_operand_id = left_expr["expr_id"],
+                    right_operand_id = right_expr["expr_id"]
+                ) 
+            ]
+            
             description = expr_info.get_compound_assignment_operator_description(operator_spell, left_expr, right_expr)
             expr_description = expr_info.append_expr_description(description, expr, execution_condition)
 

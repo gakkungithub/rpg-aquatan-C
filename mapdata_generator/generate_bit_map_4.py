@@ -1422,7 +1422,11 @@ class GenBitMap:
                     final_case_index = len(case_expr_node_info_list) - 1
 
                     for i, case_expr_node_info in enumerate(case_expr_node_info_list):
-                        condition_detail = [f"case of line {case_expr_node_info["line"]}" if self.is_english else f"{case_expr_node_info["line"]}行のcase"]
+                        condition_detail = [
+                            f"case of line {case_expr_node_info["line"]}" 
+                            if self.is_english else 
+                            f"{case_expr_node_info["line"]}行のcase"
+                        ]
                         condition_detail.append(
                             (
                                 "" 
@@ -1637,7 +1641,7 @@ class GenBitMap:
                     self.create_comment_window_info(
                         "cond-check",
                         detail = [
-                            [{condition_type}, f"of line {expr_node_info["line"]} is {"true" if is_true else "false"}"]
+                            [condition_type, f"of line {expr_node_info["line"]} is {"true" if is_true else "false"}"]
                         ] 
                         if self.is_english else 
                         [
@@ -1676,8 +1680,7 @@ class GenBitMap:
                 sys.exit("line of execution looped back is incorrect")
 
             # for(A; B; C) について、Cがある場合　と　それ以外 (forでCがない場合と、whileの場合)で区別する
-            change_expr_node_info = self.get_expr_node_info(nodeID)
-            if change_expr_node_info is not None:
+            if (change_expr_node_info := self.get_expr_node_info(nodeID)) is not None:
                 comment_window_info = self.create_comment_window_info(
                     "cond-in-change",
                     detail = [

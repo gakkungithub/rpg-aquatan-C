@@ -2095,7 +2095,7 @@ class Player(Character):
             elif direction is None and not MSGWND.selectMsgText:
                 # 接触イベントチェック
                 event = mymap.get_event(self.x, self.y)
-                if isinstance(event, MoveEvent) or isinstance(event, Treasure):
+                if isinstance(event, (MoveEvent, Treasure)):
                     self.append_code_element_window(event.codeElementWindow)
                     self.is_foot_action_valid = True
 
@@ -2117,7 +2117,7 @@ class Player(Character):
                     mymap.helps.pop((self.x, self.y))
 
                 chara = mymap.get_chara(nextx, nexty)
-                if isinstance(chara, CharaCheckCondition) or isinstance(chara, CharaReturn):
+                if isinstance(chara, (CharaCheckCondition, CharaReturn)):
                     self.append_code_element_window(chara.codeElementWindow)
                     self.is_foward_action_valid = True
                 elif isinstance(chara, CharaExpression):
@@ -2705,9 +2705,21 @@ class Player(Character):
         elif execution_info["type"] == "for":
             is_true = execution_info["condition"]
             self.add_log(
-                f"Checked for condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
+                f"Checked for-condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
                 if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のfor文の条件が{"真" if is_true else "偽"}であることを開始"
+                f"{str(execution_info["line"])}行目のfor文の条件が{"真" if is_true else "偽"}であることを確認"
+            )
+        elif execution_info["type"] == "for_initializer":
+            self.add_log(
+                f"Checked for-initializer of line {str(execution_info["line"])}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のfor文の初期化式を確認"
+            )
+        elif execution_info["type"] == "for_change":
+            self.add_log(
+                f"Checked for-change of line {str(execution_info["line"])}" 
+                if ISENGLISH else 
+                f"{str(execution_info["line"])}行目のfor文の更新式を確認"
             )
         elif execution_info["type"] == "switch":
             if execution_info["true_case_index"] >= 0:
@@ -2814,10 +2826,10 @@ class Player(Character):
         self.checked_funcs[checked_func_location][checking_func[2]].append(checked_func_state)
 
     def set_checking_function(self, object: Event | Character, index: int):
-        if isinstance(object, Treasure) or isinstance(object, MoveEvent):
+        if isinstance(object, (Treasure, MoveEvent)):
             if (codeElementWindow := object.codeElementWindow) is None:
                 sys.exit("code element window is not found in function resource of event")
-        elif isinstance(object, CharaCheckCondition) or isinstance(object, CharaReturn):
+        elif isinstance(object, (CharaCheckCondition, CharaReturn)):
             codeElementWindow = object.codeElementWindow
         elif isinstance(object, CharaExpression):
             if (codeElementWindow := object.codeElementWindow_dict.get(str(object.linenum), None)) is None:
@@ -3401,14 +3413,41 @@ class MessageWindow(Window):
                         )
                     )
                     skip_result = self.sender.receive_json()
-                    self.sender.programCodeWindow.linenum = skip_result["finalLine"]
                     # スキップした先がbreak文だった場合 ( = breakでループを抜ける場合 )
-                    if startLine != skip_result["finalLine"]:
+                    if (break_line_after_loop_skip := skip_result.get("break_line_after_loop_skip")):
+                        if "return_line_after_loop_skip" in skip_result:
+                            sys.exit("only one information for line after loop-skip")
+
+                        self.sender.programCodeWindow.linenum = break_line_after_loop_skip
                         for event in fieldmap.events:
-                            if isinstance(event, MoveEvent) and event.execution_info and event.execution_info["line"] == skip_result["finalLine"]:
+                            if isinstance(event, MoveEvent) and event.execution_info and event.execution_info["line"] == break_line_after_loop_skip:
                                 fieldmap.warp_player(fieldmap.name, *event.pos())
-                                skip_result['message'] += f'\fmoved to break statement of line {skip_result["finalLine"]} !!' if ISENGLISH else f'\f{skip_result["finalLine"]}行のbreak前まで遷移しました!!'
+                                skip_result['message'] += f'\fmoved to break statement of line {break_line_after_loop_skip} !!' if ISENGLISH else f'\f{break_line_after_loop_skip}行のbreak前まで遷移しました!!'
                                 break
+                    elif (return_line_after_loop_skip := skip_result.get("return_line_after_loop_skip")):
+                        if "break_line_after_loop_skip" in skip_result:
+                            sys.exit("only one information for line after loop-skip")
+
+                        self.sender.programCodeWindow.linenum = return_line_after_loop_skip
+                        for chara in fieldmap.charas:
+                            if isinstance(chara, CharaReturn) and chara.execution_info["line"] == return_line_after_loop_skip:
+                                x, y = chara.pos()
+                                directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+                                warp_pos = [
+                                    (x + dx, y + dy)
+                                    for dx, dy in directions
+                                    if fieldmap.is_movable(x + dx, y + dy)
+                                ]
+
+                                if len(warp_pos) == 0:
+                                    sys.exit("warp position is not found")
+
+                                fieldmap.warp_player(fieldmap.name, *random.choice(warp_pos))
+                                skip_result['message'] += f'\fmoved to return statement of line {return_line_after_loop_skip} !!' if ISENGLISH else f'\f{return_line_after_loop_skip}行のreturn前まで遷移しました!!'
+                                break
+
+
                     self.set(skip_result['message'])
                     PLAYER.remove_itemvalue()
                     for variable_info in skip_result["items"]:
@@ -4596,7 +4635,13 @@ class CodeElementWindow(Window):
                         elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
                             str_to_show_list.append(expr_part["macro"])
                         elif "operator" in expr_part:
-                            pass
+                            if "is_front_operator" in expr_part:
+                                if expr_part["is_front_operator"]:
+                                    str_to_show_list.append(f"{expr_part["operator"]}{expr_description_str_to_show[expr_part["operand_id"]]["expr"]}")
+                                else:
+                                    str_to_show_list.append(f"{expr_description_str_to_show[expr_part["operand_id"]]["expr"]}{expr_part["operator"]}")
+                            else:
+                                str_to_show_list.append(f"{expr_description_str_to_show[expr_part["left_operand_id"]]["expr"]} {expr_part["operator"]} {expr_description_str_to_show[expr_part["right_operand_id"]]["expr"]}")
                         else: # expr_id
                             str_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["expr"])
 
