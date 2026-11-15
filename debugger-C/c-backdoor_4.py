@@ -1774,7 +1774,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
                     self.line_data: dict[str, LineInfoDataByFunc] = json.load(f)
                     self.func_name = self.func_crnt_name
-                    self.frame_num = 1
+                    self.frame_num: int = 1
                     self.get_std_outputs()
                     self.event_sender(
                         Debugger2GameEvent(
@@ -2948,19 +2948,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if self.line_data.get(self.func_name, None) and self.line_number in self.line_data[self.func_name]["lines"]:
                         if (result := current_expr_status_handler.check_expr_automatically()) == "end":
                             if isinstance(current_expr_status_handler, ControlFlowStatusHandler) and current_expr_status_handler.type == "break":
-                                self.remove_line_loop(current_expr_status_handler.condition_line)
                                 # マップにて、該当するbreakのワープゾーンまで遷移させるために、current_expr_status_handler.lineをsend_eventに登録する
                                 send_event["break_line_after_loop_skip"] = current_expr_status_handler.line
                                 send_event["line"] = current_expr_status_handler.line
                                 break
                             elif isinstance(current_expr_status_handler, (WhileStatusHandler, DoWhileStatusHandler, ForStatusHandler)):
-                                self.remove_line_loop(current_expr_status_handler.line)
                                 # スキップ開始行に戻っているならスキップは終了目前であるため、スキップ終了の手続きを開始する
                                 if current_expr_status_handler.line == line_number_to_back:
                                     send_event["line"] = line_number_to_back
                                     break
                             elif isinstance(current_expr_status_handler, ReturnStatusHandler):
-                                self.remove_line_loop_of_frame_by_return()
                                 # マップにて、該当するreturnのキャラまで遷移させるために、current_expr_status_handler.lineをsend_eventに登録する
                                 send_event["return_line_after_loop_skip"] = current_expr_status_handler.line
                                 send_event["line"] = current_expr_status_handler.line
@@ -2972,7 +2969,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             current_comment_w_index[0].set_function_comment(self.analyze_next_function_in_skip())
 
                 send_event["items"] = self.vars_tracker.get_value()
-                
+
                 self.event_sender(
                     send_event,
                     get_line = False

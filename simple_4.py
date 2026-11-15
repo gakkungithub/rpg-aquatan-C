@@ -2551,7 +2551,7 @@ class Player(Character):
                 elif received_event.get("loop_skip", False):
                     MSGWND.set(received_event['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
                     self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
-                    self.ccchara = chara.set_checked()
+                    # self.ccchara = chara.set_checked()
                 else:
                     self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
                     self.ccchara = chara.set_checked()
@@ -3406,7 +3406,7 @@ class MessageWindow(Window):
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):
                     # 暗転
                     DIMWND.show(200, "skip")
-                    startLine = self.sender.programCodeWindow.linenum
+
                     self.sender.send_event(
                         Game2DebuggerEvent(
                             skip = True
@@ -3414,7 +3414,7 @@ class MessageWindow(Window):
                     )
                     skip_result = self.sender.receive_json()
                     # スキップした先がbreak文だった場合 ( = breakでループを抜ける場合 )
-                    if (break_line_after_loop_skip := skip_result.get("break_line_after_loop_skip")):
+                    if (break_line_after_loop_skip := skip_result.get("break_line_after_loop_skip")) is not None:
                         if "return_line_after_loop_skip" in skip_result:
                             sys.exit("only one information for line after loop-skip")
 
@@ -3424,10 +3424,7 @@ class MessageWindow(Window):
                                 fieldmap.warp_player(fieldmap.name, *event.pos())
                                 skip_result['message'] += f'\fmoved to break statement of line {break_line_after_loop_skip} !!' if ISENGLISH else f'\f{break_line_after_loop_skip}行のbreak前まで遷移しました!!'
                                 break
-                    elif (return_line_after_loop_skip := skip_result.get("return_line_after_loop_skip")):
-                        if "break_line_after_loop_skip" in skip_result:
-                            sys.exit("only one information for line after loop-skip")
-
+                    elif (return_line_after_loop_skip := skip_result.get("return_line_after_loop_skip")) is not None:
                         self.sender.programCodeWindow.linenum = return_line_after_loop_skip
                         for chara in fieldmap.charas:
                             if isinstance(chara, CharaReturn) and chara.execution_info["line"] == return_line_after_loop_skip:
@@ -3446,7 +3443,42 @@ class MessageWindow(Window):
                                 fieldmap.warp_player(fieldmap.name, *random.choice(warp_pos))
                                 skip_result['message'] += f'\fmoved to return statement of line {return_line_after_loop_skip} !!' if ISENGLISH else f'\f{return_line_after_loop_skip}行のreturn前まで遷移しました!!'
                                 break
+                    else:
+                        line = skip_result["line"]
+                        is_not_event_found = True
+                        for event in fieldmap.events:
+                            if isinstance(event, MoveEvent) and (execution_info := event.execution_info) and execution_info["line"] == line and execution_info.get("condition") is False:
+                                fieldmap.warp_player(fieldmap.name, *event.pos())
+                                skip_result['message'] += (
+                                    f'\fmoved to end of the {execution_info["type"]} statement line {line} !!' 
+                                    if ISENGLISH else 
+                                    f'\f{line}行の{execution_info["type"]}文の終了直前まで遷移しました!!'
+                                )
+                                is_not_event_found = False
+                                break
 
+                        if is_not_event_found:
+                            for chara in fieldmap.charas:
+                                if isinstance(chara, CharaCheckCondition) and chara.execution_info["line"] == line and chara.execution_info.get("condition") is False:
+                                    x, y = chara.pos()
+
+                                    if chara.direction == DOWN:
+                                        y += 1
+                                    elif chara.direction == LEFT:
+                                        x -= 1
+                                    elif chara.direction == RIGHT:
+                                        x += 1
+                                    else:
+                                        y -= 1
+
+                                    fieldmap.warp_player(fieldmap.name, x, y)
+                                    skip_result['message'] += (
+                                        f'\fmoved to end of the {chara.execution_info["type"]} statement line {line} !!' 
+                                        if ISENGLISH else 
+                                        f'\f{line}行の{chara.execution_info["type"]}文の終了直前まで遷移しました!!'
+                                    )
+                                    is_not_event_found = False
+                                    break
 
                     self.set(skip_result['message'])
                     PLAYER.remove_itemvalue()
@@ -3460,6 +3492,24 @@ class MessageWindow(Window):
                         )
                     )
                     skip_result = self.sender.receive_json()
+
+                    if PLAYER is None: # あり得ないが一応
+                        sys.exit("player information is not found")
+
+                    x, y = PLAYER.pos()
+                    if PLAYER.direction == DOWN:
+                        y += 1
+                    elif self.direction == LEFT:
+                        x -= 1
+                    elif self.direction == RIGHT:
+                        x += 1
+                    else:
+                        y -= 1
+
+                    if (chara := fieldmap.get_chara(x, y)) is not None:
+                        if isinstance(chara, CharaCheckCondition):
+                            PLAYER.ccchara = chara.set_checked()
+
                     self.set(skip_result['message'])
             elif self.select_type == "func_skip":
                 if self.selectMsgText[self.selectingIndex] in ("はい", "Yes"):

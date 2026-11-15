@@ -448,7 +448,15 @@ class MapInfo:
     def setCharaCheckCondition(self, func_name: str, pos: tuple[int, int], dir: int, execution_info: ExecutionInfo, comment_window_info: TempCommentWindowInfo):
         absolute_pos = (pos[0] - self.offset["y"], pos[1] - self.offset["x"])
 
-        self.chara_checkConditions.append(CharaCheckCondition(func_name, absolute_pos, dir, execution_info, comment_window_info))
+        self.chara_checkConditions.append(
+            CharaCheckCondition(
+                func_name, 
+                absolute_pos, 
+                dir, 
+                execution_info, 
+                comment_window_info
+            )
+        )
         self.event_map[pos[0], pos[1]] = self.ISEVENT
 
     def addExpressionToCharaExpression(self, crnt_room_nodeID: str, detail: TempExpressionDetail, line: int, func_name: str):
@@ -949,12 +957,12 @@ class GenBitMap:
                             if bit_map_padded[i+1, j-1] == 0:
                                 #左下角壁フラグ
                                 wallFlags[7] = 1
-                        bit_map_padded[i, j] = self.getFloorChipID(wallFlags, wall_chip_type)
+                        bit_map_padded[i, j] = self.get_floor_chipID(wallFlags, wall_chip_type)
             self.floor_map = bit_map_padded[1:height+1, 1:width+1]
 
         self.map_info.mapdata_generator(program_name, self.set_gvar(), self.floor_map, is_universal, line_info_dict, wall_chip_type)
 
-    def getFloorChipID(self, arr, wall_chip_type: int):
+    def get_floor_chipID(self, arr, wall_chip_type: int):
         floorChipID =  {
             (0, 0, 0, 0, 0, 0, 0, 0): 14,
             (1, 0, 0, 0, 0, 0, 0, 0): 13,
@@ -1931,7 +1939,7 @@ class GenBitMap:
 
                     nextNodeID = loopBackID
 
-                # continue → doWhile構文の場合
+                # continue → do-while構文の場合
                 elif self.get_node_shape(nextNodeID) == 'diamond':
                     self.create_room(nextNodeID, crnt_room_nodeID)
                     if (expr_node_info := self.get_expr_node_info(nextNodeID)) is None:
@@ -2449,7 +2457,7 @@ class GenBitMap:
                         sys.exit("a unit of door and condition-check character cannot be produced if type of execution info is \"expression\"")
                     self.map_info.setDoor(path[0], dir, comment_window_info)     
                     door_direction = (path[i-1][0] - path[i][0], path[i-1][1] - path[i][1])
-                    if door_direction == (1,0): # 下向き d
+                    if door_direction == (1,0): # 下向き d (キャラクターが向いている方向)
                         self.map_info.setCharaCheckCondition(self.func_name, path[i], 0, execution_info, comment_window_info)
                     elif door_direction == (-1,0): # 上向き u
                         self.map_info.setCharaCheckCondition(self.func_name, path[i], 3, execution_info, comment_window_info)
