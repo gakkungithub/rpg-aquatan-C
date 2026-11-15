@@ -1,8 +1,6 @@
-start,103_loops,154, 85
-itemget, 103_loops,155, 85,base_calorie
-itemget, 103_loops,143, 80,total
-itemget, 103_loops,131, 72,days
-itemget, 103_loops,123, 66,i
-jump, 103_loops,98, 48
-itemget, 103_loops,97, 52,goal
-end, 103_loops,95, 54
+start,103_loops,57, 85
+itemget, 103_loops,56, 86,base_calorie
+itemget, 103_loops,54, 74,total
+itemget, 103_loops,41, 68,days
+itemget, 103_loops,35, 66,i
+end, 103_loops,33, 55

@@ -396,19 +396,15 @@ class ForStatusHandler(DynamicNonVarStatusHandler):
     def check_status(self, send_event: Debugger2GameEvent, execution_info: ForExecutionInfo):
         if execution_info["type"] == "for":
             if self.initializer is not None or self.required_var_list is not None:
-                print("1")
                 return "incorrect"
             
             if self.change is not None and self.change["dynamic_expr"] is not None:
-                print("2")
                 return "incorrect"
             
             if (result := self.condition["result"]) is None:
-                print("3")
                 return "next_function"
             
             if result is not execution_info["condition"]:
-                print("4")
                 return "incorrect"
 
             self.condition["is_check_completed"] = True
@@ -2476,7 +2472,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                         self.remove_line_loop(self.line_number)
             elif isinstance(current_expr_status_handler, ForStatusHandler):
-                print(current_expr_status_handler)
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
 
                 # for falseの条件文チェックが完了した場合のみ、スキップされ得る次の変数リストを取得する
@@ -2492,7 +2487,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             end_line = self.next_line_number
 
                             self.remove_line_loop(self.line_number)
-                    elif execution_info["type"] in ("for_initializer", "for_change"):
+                    elif execution_info["type"] == "for_initializer":
+                        get_line = False
+                    else: # "for_change"
+                        send_event["line"] = self.line_number
                         get_line = False
             elif isinstance(current_expr_status_handler, SwitchStatusHandler) and execution_info["type"] == "switch":
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)

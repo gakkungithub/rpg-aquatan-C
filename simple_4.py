@@ -2469,7 +2469,7 @@ class Player(Character):
                         if (r := random.randint(0, vars_quiz_count - 1)) < 3:
                             var_quiz_list[r] = (var_path, True)
 
-                self.set_completed_checked_func_location(mymap.name, chara.func, comment["fromTo"][0])
+                self.set_completed_checked_func_location(mymap.name, chara.func, chara.linenum)
                 
                 log_comment = " ".join(
                     [
@@ -3499,9 +3499,9 @@ class MessageWindow(Window):
                     x, y = PLAYER.pos()
                     if PLAYER.direction == DOWN:
                         y += 1
-                    elif self.direction == LEFT:
+                    elif PLAYER.direction == LEFT:
                         x -= 1
-                    elif self.direction == RIGHT:
+                    elif PLAYER.direction == RIGHT:
                         x += 1
                     else:
                         y -= 1

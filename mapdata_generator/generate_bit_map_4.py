@@ -414,7 +414,16 @@ class MapInfo:
         execution_info = self.execution_info.get(warpNodeID, None) if warpNodeID is not None else self.execution_info.get(to_nodeID, None)
 
         # ステージによってマップチップ(UI)番号(158)を変えるかは今後判断する
-        self.move_events.append(MoveEvent(from_local_pos, to_local_pos, comment_window_info, 158, execution_info, crnt_func_name))
+        self.move_events.append(
+            MoveEvent(
+                from_local_pos, 
+                to_local_pos, 
+                comment_window_info, 
+                158, 
+                execution_info, 
+                crnt_func_name
+            )
+        )
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
     def setItemBox(self, roomNodeID: str, item_name: str, var_info: VarInfo, crnt_func_name: str):
@@ -1716,7 +1725,7 @@ class GenBitMap:
                 )
             else:
                 comment_window_info = None
-            
+
             self.map_info.setWarpZone(
                 crnt_room_nodeID, 
                 loopBackID, 
@@ -1724,6 +1733,8 @@ class GenBitMap:
                 self.func_name,
                 nodeID if change_expr_node_info is not None else None
             )
+
+            return
 
         # 話しかけると関数の遷移元に戻るようにする
         elif self.get_node_shape(nodeID) == 'lpromoter':
@@ -2146,6 +2157,7 @@ class GenBitMap:
                     direction = random.choice(['up', 'right'])
             else:
                 direction = None
+
             self.map_info.room_info[nodeID] = RoomInfo(
                 room_size = self.find_room_area((height, width), (mapHeight, mapWidth), kernel, (prev_room_nodeID, direction) if direction else None), 
                 direction = direction or random.choice(['left', 'up', 'right'])
@@ -2168,6 +2180,8 @@ class GenBitMap:
         candidate_squares: list[tuple[int, int]] = []
         convolved = ndimage.convolve(self.floor_map, kernel, mode='constant', cval=0)
 
+        # なるべく一つ前の部屋の近くに今回の部屋を作る。連続で同じ向きに部屋を作らないように、
+        # 一つ前の部屋が二つ前の部屋のどの位置に作られたかに応じて、その向きを取得して、それとは違う向きに作る
         if prev_room_info:
             if prev_room_info[1] == "left":
                 range_x = (1, self.map_info.room_info[prev_room_info[0]]["room_size"][1]+self.map_info.offset["x"]-room_size[1]-self.PADDING2)
@@ -2183,17 +2197,33 @@ class GenBitMap:
             if range_y[0] >= range_y[1]:
                 range_y = (range_y[0], range_y[0]+1)
 
-            for y in range(range_y[0], range_y[1]):
-                if y < 1 or map_size[0] <= y:
-                    continue
-                for x in range(range_x[0], range_x[1]):
-                    if 1 <= x < map_size[1] and convolved[y,x] == (room_size[0]+self.PADDING2)*(room_size[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+room_size[0]+self.PADDING, x-self.PADDING:x+room_size[1]+self.PADDING] == 1):
-                        candidate_squares.append((y,x))
+            candidate_squares.extend(
+                (y, x)
+                for y in range(range_y[0], range_y[1])
+                for x in range(range_x[0], range_x[1])
+                if 1 <= y < map_size[0]
+                and 1 <= x < map_size[1]
+                and convolved[y, x] == (room_size[0] + self.PADDING2) * (room_size[1] + self.PADDING2)
+                and np.all(
+                    self.floor_map[
+                        y-self.PADDING:y+room_size[0]+self.PADDING,
+                        x-self.PADDING:x+room_size[1]+self.PADDING
+                    ] == 1
+                )
+            )
         else:
-            for y in range(1, map_size[0]-room_size[0]-self.PADDING2):
-                for x in range(1, map_size[1]-room_size[1]-self.PADDING2):
-                    if convolved[y,x] == (room_size[0]+self.PADDING2)*(room_size[1]+self.PADDING2) and np.all(self.floor_map[y-self.PADDING:y+room_size[0]+self.PADDING, x-self.PADDING:x+room_size[1]+self.PADDING] == 1):
-                        candidate_squares.append((y,x))
+            candidate_squares.extend(
+                (y,x)
+                for y in range(1, map_size[0]-room_size[0]-self.PADDING2)
+                for x in range(1, map_size[1]-room_size[1]-self.PADDING2)
+                if convolved[y,x] == (room_size[0]+self.PADDING2)*(room_size[1]+self.PADDING2) 
+                and np.all(
+                    self.floor_map[
+                        y-self.PADDING:y+room_size[0]+self.PADDING, 
+                        x-self.PADDING:x+room_size[1]+self.PADDING
+                    ] == 1
+                )
+            )
         
         if candidate_squares:
             # region choose room pos with weight
@@ -2265,7 +2295,6 @@ class GenBitMap:
                 self.only_room_map = self.expand_map(self.only_room_map, map_size, new_shape, fill_value=1, direction=None)
                 self.map_info.event_map = self.expand_map(self.map_info.event_map, map_size, new_shape, fill_value=0, direction=None)
                 return self.find_room_area(room_size, (new_height, new_width), kernel, prev_room_info, add_size)
-
 
     def random_edge_point(self, dir: Literal['u', 'd', 'l', 'r'], room_pos: tuple[int, int, int, int], x_max: int, y_max: int):
         local_ry, local_rx, rheight, rwidth = room_pos
