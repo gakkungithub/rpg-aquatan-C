@@ -1692,7 +1692,7 @@ class AST2Flowchart:
                     right_operand_id = right_expr["expr_id"]
                 ) 
             ]
-            
+
             description = expr_info.get_compound_assignment_operator_description(operator_spell, left_expr, right_expr)
             expr_description = expr_info.append_expr_description(description, expr, execution_condition)
 
@@ -2288,7 +2288,9 @@ class AST2Flowchart:
         if self.get_cursor_extent_start(cond_cursor).line != self.get_cursor_extent_end(cond_cursor).line:
             sys.exit("condition expression has to be in one line")
 
-        self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_line(comp_stmt_cursor))
+        self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_extent_start(cursor).line)
+        self.register_execution_info(init_nodeID, create_do_while_execution_info(self.get_cursor_extent_start(cursor).line, True))
+        self.line_info_dict[self.scanning_func].set_loop_start_and_goal(self.get_cursor_extent_start(cursor).line, self.get_cursor_line(cond_cursor))
 
         self.create_breaker_info_for_loop(
             condition_line = self.get_cursor_extent_start(cond_cursor).line

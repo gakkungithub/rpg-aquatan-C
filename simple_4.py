@@ -2696,11 +2696,11 @@ class Player(Character):
                 f"{str(execution_info["line"])}行目のwhile文の条件が{"真" if is_true else "偽"}であることを開始"
             )
         elif execution_info["type"] == "do_while":
-            is_true = execution_info["conditioin"]
+            is_true = execution_info["condition"]
             self.add_log(
                 f"Checked do while condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
                 if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if is_true else "偽"}であることを開始"
+                f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if is_true else "偽"}であることを確認"
             )
         elif execution_info["type"] == "for":
             is_true = execution_info["condition"]

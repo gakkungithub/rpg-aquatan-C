@@ -221,6 +221,19 @@ class WhileStatusHandler(DynamicNonVarStatusHandler):
         return "next_function"
 
 
+class DoWhileInitializerStatusHandler(DynamicNonVarStatusHandler):
+    def __init__(self, line: int, is_english: bool):
+        super().__init__(line, is_english)
+
+    def check_arrival(self, send_event: Debugger2GameEvent):
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution = "the first do-while loop begins" if self.is_english else "do while文の最初の繰り返しが始まります",
+                result = None
+            )
+        ]
+
+
 class DoWhileStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, condition: list[Comment], is_english: bool):
         super().__init__(line, is_english)
@@ -2370,7 +2383,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             # 繰り返し文は戻ってくる毎に再利用されるので、前回の解析結果がまだ残っている場合は初期化する
             if isinstance(expr_status_handler, (WhileStatusHandler, DoWhileStatusHandler)) and expr_status_handler.result is not None:
-                expr_status_handler.dynamic_condition.initialize_analysis(previous_expr_status_handler.condition)
+                expr_status_handler.dynamic_condition.initialize_analysis(expr_status_handler.condition)
                 expr_status_handler.result = None
             elif isinstance(expr_status_handler, ForStatusHandler) and expr_status_handler.condition["result"] is not None:
                 if (dynamic_comment_handler := expr_status_handler.condition["dynamic_expr"]):
@@ -2405,7 +2418,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 expr_status_handler = WhileStatusHandler(line, expr["condition"], self.is_english)
                 self.append_line_loop("while", line)
             elif expr["type"] == "do_while":
-                expr_status_handler = DoWhileStatusHandler(line, expr["condition"], self.is_english)
+                # do (最初のdo-whileループに入る = コメントがない)
+                expr_status_handler = (
+                    DoWhileStatusHandler(
+                        line, 
+                        expr["condition"], 
+                        self.is_english
+                    ) if len(expr["condition"]) else 
+                    DoWhileInitializerStatusHandler(
+                        line, 
+                        self.is_english
+                    )
+                )
                 self.append_line_loop("do_while", line)
             elif expr["type"] == "for":
                 expr_status_handler = ForStatusHandler(line, expr, self.is_english)
@@ -2471,6 +2495,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             end_line = self.next_line_number
 
                         self.remove_line_loop(self.line_number)
+            elif isinstance(current_expr_status_handler, DoWhileInitializerStatusHandler):
+                check_result = current_expr_status_handler.check_arrival(send_event)
+                self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
+                
+                start_line = self.line_number
+                end_line = self.next_line_number
             elif isinstance(current_expr_status_handler, ForStatusHandler):
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
 
@@ -2893,10 +2923,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     bottom_edge = opposite_edge
                 )
             else:
-                crnt_line_loop_dict[line] = LoopLineInfo(
+                top_edge = min(line, opposite_edge)
+                bottom_edge = max(line, opposite_edge)
+
+                crnt_line_loop_dict[bottom_edge] = LoopLineInfo(
                     type = type,
-                    top_edge = opposite_edge,
-                    bottom_edge = line
+                    top_edge = top_edge,
+                    bottom_edge = bottom_edge
                 )
 
         def remove_line_loop(self, line: int):

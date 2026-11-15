@@ -1327,7 +1327,6 @@ class GenBitMap:
                             ),
                             self.func_name
                         )
-                        
                     else: # double circle node (while false)
                         self.create_path(
                             crnt_room_nodeID, 
@@ -2016,6 +2015,9 @@ class GenBitMap:
             
             if len(true_nodeID_info) != 1:
                 sys.exit("number of child nodes of do-while entry node has to be 1")
+
+            line = int(self.get_node_label(nodeID))
+            
             trueNodeID, _ = true_nodeID_info[0]
             
             # do-whileの条件真の部屋を作る
@@ -2023,10 +2025,20 @@ class GenBitMap:
             self.map_info.setWarpZone(
                 crnt_room_nodeID, 
                 trueNodeID,
-                None,
+                self.create_comment_window_info(
+                    "cond-check",
+                    detail = [
+                        [f"the first do-while loop begins from line {line}"] 
+                        if self.is_english else 
+                        [f"{line}行目からdo-while文を始めます"]
+                    ]
+                ),
                 self.func_name,
-                warpNodeID=nodeID
+                warpNodeID = nodeID
             )
+
+            self.map_info.execution_comment_handler.register_do_while_condition_comment(line, [])
+            
             nodeID = trueNodeID
             crnt_room_nodeID = trueNodeID
 
