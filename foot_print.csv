@@ -1,12 +1,14 @@
-start,103_loops,47, 82
-itemget, 103_loops,44, 81,base_calorie
-itemget, 103_loops,55, 77,total
-itemget, 103_loops,61, 73,days
-itemget, 103_loops,70, 70,i
-itemget, 103_loops,51, 51,goal
-itemget, 103_loops,39, 47,exercise
-itemget, 103_loops,29, 43,session
-itemget, 103_loops,33, 30,cooldown_days
-itemget, 103_loops,30, 24,cooldown_count
-jump, 103_loops,36, 22
-end, 103_loops,37, 20
+start,103_loops,66, 94
+itemget, 103_loops,66, 91,base_calorie
+itemget, 103_loops,55, 88,total
+itemget, 103_loops,46, 84,days
+itemget, 103_loops,41, 73,i
+itemget, 103_loops,36, 61,goal
+jump, 103_loops,27, 53
+itemget, 103_loops,25, 53,exercise
+itemget, 103_loops,25, 48,session
+itemget, 103_loops,29, 27,cooldown_days
+itemget, 103_loops,39, 30,cooldown_count
+jump, 103_loops,32, 20
+jump, 103_loops,35, 22
+finished

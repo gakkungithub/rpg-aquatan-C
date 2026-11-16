@@ -2289,7 +2289,7 @@ class AST2Flowchart:
             sys.exit("condition expression has to be in one line")
 
         self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_extent_start(cursor).line)
-        self.register_execution_info(init_nodeID, create_do_while_execution_info(self.get_cursor_extent_start(cursor).line, True))
+        self.register_execution_info(init_nodeID, create_do_while_execution_info(self.get_cursor_extent_start(cursor).line, None))
         self.line_info_dict[self.scanning_func].set_loop_start_and_goal(self.get_cursor_extent_start(cursor).line, self.get_cursor_line(cond_cursor))
 
         self.create_breaker_info_for_loop(

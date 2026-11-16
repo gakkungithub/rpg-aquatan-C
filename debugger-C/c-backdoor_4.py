@@ -771,14 +771,14 @@ class SideEffectValue(TypedDict):
     result_value_str: str | None
 
 class DynamicCommentHandler:
-    def __init__(self, comments: list[Comment], side_effect_values: dict[str, SideEffectValue] = {}):
+    def __init__(self, comments: list[Comment], side_effect_values: dict[str, SideEffectValue] | None = None):
         # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
         # 計算式の評価がどうなろうと、このリストの内容は一定(計算式の生文字列)なので初期化時に全て取得しておく
         self.expr_str_to_show_by_id: list[str] = self.get_str_base(comments)
         # 分析初期化メソッドでリセットする
         self.initialize_analysis(comments)
         # 演算子による副作用後の値を登録する (計算中に使われる値と、計算後の値)
-        self.side_effect_values = side_effect_values
+        self.side_effect_values = side_effect_values if side_effect_values is not None else {}
 
     # while, do_while, for文がもう一度来たときのために分析部分の所だけリセットできるメソッドを設けておく
     def initialize_analysis(self, comments: list[Comment]):
@@ -787,6 +787,8 @@ class DynamicCommentHandler:
         self.expr_result_by_id: list[str | None] = [None] * len(comments) 
         # 「aとbをかけます」のような、説明文をidごとに記録する
         self.expr_description_to_show_by_id: list[str | Comment] = comments.copy()
+        # a[i] = a[1] のような、計算用の文字列を取得する (side_effect_valuesへの登録に用いる)
+        self.str_for_evaluation_by_id: list[str | None] = [None] * len(comments)
 
         # 計算されずに飛ばされた自作関数を登録するリスト
         self.skipped_function_list: list[str] = []
@@ -943,8 +945,11 @@ class DynamicCommentHandler:
                     elif "operator" in expr_part:
                         if "is_front_operator" in expr_part:
                             str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
-                            if (operand_str := self.get_expr_result(expr_part["operand_id"])) is None:
-                                sys.exit(f"result of {str_to_show_base} is not found")
+
+                            operand_str = self.get_str_for_evaluation(expr_part["operand_id"])
+
+                            if (operand_result := self.get_expr_result(expr_part["operand_id"])) is None:
+                                sys.exit("result of operand of unary expression is not found")
 
                             # 未定義動作を弾く
                             if (variable_value_str_after_side_effect := self.side_effect_values.get(operand_str)) is not None:
@@ -952,10 +957,10 @@ class DynamicCommentHandler:
                                     sys.exit("undefined expression is found")
 
                             if expr_part["is_front_operator"]:
-                                current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
+                                current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result} {'+' if expr_part["operator"] == "++" else '-'} 1"
                                 result_value_str = current_value_str
                             else:
-                                current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_str
+                                current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result
                                 result_value_str = f"{current_value_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
 
                             if variable_value_str_after_side_effect:
@@ -968,10 +973,8 @@ class DynamicCommentHandler:
                                 )
                         else:
                             str_to_show_base = self.get_expr_to_show(expr_part["right_operand_id"] + 1)
-                            if (left_operand_str := self.get_expr_result(expr_part["left_operand_id"])) is None:
-                                sys.exit(f"result of {str_to_show_base} is not found")
-                            if (right_operand_str := self.get_expr_result(expr_part["right_operand_id"])) is None:
-                                sys.exit(f"result of {str_to_show_base} is not found")
+                            left_operand_str = self.get_str_for_evaluation(expr_part["left_operand_id"])
+                            # right_operand_str = self.get_str_for_evaluation(expr_part["right_operand_id"])
 
                             # 未定義動作を弾く
                             if (variable_value_str_after_side_effect := self.side_effect_values.get(left_operand_str)) is not None:
@@ -979,9 +982,15 @@ class DynamicCommentHandler:
                                     sys.exit("undefined expression is found")
 
                             if expr_part["operator"] == "=":
-                                current_value_str = right_operand_str
+                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit("result of right operand of \"=\" operator is not found")
+                                current_value_str = right_operand_result
                             else:
-                                current_value_str = f"{left_operand_str} {expr_part["operator"][:-1]} {right_operand_str}"
+                                if (left_operand_result := self.get_expr_result(expr_part["left_operand_id"])) is None:
+                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
+                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
+                                current_value_str = f"{left_operand_result} {expr_part["operator"][:-1]} {right_operand_result}"
 
                             if variable_value_str_after_side_effect:
                                 variable_value_str_after_side_effect["current_value_str"] = current_value_str
@@ -1050,8 +1059,10 @@ class DynamicCommentHandler:
                         sys.exit("all expression parts have to be calculated")
                     str_for_evaluation: str = " ".join(str_for_evaluation_list)
 
+
             self.expr_result_by_id[self.index_scanned_currently] = frame.EvaluateExpression(str_for_evaluation).GetValue()
             self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {description_to_show}'
+            self.str_for_evaluation_by_id[self.index_scanned_currently] = str_for_evaluation
 
             self.index_scanned_currently += 1
 
@@ -1107,7 +1118,16 @@ class DynamicCommentHandler:
             sys.exit("error in id number for getting expression result")
         
         return self.expr_result_by_id[index]
-    
+
+    def get_str_for_evaluation(self, index: int):
+        if index >= len(self.str_for_evaluation_by_id):
+            sys.exit("error in id number for getting string for evaluation")
+
+        if (str_for_evaluation := self.str_for_evaluation_by_id[index]) is None:
+            sys.exit(f"string for evaluation no.{id} is not found")
+
+        return str_for_evaluation
+
     def get_expr_to_show(self, index: int):
         if index >= len(self.expr_str_to_show_by_id):
             sys.exit("error in id number for getting expression result")
@@ -2000,7 +2020,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             if (next_step := self.analyze_non_var_expr_comments()) is not None:
                 return
-            
+
             if (next_state := self.get_next_state()):
                 self.line_number = self.next_line_number
                 self.func_name = self.func_crnt_name
@@ -2479,9 +2499,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     start_line = self.line_number
                     end_line = self.next_line_number
             elif (isinstance(current_expr_status_handler, WhileStatusHandler) and execution_info["type"] == "while") or (isinstance(current_expr_status_handler, DoWhileStatusHandler) and execution_info["type"] == "do_while"):
-                check_result = current_expr_status_handler.check_condition(send_event, execution_info["condition"])
+                condition = execution_info["condition"]
+                if condition is None:
+                    return "incorrect"
+                
+                check_result = current_expr_status_handler.check_condition(send_event, condition)
                 if check_result == "correct":
-                    if execution_info["condition"]:
+                    if condition:
                         return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                     else: # falseなら、一番下の行をstart_lineに設定して、next_line_numberをend_lineに設定する
                         self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
@@ -2495,7 +2519,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             end_line = self.next_line_number
 
                         self.remove_line_loop(self.line_number)
-            elif isinstance(current_expr_status_handler, DoWhileInitializerStatusHandler):
+            elif isinstance(current_expr_status_handler, DoWhileInitializerStatusHandler) and execution_info["type"] == "do_while":
+                # あり得ないが
+                if execution_info["condition"] is not None:
+                    return "incorrect"
+                
                 check_result = current_expr_status_handler.check_arrival(send_event)
                 self.expr_status_handler_dict_by_frame[self.frame_num-2].pop(self.line_number)
                 
@@ -2942,7 +2970,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             return self.line_loop_dict_by_frame[self.frame_num - 2].pop(line)
 
         def remove_line_loop_of_frame_by_return(self):
-            if len(self.line_loop_dict_by_frame) > self.frame_num - 3:
+            if len(self.line_loop_dict_by_frame) <= self.frame_num - 3:
                 sys.exit(f"line loop info is not found in function in frame layer no.{self.frame_num-2}")
 
             del self.line_loop_dict_by_frame[self.frame_num-2:]
@@ -3104,7 +3132,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             while process.GetState() == lldb.eStateStopped:
                 debug_manager.analyze_frame()
         except ProgramFinished:
-            print(e)
+            print("プログラムが終了しました")
             break
         except Exception as e:
             # エラーの行番をトラックするためのコード

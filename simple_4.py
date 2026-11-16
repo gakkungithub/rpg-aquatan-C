@@ -2696,11 +2696,19 @@ class Player(Character):
                 f"{str(execution_info["line"])}行目のwhile文の条件が{"真" if is_true else "偽"}であることを開始"
             )
         elif execution_info["type"] == "do_while":
-            is_true = execution_info["condition"]
+            condition = execution_info["condition"]
             self.add_log(
-                f"Checked do while condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if is_true else "偽"}であることを確認"
+                (
+                    f"the first do-while loop began from line {str(execution_info["line"])}" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行から最初のdo while処理が始まりました"
+                ) 
+                if condition is None else
+                (
+                    f"Checked do while condition of line {str(execution_info["line"])} is {"true" if condition else "false"}" 
+                    if ISENGLISH else 
+                    f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if condition else "偽"}であることを確認"
+                )
             )
         elif execution_info["type"] == "for":
             is_true = execution_info["condition"]
@@ -4430,7 +4438,6 @@ class Event:
 
 class MoveEvent(Event):
     """移動イベント"""
-    # ((x, y), mapchip, dest_map, (dest_x, dest_y), execution_info, func, detail, self.name.lower())
     def __init__(self, pos: tuple[int, int], mapchip: int, dest_map: str, dest_pos: tuple[int, int], execution_info: ExecutionInfo | None, func: str, detail: CommentWindowInfo | None, mapname: str):
         super().__init__(pos, mapchip)
         self.dest_map = dest_map  # 移動先マップ名
@@ -6249,7 +6256,6 @@ class EventSender:
                     for itemvalues in msg["vars_w_value_changed"]:
                         if (item := PLAYER.find_item_belong_to_player(itemvalues["item"]["name"], itemvalues["item"]["line"])) is not None:
                             item.set_value(itemvalues)
-                    print("changed: ", msg["vars_w_value_changed"])
                 # if "vars_w_value_unchanged" in msg:
 
                 #     for var_w_value_unchanged in msg["vars_w_value_unchanged"]:

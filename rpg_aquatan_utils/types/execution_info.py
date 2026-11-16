@@ -42,9 +42,9 @@ def create_while_execution_info(line: int, condition: bool):
 class DoWhileExecutionInfo(TypedDict):
     type: Literal["do_while"]
     line: int
-    condition: bool
+    condition: bool | None
 
-def create_do_while_execution_info(line: int, condition: bool):
+def create_do_while_execution_info(line: int, condition: bool | None):
     return DoWhileExecutionInfo(
         type = "do_while", 
         line = line, 
