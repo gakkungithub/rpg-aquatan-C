@@ -491,6 +491,9 @@ class AST2Flowchart:
                 
         for cursor in tu.cursor.get_children():
             self.check_cursor_error(cursor)
+            if not self.is_custom_cursor(cursor):
+                continue
+
             if cursor.kind == ci.CursorKind.FUNCTION_DECL:
                 self.parse_func(cursor)
                 # gotoのLabelを登録する
@@ -506,7 +509,14 @@ class AST2Flowchart:
                 self.parse_union(cursor)
             elif cursor.kind == ci.CursorKind.ENUM_DECL:
                 self.parse_enum(cursor)
-            
+
+    # 標準関数の中身を除外する
+    def is_custom_cursor(self, cursor: ci.Cursor) -> bool:
+        if (file := self.get_cursor_file(cursor)) is None:
+            return False
+
+        return isinstance(file.name, str) and file.name in self.c_files
+    
     #関数の宣言or定義
     def parse_func(self, cursor: ci.Cursor):
         #引数あり/なし→COMPなし = 関数宣言, 引数あり/なし→COMPあり = 関数定義
@@ -542,7 +552,7 @@ class AST2Flowchart:
                 #関数の最初の部屋情報を作る
                 self.room_size_info[self.scanning_func] = {}
                 self.create_room_size_estimate(nodeID)
-
+                
                 self.func_info_dict[self.scanning_func].args = [
                     VarInfo(
                         varNode = self.create_var_node(arg_name, self.get_var_type(arg_type)), 
@@ -795,7 +805,7 @@ class AST2Flowchart:
         elif type.kind == ci.TypeKind.POINTER:
             # 本ポインタのアドレスが表す値を取得する
             pointee = type.get_pointee()
-
+            
             return PointerTypeInfo(
                 kind = "pointer",
                 type = self.get_type_spelling(type),
@@ -821,21 +831,19 @@ class AST2Flowchart:
         # 構造体・共用体
         elif type.kind == ci.TypeKind.RECORD:
             # どちらの型であるかを判別するためのカーソル
-            decl_cursor: ci.Cursor = type.get_decl_cursor()
+            decl_cursor: ci.Cursor = type.get_declaration()
 
             self.check_cursor_error(decl_cursor)
 
+            # struct = 構造体である場合
             if decl_cursor.kind == ci.CursorKind.STRUCT_DECL:
-                # struct = 構造体である場合
-                children: dict[str, TypeInfo] = {}
-
                 field_cursor_list = self.get_child_cursor_list(decl_cursor, (1, None))
 
-                for field_cursor in field_cursor_list:
-                    if field_cursor.kind != ci.CursorKind.FIELD_DECL:
-                        continue
-
-                    children[self.get_cursor_spelling(field_cursor)] = self.get_var_type(self.get_cursor_type(field_cursor))
+                children = {
+                    self.get_cursor_spelling(field_cursor) : self.get_var_type(self.get_cursor_type(field_cursor))
+                    for field_cursor in field_cursor_list
+                    if field_cursor.kind == ci.CursorKind.FIELD_DECL
+                }
 
                 return StructTypeInfo(
                     kind = "struct",
@@ -844,15 +852,13 @@ class AST2Flowchart:
                 )
 
             elif decl_cursor.kind == ci.CursorKind.UNION_DECL:
-                children: dict[str, TypeInfo] = {}
-
                 field_cursor_list = self.get_child_cursor_list(decl_cursor)
 
-                for field_cursor in field_cursor_list:
-                    if field_cursor.kind != ci.CursorKind.FIELD_DECL:
-                        continue
-
-                    children[self.get_cursor_spelling(field_cursor)] = self.get_var_type(self.get_cursor_type(field_cursor))
+                children = {
+                    self.get_cursor_spelling(field_cursor) : self.get_var_type(self.get_cursor_type(field_cursor))
+                    for field_cursor in field_cursor_list
+                    if field_cursor.kind == ci.CursorKind.FIELD_DECL
+                }
 
                 return UnionTypeInfo(
                     kind = "union",
@@ -949,10 +955,17 @@ class AST2Flowchart:
                 type = self.get_type_spelling(type),
                 children = children,
             )
+        # elaborated type (ラッパー型で、内部に実体型を持つ)
+        elif type.kind == ci.TypeKind.ELABORATED:
+            named_type = type.get_named_type()
 
+            if not isinstance(named_type, ci.Type):
+                sys.exit("error in getting named type of elaborated type")
+
+            return self.get_var_type(named_type)
         # その他
         else:
-            sys.exit(f"Unsupported TypeKind: {type.kind}, spelling={self.get_type_spelling(type)}")
+            sys.exit(f"{self.get_type_spelling(type)} is not allowed in this game")
 
     def parse_var_decl(self, cursor: ci.Cursor, nodeID: str | None, edgeName: str = ""):
         #変数名を取得
@@ -964,6 +977,7 @@ class AST2Flowchart:
 
         # 変数の型情報は、変数宣言のsignatureノードごとに取得する
         type_info = self.get_var_type(self.get_cursor_type(cursor))
+
         varNode = self.create_var_node(self.get_cursor_spelling(cursor), type_info)
         
         # 配列の場合
@@ -980,16 +994,30 @@ class AST2Flowchart:
 
             content_cursors = self.get_child_cursor_list(cursor, (1, None)) 
 
+            if len(content_cursors) == 0:
+                sys.exit("there is no content cursor in array variable")
+
+            if content_cursors[0].kind == ci.CursorKind.TYPE_REF:
+                content_cursors.pop(0)
+
             index_expr_info = ExprInfo(self.is_english)
 
             for i, token in enumerate(tokens):
                 if self.get_token_spelling(token) != '[':
                     continue
 
-                if i+1 < len(tokens) and self.get_token_spelling(token[i+1]) == ']':
+                if i+1 < len(tokens) and self.get_token_spelling(tokens[i+1]) == ']':
                     index_expr_info.append_expr_description(
-                        description=[{"text": f"#1 index was automatically set {type_info_for_array["size"]}" if self.is_english else f"最初の添字は {type_info_for_array["size"]} に自動的に設定されます"}], 
-                        expr=[{"text": ""}],
+                        description=[
+                            TextPart
+                            (
+                                text = 
+                                f"#1 index was automatically set {type_info_for_array["size"]}" 
+                                if self.is_english else 
+                                f"最初の添字は {type_info_for_array["size"]} に自動的に設定されます"
+                            )
+                        ], 
+                        expr=[TextPart(text = "")],
                         execution_condition={}
                     )
                     
@@ -997,12 +1025,13 @@ class AST2Flowchart:
                     type_info_for_array = type_info_for_array["children"]
                     index_num += 1
                     break
-            
+
             while "size" in type_info_for_array:
                 if len(content_cursors) == 0:
                     sys.exit("error in number of children cursors of array")
+
+                print(content_cursors[0].spelling)
                 expr_description = self.parse_expr(content_cursors.pop(0), index_expr_info, {})
-                
                 index_expr_info.append_expr_description(
                     description=[
                         {
@@ -1390,7 +1419,7 @@ class AST2Flowchart:
         cursor = self.unwrap_unexposed(cursor)
 
         # 現在の計算式がマクロならその情報を取得する
-        if self.get_cursor_file(cursor) is not None and (macro := self.macro_pos.get((self.get_cursor_file(cursor).name, self.get_cursor_line(cursor), self.get_cursor_column(cursor)), None)) is not None:
+        if (file := self.get_cursor_file(cursor)) is not None and (macro := self.macro_pos.get((file.name, self.get_cursor_line(cursor), self.get_cursor_column(cursor)))) is not None:
             '''
             しかし、この条件だけだと、"TEST"といったマクロ単体と、"TEST + a + func(b)"のようなマクロが先頭に含まれる計算式を区別できない
             どちらも、TESTの先頭が位置するファイル、行番、列番が同じになってしまう
@@ -1400,8 +1429,13 @@ class AST2Flowchart:
             if self.get_cursor_column(cursor) + len(macro) != self.get_cursor_extent_end(cursor).column:
                 macro = None
 
+        # マクロ単体の計算式の場合、そのマクロ名を登録する
+        if macro:
+            expr_description = MacroPart(
+                macro = macro
+            )
         # ()で囲まれている場合
-        if cursor.kind == ci.CursorKind.PAREN_EXPR:
+        elif cursor.kind == ci.CursorKind.PAREN_EXPR:
             children = self.get_child_cursor_list(cursor, 1) 
             inside_paren_cursor = children[0]
             inside_expr_description = self.parse_expr(inside_paren_cursor, expr_info, execution_condition)
@@ -1416,9 +1450,18 @@ class AST2Flowchart:
         # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind in (ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.FLOATING_LITERAL, ci.CursorKind.STRING_LITERAL, ci.CursorKind.CHARACTER_LITERAL):
             tokens = list(cursor.get_tokens())
+            # if macro is None:
+            #     if len(tokens) != 1:
+            #         sys.exit("number of child tokens of const value (not macro) has to be 1")
+            #     expr_description = TextPart(text = self.get_token_spelling(tokens[0]))
+            # else:
+            #     expr_description = MacroPart(
+            #         macro = macro, 
+            #         replacement = expr_description
+            #     )
+            #     macro = None
             if len(tokens) != 1:
                 sys.exit("number of child tokens of const value has to be 1")
-
             expr_description = TextPart(text = self.get_token_spelling(tokens[0]))
         # スカラー変数の呼び出し
         elif cursor.kind == ci.CursorKind.DECL_REF_EXPR:
@@ -1501,62 +1544,53 @@ class AST2Flowchart:
         elif cursor.kind == ci.CursorKind.UNARY_OPERATOR:
             # ++aでいうaのカーソル
             child_cursor_list = self.get_child_cursor_list(cursor, 1)
-
             operand_cursor = child_cursor_list[0]
 
             child_tokens = list(cursor.get_tokens())
 
-            if len(child_tokens) < 2:
-                sys.exit("error in number of child tokens of unary operator")
+            operand_start = self.get_cursor_offset(operand_cursor)
+            operand_end = operand_cursor.extent.end.offset
 
-            potential_operator_offset: int = child_tokens[0].location.offset
+            unary_operator_list = {"+", "-", "!", "~", "&", "*", "++", "--"}
 
-            if not isinstance(potential_operator_offset, int):
-                sys.exit("value of operator offset has to be integer")
+            operator_tokens = [
+                token for token in child_tokens
+                if self.get_token_spelling(token) in unary_operator_list
+                and not operand_start <= token.location.offset < operand_end
+            ]
 
-            is_front = potential_operator_offset < self.get_cursor_offset(operand_cursor)
-            operator_spell = self.get_token_spelling(child_tokens[0]) if is_front else self.get_token_spelling(child_tokens[-1])
+            if len(operator_tokens) != 1:
+                sys.exit("invalid number of unary operator tokens")
 
+            operator_token = operator_tokens[0]
+            operator_spell = self.get_token_spelling(operator_token)
+
+            is_front = operator_token.location.offset < operand_start
             is_inc_or_dec = operator_spell in ("++", "--")
 
             operand_expr = self.parse_expr(
-                operand_cursor, 
-                expr_info, 
-                execution_condition, 
-                required_expr_description_type = {"expr_id"} if is_inc_or_dec else None
+                operand_cursor,
+                expr_info,
+                execution_condition,
+                required_expr_description_type={"expr_id"} if is_inc_or_dec else None
             )
 
             if expr_info.has_standard_func_reference:
                 sys.exit("this game does not allow standard function in unary operator expression")
 
-            # 前置, 後置で分けてdescriptionを取得する
-            # operator_spellが ++ や -- のときはexprはTextPartとの組み合わせではなく、副作用演算子ExprDescriptionPartに登録する
             expr = (
                 [
                     UnaryExprPart(
-                        operator = operator_spell,
-                        operand_id = operand_expr["expr_id"],
-                        is_front_operator = True
+                        operator=operator_spell,
+                        operand_id=operand_expr["expr_id"],
+                        is_front_operator=is_front
                     )
                 ]
-                if is_inc_or_dec else
-                [
-                    TextPart(text = operator_spell), 
-                    operand_expr
-                ]
-            ) if is_front else (
-                [
-                    UnaryExprPart(
-                        operator = operator_spell,
-                        operand_id = operand_expr["expr_id"],
-                        is_front_operator = False
-                    )
-                ]
-                if is_inc_or_dec else
-                [
-                    operand_expr, 
-                    TextPart(text = operator_spell)
-                ]
+                if is_inc_or_dec else (
+                    [TextPart(text=operator_spell), operand_expr]
+                    if is_front else
+                    [operand_expr, TextPart(text=operator_spell)]
+                )
             )
 
             description = expr_info.get_unary_operator_description(operator_spell, operand_expr, is_front)
@@ -1753,16 +1787,8 @@ class AST2Flowchart:
             expr_description = expr_info.append_expr_description(description, expr, execution_condition)
         # その他 → 対応していない計算式ということでエラー
         else:
+            print(cursor.kind, cursor.referenced.kind, cursor.type.kind, self.get_cursor_line(cursor))
             sys.exit("error in expression type")
-
-        # マクロ単体の計算式の場合、現在のexpr_descriptionをマクロ型に変換する
-        if macro:
-            if not ("expr_id" in expr_description or "text" in expr_description):
-                expr_description = expr_info.append_expr_description([expr_description], [expr_description], execution_condition)
-            expr_description = MacroPart(
-                macro = macro, 
-                replacement = expr_description
-            )
 
         if required_expr_description_type is not None:
             if not any(t in expr_description for t in required_expr_description_type):

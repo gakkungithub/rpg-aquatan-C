@@ -39,7 +39,6 @@ class ArrayVariablePart(TypedDict):
 
 class MacroPart(TypedDict):
     macro: str
-    replacement: ExprIdPart | TextPart
 
 class UnaryExprPart(TypedDict):
     operator: Literal["++", "--"]

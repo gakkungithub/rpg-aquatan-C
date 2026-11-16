@@ -4722,11 +4722,7 @@ class CodeElementWindow(Window):
                             # description_to_show_list.append(expr_part["text"])
                             pass
                         elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                            if "text" in expr_part["replacement"]:
-                                description_to_show_list.append(f"(={expr_part["replacement"]["text"]})")
-                            else:
-                                # description_to_show_list.append(f"{expr_part["macro"]}(={value_list_from_send_event(expr_part["replacement"]["expr_id"])})")
-                                pass
+                            description_to_show_list.append(expr_part["macro"])
                         # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
                         elif "operator" in expr_part:
                             sys.exit("description parts cannot include side-effect part")

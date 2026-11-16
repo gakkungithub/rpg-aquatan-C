@@ -934,14 +934,8 @@ class DynamicCommentHandler:
                         str_for_evaluation_list.append(expr_part["text"])
                         str_to_show_list.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        if "text" in expr_part["replacement"]:
-
-                            str_for_evaluation_list.append(expr_part["replacement"]["text"])
-                            str_to_show_list.append(f"<{expr_part["macro"]}>(={expr_part["replacement"]["text"]})")
-                        else: # expr_id
-
-                            str_for_evaluation_list.append(self.get_expr_result(expr_part["replacement"]["expr_id"]))
-                            str_to_show_list.append(f"<{expr_part["macro"]}>(={self.get_expr_result(expr_part["replacement"]["expr_id"]) or "not to evaluate"})")
+                        str_for_evaluation_list.append(expr_part["macro"])
+                        str_to_show_list.append(f"<{expr_part["macro"]}>(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
                     elif "operator" in expr_part:
                         if "is_front_operator" in expr_part:
                             str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
@@ -1026,10 +1020,7 @@ class DynamicCommentHandler:
                     elif "text" in expr_part:
                         description_to_show_list.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        if "text" in expr_part["replacement"]:
-                            description_to_show_list.append(f"{expr_part["macro"]}(={expr_part["replacement"]["text"]})")
-                        else:
-                            description_to_show_list.append(f"{expr_part["macro"]}(={self.get_expr_result(expr_part["replacement"]["expr_id"])})")
+                        description_to_show_list.append(f"{expr_part["macro"]}(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
                     # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
                     elif "operator" in expr_part:
                         sys.exit("description parts cannot include side-effect part")
