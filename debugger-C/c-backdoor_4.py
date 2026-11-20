@@ -232,6 +232,7 @@ class DoWhileInitializerStatusHandler(DynamicNonVarStatusHandler):
                 result = None
             )
         ]
+        return "correct"
 
 
 class DoWhileStatusHandler(DynamicNonVarStatusHandler):
@@ -1800,8 +1801,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
                     self.line_data: dict[str, LineInfoDataByFunc] = json.load(f)
                     self.func_name = self.func_crnt_name
+                    # self.next_lines = {
+                    #     int(line): (
+                    #         {int(condition): next_line for condition, next_line in info.items()}
+                    #         if isinstance(info, dict)
+                    #         else info
+                    #     )
+                    #     for line, info in self.line_data[self.func_name]["next_lines"].items()
+                    # }
                     self.frame_num: int = 1
                     self.get_std_outputs()
+
                     self.event_sender(
                         Debugger2GameEvent(
                             message = "The first step" if self.is_english else "最初の処理",
@@ -1812,6 +1822,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         ), 
                         False
                     )
+
                     self.line_number: int = self.line_data[self.func_name]["start"] - 1
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_variables.json", 'r') as f:
                     variables_info: dict[str, dict] = json.load(f)
@@ -2199,37 +2210,53 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     )
                 )
             return value_unchanged_dict_list
-        
-        def set_skipped_var_declaration(self, start_line: int | None, end_line: int | None):
-            start_line, end_line = self.get_start_end_lines_for_skipped_var_declaration(start_line, end_line)
 
-            if start_line is None and end_line is None:
-                return
+        def set_skipped_var_declaration_lines(self, send_event: Debugger2GameEvent, previous_line: int | tuple[int, int], is_func_entry: bool = False):
+            self.skipped_var_declaration_lines = []
 
-            self.skipped_var_declaration_lines = [
-                line for line in self.vars_tracker.declared_variables_by_line
-                if ((start_line is not None and end_line is not None and start_line < int(line) < end_line) 
-                or (start_line is None and end_line is not None and int(line) < end_line) 
-                or (start_line is not None and end_line is None and start_line < int(line)))
-            ]
+            if is_func_entry:
+                if isinstance(previous_line, tuple):
+                    sys.exit("previous line of function entry has to be integer")
+                send_event["line"] = previous_line
+                if previous_line == self.next_line_number:
+                    return
+                if str(previous_line) not in self.vars_tracker.declared_variables_by_line:
+                    sys.exit(f"variable declaration info of {previous_line} is not found")
 
-        def get_start_end_lines_for_skipped_var_declaration(self, start_line: int | None, end_line: int | None) -> tuple[int | None, int | None]:
-            if start_line is None or end_line is None:
-                return start_line, end_line
+                self.skipped_var_declaration_lines.append(str(previous_line))
 
-            if start_line <= end_line:
-                return start_line, end_line
-            
-            if self.frame_num < self.next_frame_num:
-                return start_line, end_line
-            elif self.frame_num > self.next_frame_num:
-                end_line = None
-            else: # 同じ関数内 = while, do-while, or for
-                # 直前のself.loop_listのend_lineを取得する
-                if (line_loop := self.line_loop_dict_by_frame[self.frame_num - 2].get(end_line) if len(self.line_loop_dict_by_frame) > self.frame_num - 2 else None) is not None:
-                    end_line = line_loop["bottom_edge"]
+            next_line_number = self.get_next_line(previous_line)
 
-            return start_line, end_line
+            if not is_func_entry:
+                send_event["line"] = next_line_number
+
+            while next_line_number != self.next_line_number:
+                if str(next_line_number) not in self.vars_tracker.declared_variables_by_line:
+                    return
+
+                self.skipped_var_declaration_lines.append(str(next_line_number))
+                next_line_number = self.get_next_line(next_line_number)
+                
+        def get_next_line(self, previous_line: int | tuple[int, int]):
+            if (line_data := self.line_data.get(self.func_name)) is None:
+                sys.exit(f"line data of function {self.func_name} is not found")
+
+            next_line_data_dict = line_data["next_lines"]
+            if isinstance(previous_line, int):
+                if (next_line_data := next_line_data_dict.get(str(previous_line))) is None:
+                    sys.exit(f"next-line data is not found in line {previous_line}")
+                if isinstance(next_line_data, dict):
+                    sys.exit(f"next-line data in line {line} is integer")
+                return next_line_data
+            else:
+                line, condition = previous_line
+                if (next_line_data := next_line_data_dict.get(str(line))) is None:
+                    sys.exit(f"next-line data is not found in line {line}")
+                if isinstance(next_line_data, int):
+                    sys.exit(f"next-line data in line {line} is integer")
+                if (skipped_start_line := next_line_data.get(str(condition))) is None:
+                    sys.exit(f"next line of line {line} with condition {condition} is not found")
+                return skipped_start_line
 
         def vars_checker(self, line_number: int, is_for_false: bool = False, is_skipped_var_check: bool = False):
             if self.is_end:
@@ -2323,7 +2350,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     # current_comment is None = 未処理の関数がない = アイテムを正しく取得できた → 次の変数に移る
                     if (current_comment := dynamic_variable_info["current_comment_w_index"]) is None:
-
                         # 取得した変数を宣言済リストに登録する
                         self.vars_tracker.set_variable_declared(var)
 
@@ -2337,7 +2363,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
                                         line = var[1]
                                     ),
-                                    skipped_function_list = dynamic_variable_info["skipped_function_list"]
+                                    skipped_function_list = dynamic_variable_info["skipped_function_list"],
                                 ),
                                 False
                             )
@@ -2351,22 +2377,25 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines
                             ]
 
+                            send_event = Debugger2GameEvent(
+                                message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
+                                status = "ok",
+                                item = DeclaredVariableInfo(
+                                    value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
+                                    line = var[1]  
+                                ),
+                                vars_w_value_changed = self.get_vars_w_value_changed(values_changed), 
+                                vars_w_value_unchanged = self.get_vars_w_value_unchanged(),
+                                skipped_function_list = dynamic_variable_info["skipped_function_list"],
+                                # line = self.get_next_line(line_number)
+                            )
+
                             # 変数宣言が全て完了した時の処理
                             if not is_skipped_var_check:
-                                self.set_skipped_var_declaration(self.line_number, self.next_line_number)
+                                self.set_skipped_var_declaration_lines(send_event, self.line_number)
 
                             self.event_sender(
-                                Debugger2GameEvent(
-                                    message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
-                                    status = "ok",
-                                    item = DeclaredVariableInfo(
-                                        value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
-                                        line = var[1]  
-                                    ),
-                                    vars_w_value_changed = self.get_vars_w_value_changed(values_changed), 
-                                    vars_w_value_unchanged = self.get_vars_w_value_unchanged(),
-                                    skipped_function_list = dynamic_variable_info["skipped_function_list"]
-                                )
+                                send_event
                             )
 
                         break
@@ -2480,9 +2509,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 status = "ok",
             )
 
-            start_line: int | None = None
-            end_line: int | None = None
-
             get_line = True
 
             # if文は、条件ごとに実行行が異なるので、これから変えないといけない?
@@ -2495,8 +2521,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_conditions(send_event, execution_info["true_condition_index"])
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    start_line = self.line_number
-                    end_line = self.next_line_number
+                    self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(True)))
             elif (isinstance(current_expr_status_handler, WhileStatusHandler) and execution_info["type"] == "while") or (isinstance(current_expr_status_handler, DoWhileStatusHandler) and execution_info["type"] == "do_while"):
                 condition = execution_info["condition"]
                 if condition is None:
@@ -2508,15 +2533,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                     else: # falseなら、一番下の行をstart_lineに設定して、next_line_numberをend_lineに設定する
                         self.pop_expr_status_handler(False)
-
-                        if execution_info["type"] == "while":
-                            if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
-                                sys.exit("end_line of while statement is not found")
-                            end_line = self.next_line_number
-                        else:
-                            start_line = self.line_number
-                            end_line = self.next_line_number
-
+                        self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(False)))
                         self.remove_line_loop(self.line_number)
             elif isinstance(current_expr_status_handler, DoWhileInitializerStatusHandler) and execution_info["type"] == "do_while":
                 # あり得ないが
@@ -2526,8 +2543,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_arrival(send_event)
                 self.pop_expr_status_handler(False)
                 
-                start_line = self.line_number
-                end_line = self.next_line_number
+                self.set_skipped_var_declaration_lines(send_event, self.line_number)
             elif isinstance(current_expr_status_handler, ForStatusHandler):
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
 
@@ -2538,11 +2554,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                         else:
                             self.pop_expr_status_handler(False)
-
-                            if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
-                                sys.exit("start_line of for statement is not found")
-                            end_line = self.next_line_number
-
+                            self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(False)))
                             self.remove_line_loop(self.line_number)
                     elif execution_info["type"] == "for_initializer":
                         get_line = False
@@ -2553,20 +2565,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    start_line = self.line_number
-                    end_line = self.next_line_number
+                    self.set_skipped_var_declaration_lines(send_event, (self.line_number, execution_info["true_case_index"]))
             elif isinstance(current_expr_status_handler, ControlFlowStatusHandler):
                 if current_expr_status_handler.type == execution_info["type"]:
                     check_result = current_expr_status_handler.check_status(send_event)
                     self.pop_expr_status_handler(False)
                     if execution_info["type"] == "break":
                         self.remove_line_loop(current_expr_status_handler.condition_line)
+                    self.set_skipped_var_declaration_lines(send_event, self.line_number)
+                else:
+                    check_result = "incorrect"
             elif isinstance(current_expr_status_handler, ExpressionStatusHandler) and execution_info["type"] == "expression":
                 check_result = current_expr_status_handler.check_expr(send_event)
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    start_line = self.line_number
-                    end_line = self.next_line_number
+                    self.set_skipped_var_declaration_lines(send_event, self.line_number)
             elif isinstance(current_expr_status_handler, ReturnStatusHandler) and execution_info["type"] == "return":
                 check_result = current_expr_status_handler.check_status(send_event)
 
@@ -2591,8 +2604,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 elif check_result == "next_function":
                     self.analyze_next_function(current_expr_status_handler)
                     return "correct"
-
-            self.set_skipped_var_declaration(start_line, end_line)
 
             send_event["skipped_function_list"] = current_expr_status_handler.get_skipped_functions()
             if not self.is_end:
@@ -2699,34 +2710,35 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if len(arg_comment_list) != len(func_warp["args"]):
                         sys.exit("number of argument comments does not match number of arguments in func warp")
 
-                    self.event_sender(
-                        Debugger2GameEvent(
-                            message = f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", 
-                            status = "ok",
-                            func = self.func_name, 
-                            from_line = self.line_number, 
-                            next_func = NextFunctionInfo(
-                                name = func_warp["name"], 
-                                x = func_warp["x"], 
-                                y = func_warp["y"], 
-                                items = [
-                                    ArgumentItemInfo(
-                                        name = var_info["var_node"]["name"],
-                                        line = var_info["start"],
-                                        value = self.vars_tracker.get_arg_value(var_info, arg_comment_list[i])
-                                    )
-                                    for i, var_info in enumerate(func_warp["args"])
-                                ]
-                            )
+                    send_event = Debugger2GameEvent(
+                        message = f"skip is canceled. move to function {self.func_crnt_name}" if self.is_english else f"スキップをキャンセルしました。関数 {self.func_crnt_name} に遷移します", 
+                        status = "ok",
+                        func = self.func_name, 
+                        from_line = self.line_number, 
+                        next_func = NextFunctionInfo(
+                            name = func_warp["name"], 
+                            x = func_warp["x"], 
+                            y = func_warp["y"], 
+                            items = [
+                                ArgumentItemInfo(
+                                    name = var_info["var_node"]["name"],
+                                    line = var_info["start"],
+                                    value = self.vars_tracker.get_arg_value(var_info, arg_comment_list[i])
+                                )
+                                for i, var_info in enumerate(func_warp["args"])
+                            ]
                         )
+                    )
+
+                    self.set_skipped_var_declaration_lines(send_event, func_warp["line"], is_func_entry = True)
+
+                    self.event_sender(
+                        send_event
                     )
 
                     self.dynamic_comment_handler_being_checked.append(current_comment_handler)
                     back_line_number = self.line_number
                     back_frame_num = self.frame_num
-
-                    # 次の関数の遷移時の処理
-                    self.set_skipped_var_declaration(func_warp["line"], self.next_line_number)
 
                     index_scanned_currently_before = current_comment_handler.index_scanned_currently
 
@@ -2857,16 +2869,16 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.reset_state()
                     del self.events_history[event["index"]:]
                     raise RollBack()
-                else:
-                    self.event_sender(
-                        Debugger2GameEvent(
-                            message = "", 
-                            status = "rollback_fail"
-                        )
+
+                self.event_sender(
+                    Debugger2GameEvent(
+                        message = "", 
+                        status = "rollback_fail"
                     )
-                    return None
-            else:
-                self.events_history.append(event)
+                )
+                return None
+
+            self.events_history.append(event)
             
             return event
     
@@ -2905,11 +2917,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 send_event["str"] = self.str_info_to_send
                 self.str_info_to_send = []
 
-                if get_line:
+                if get_line and "line" not in send_event:
                     if len(self.skipped_var_declaration_lines):
                         # 初期化されていない変数はスキップされてしまうので、そのような変数があるなら最初の行数を取得する
                         send_event["line"] = int(self.skipped_var_declaration_lines[0])
-                    else:
+                    else: 
                         send_event["line"] = self.next_line_number
                     # スコープから外れて除外された変数を取り除く
                     send_event["removed"] = [
@@ -3043,29 +3055,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 return True
             else:
-                if isinstance(current_expr_status_handler, WhileStatusHandler):
-                    if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
-                        sys.exit("end_line of while statement is not found")
-                    end_line = self.next_line_number
-                elif isinstance(current_expr_status_handler, DoWhileStatusHandler):
-                    start_line = self.line_number
-                    end_line = self.next_line_number
-                elif isinstance(current_expr_status_handler, ForStatusHandler):
-                    if (start_line := self.line_data[self.func_name]["loops"].get(str(self.line_number), None)) is None:
-                        sys.exit("start_line of for statement is not found")
-                    end_line = self.next_line_number
-                else:
-                    sys.exit("non-loop type expr status handler is found in loop skip process")
+                send_event = Debugger2GameEvent(
+                    message = f"skip is canceled" if self.is_english else f"スキップをキャンセルしました。",
+                    status = "ok",
+                    vars_w_value_changed = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())),
+                    vars_w_value_unchanged = self.get_vars_w_value_unchanged()
+                )
 
-                self.set_skipped_var_declaration(start_line, end_line)
-
+                self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(True)))
+                
                 self.event_sender(
-                    Debugger2GameEvent(
-                        message = f"skip is canceled" if self.is_english else f"スキップをキャンセルしました。",
-                        status = "ok",
-                        vars_w_value_changed = self.get_vars_w_value_changed(list(self.vars_tracker.vars_changed.keys())),
-                        vars_w_value_unchanged = self.get_vars_w_value_unchanged()
-                    )
+                    send_event
                 )
                 
                 return False

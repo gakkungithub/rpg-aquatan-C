@@ -119,9 +119,9 @@ def create_expression_execution_info(line: int):
 
 class ReturnExecutionInfo(TypedDict):
     type: Literal["return"]
-    line: int | None
+    line: int
 
-def create_return_execution_info(line: int | None):
+def create_return_execution_info(line: int):
     return ReturnExecutionInfo(
         type = "return", 
         line = line

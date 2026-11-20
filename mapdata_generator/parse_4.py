@@ -572,12 +572,11 @@ class AST2Flowchart:
                 # つまり、ここからvoid関数の解析になる
                 end_line = self.get_cursor_extent_end(cr).line
                 self.func_info_dict[self.scanning_func].set_start(end_line)
-
                 self.line_info_dict[self.scanning_func].set_start(end_line)
                 self.line_info_dict[self.scanning_func].set_execution_line(end_line)
                 return_nodeID = self.create_node(str(end_line), 'lpromoter')
                 self.create_edge(nodeID, return_nodeID)
-                self.register_execution_info(return_nodeID, create_return_execution_info(None))
+                self.register_execution_info(return_nodeID, create_return_execution_info(end_line))
 
     #関数内や条件文内の処理
     def parse_comp_stmt(self, cursor: ci.Cursor, nodeID: str | None, edgeName: str=""):
@@ -1167,7 +1166,7 @@ class AST2Flowchart:
         にそれぞれ含めていたが、これからは処理の最初の行〜最後の行の範囲で確かめる方針にすると良いかも?
         '''
         self.line_info_dict[self.scanning_func].set_start(start_line, isStatic)
-        self.func_info_dict[self.scanning_func].set_start(start_line, isStatic)
+        self.func_info_dict[self.scanning_func].set_start(start_line)
 
         self.var_info[f'"{var_nodeID}"'] = VarInfo(
             var_node = varNode, 

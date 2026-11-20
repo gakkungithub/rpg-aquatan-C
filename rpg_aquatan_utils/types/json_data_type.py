@@ -118,6 +118,7 @@ class LineInfoDataByFunc(TypedDict):
     lines: list[int]
     loops: dict[int | str, int]
     returns: list[int]
+    next_lines: dict[int | str, int | dict[int | str, int]]
     stdins: list[int]
     start: int
     input: dict[int | str, list[int]]

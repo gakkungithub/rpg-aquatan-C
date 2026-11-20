@@ -3406,6 +3406,7 @@ class MessageWindow(Window):
                         )
                     )
                     skip_result = self.sender.receive_json()
+
                     # スキップした先がbreak文だった場合 ( = breakでループを抜ける場合 )
                     if (break_line_after_loop_skip := skip_result.get("break_line_after_loop_skip")) is not None:
                         if "return_line_after_loop_skip" in skip_result:

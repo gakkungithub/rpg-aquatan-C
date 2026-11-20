@@ -1,6 +1,6 @@
 import argparse
 from parse_4 import AST2Flowchart
-from generate_bit_map_4 import GenBitMap
+from generate_bit_map_4 import BitMapGenerator
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', required=True)
@@ -13,10 +13,11 @@ args = parser.parse_args()
 program_name: str = args.p
 c_files: list[str] = args.c
 is_english: bool = args.e
+is_universal: bool = args.u
 
 ast_to_flowchart = AST2Flowchart(program_name, c_files, is_english)
 
-genBitMap = GenBitMap(
+genBitMap = BitMapGenerator(
     program_name, 
     ast_to_flowchart.func_info_dict, 
     ast_to_flowchart.gvar_info, 
@@ -24,10 +25,10 @@ genBitMap = GenBitMap(
     ast_to_flowchart.expr_node_info, 
     ast_to_flowchart.room_size_info, 
     ast_to_flowchart.gotoRoom_list, 
-    ast_to_flowchart.execution_info, 
-    is_english
+    ast_to_flowchart.execution_info,
+    ast_to_flowchart.line_info_dict,
+    is_english,
+    is_universal
 )
 
 genBitMap.start_tracking()
-
-genBitMap.set_mapchip(program_name, ast_to_flowchart.line_info_dict, is_english)
