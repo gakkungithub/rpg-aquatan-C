@@ -2,7 +2,7 @@ from rpg_aquatan_utils.types.expr_descriptions import *
 
 class GotoRoomInfo(TypedDict):
     to_nodeID: str
-    fromNodeID: str
+    from_nodeID: str
     
 class FuncInfo:
     def __init__(self, nodeID: str):
@@ -24,6 +24,7 @@ class LineInfo:
         self.lines: set[int] = set()
         self.loops: dict[int, int] = {}
         self.returns: set[int] = set()
+        self.next_lines: dict[int, int | dict[bool | str, int]] = {}
         self.stdins: set[int] = set()
         self.start = 0
 
@@ -35,6 +36,27 @@ class LineInfo:
 
     def set_return(self, line: int):
         self.returns.add(line)
+
+    def set_next_line(self, previous_line: int | tuple[int, bool | str], next_line: int):
+        if isinstance(previous_line, int):
+            if previous_line in self.next_lines:
+                return False
+            self.next_lines[previous_line] = next_line
+        else:
+            line, condition = previous_line
+            if (next_line_info := self.next_lines.get(line)) is None:
+                self.next_lines[line] = {condition: next_line}
+                return True
+
+            if isinstance(next_line_info, int):
+                return False
+
+            if condition in next_line_info:
+                return False
+
+            next_line_info[condition] = line
+
+        return True
 
     def set_stdin(self, line: int):
         self.stdins.add(line)

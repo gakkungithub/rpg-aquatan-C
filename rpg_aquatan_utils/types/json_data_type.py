@@ -136,7 +136,7 @@ class Debugger2GameEvent(TypedDict):
     items: NotRequired[list[VariableInfo]]
     item: NotRequired[DeclaredVariableInfo]
     func: NotRequired[str]
-    func_skip: NotRequired[int]
+    func_skip_index: NotRequired[int]
     loop_skip: NotRequired[Literal[True]]
     break_line_after_loop_skip: NotRequired[int]
     return_line_after_loop_skip: NotRequired[int]

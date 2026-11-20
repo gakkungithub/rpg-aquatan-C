@@ -69,7 +69,7 @@ class FunctionComment(TypedDict):
 class Comment(TypedDict):
     id: int
     comment: ExprDescription | FunctionComment
-    execution_condition: dict[int, bool]
+    execution_condition: dict[int | str, bool]
 
 class ExprDescription(TypedDict):
     description: list[ExprDescriptionPart]
@@ -91,7 +91,7 @@ class VarNode(TypedDict):
     initialized: bool
 
 class VarInfo(TypedDict):
-    varNode: VarNode
+    var_node: VarNode
     start: int
     end: int
 

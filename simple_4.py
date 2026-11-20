@@ -583,7 +583,7 @@ def main():
             if not MSGWND.is_visible:
                 MMAPWND.draw(screen, fieldmap)
 
-            PCODEWND.draw(screen)
+            PCODEWND.draw(screen, fieldmap)
 
             draw_string(
                 screen, 
@@ -843,8 +843,7 @@ def main():
                                 crnt_codeElementWindow.offset_x += dx
                             elif dx >= 0:
                                 crnt_codeElementWindow.offset_x = min(crnt_codeElementWindow.offset_x+dx, 10)
-                            codeElementWindow_scroll_mouse_pos = event.pos
-                                      
+                            codeElementWindow_scroll_mouse_pos = event.pos          
                     elif programCodeWindow_scroll_mouse_pos is None and itemWindow_expand_mouse_pos is None and itemWindow_scroll_mouse_pos is None and controllerGuideWindow_scroll_mouse_pos is None and logWindow_scroll_mouse_pos is None:
                         cmd = BTNWND.is_clicked(pygame.mouse.get_pos())
                         if cmd == "command":
@@ -867,7 +866,7 @@ def main():
 
                 if event.type == KEYDOWN and event.key in [K_DOWN, K_UP]:
                     if PCODEWND.rollback_index is not None:
-                        PCODEWND.selectRollBackLine(-1 if event.key == K_UP else 1)
+                        PCODEWND.select_rollback_line(-1 if event.key == K_UP else 1)
 
                 if (event.type == KEYDOWN and event.key == K_f) or cmd == "foot":
                     cmd = ""
@@ -904,7 +903,7 @@ def main():
                         sys.exit()
 
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
-                        if (button_name := PAUSEWND.sm_window.touchKnob(event.pos)):
+                        if (button_name := PAUSEWND.sm_window.scroll_knob(event.pos)):
                             continue
                         if PAUSEWND.button_toGame_rect.collidepoint(event.pos):
                             SMANAGER.play_se("pause_close")
@@ -1305,14 +1304,19 @@ class Map:
         self.lights: list[Light] = []  # マップにある光源リスト
         self.floor: int = 0
         self.red_overlay = pygame.Surface((SCR_WIDTH, SCR_HEIGHT), pygame.SRCALPHA)
+        self.execution_lines: dict[int, int] = {}
         self.load_json()
 
     def create(self, dest_map: str):
         """dest_mapでマップを初期化"""
+        if self.name == dest_map:
+            self.execution_lines.clear()
+
         self.name = dest_map
         self.charas = []
         self.events = []
         self.lights = []
+
         self.load_json()
 
     def add_chara(self, chara):
@@ -1500,6 +1504,7 @@ class Map:
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
                 self.create_treasure_j(event)
+                self.execution_lines[event["start"]] = event["end"]
             elif event_type == "DOOR":  # ドア
                 self.create_door_j(event)
             elif event_type == "SDOOR":  #  小さいドア
@@ -2187,32 +2192,26 @@ class Player(Character):
                     event.item
                 )
 
-                if (func_skip_index := received_event.get("func_skip")) is not None:
-                    self.set_checking_function(event, func_skip_index)
-                    MSGWND.set(
-                        received_event['message'], 
-                        (
-                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                            "func_skip"
-                        )
-                    )
-                else:
-                    # 初期化値なしの変数でコメントを初期化する
-                    if "values" not in received_event:
-                        self.remove_itemvalue()
-                        
-                    event.open(received_event["item"])
+                if self.handle_func_skip_request(received_event, event):
+                    self.fp.write("itemget, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "," + event.item + "\n")
+                    return True
 
-                    item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
-                    self.add_log(f"Item \"{event.item}\" of {event.start} line was acquired" if ISENGLISH else f"{event.start}行目のアイテム「{event.item}」を取得")
-                    # if (indexes_comments := received_event["expr_descriptions"]["indexes"]):
-                    #     item_get_message += "\f" + "\f".join(indexes_comments)
-                    # if not received_event['item']["initialized"]:
-                    #     item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
-                    self.set_completed_checked_func_location(mymap.name, event.func, event.start, event.item)
+                # 初期化値なしの変数でコメントを初期化する
+                if "values" not in received_event:
+                    self.remove_itemvalue()
+                    
+                event.open(received_event["item"])
 
-                    mymap.remove_event(event)
-                    MSGWND.set(item_get_message)
+                item_get_message = f"You got item \"{event.item}\"" if ISENGLISH else f"宝箱を開けた！\n「{event.item}」を手に入れた！"
+                self.add_log(f"Item \"{event.item}\" of {event.start} line was acquired" if ISENGLISH else f"{event.start}行目のアイテム「{event.item}」を取得")
+                # if (indexes_comments := received_event["expr_descriptions"]["indexes"]):
+                #     item_get_message += "\f" + "\f".join(indexes_comments)
+                # if not received_event['item']["initialized"]:
+                #     item_get_message += f"\fbut, value of item \"{event.item}\" was uninitialized !!" if ISENGLISH else f"\fただし、アイテム 「{event.item}」 は初期化されていないので注意してください!!"
+                self.set_completed_checked_func_location(mymap.name, event.func, event.start, event.item)
+
+                mymap.remove_event(event)
+                MSGWND.set(item_get_message)
                 self.fp.write("itemget, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "," + event.item + "\n")
             else:
                 MSGWND.set(received_event['message'])
@@ -2238,15 +2237,7 @@ class Player(Character):
                     )
 
                     # 関数のスキップ
-                    if (func_skip_index := received_event.get("func_skip")) is not None:
-                        self.set_checking_function(event, func_skip_index)
-                        MSGWND.set(
-                            received_event['message'], 
-                            (
-                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                                'func_skip'
-                            )
-                        )
+                    if self.handle_func_skip_request(received_event, event):
                         return True
                     
                     # 繰り返し文のスキップ
@@ -2421,15 +2412,7 @@ class Player(Character):
                         comment["execution_info"]["line"]
                     )
                 
-                if (func_skip_index := received_event.get("func_skip")) is not None:
-                    self.set_checking_function(chara, func_skip_index)
-                    MSGWND.set(
-                        received_event['message'], 
-                        (
-                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                            'func_skip'
-                        )
-                    )
+                if self.handle_func_skip_request(received_event, chara):
                     return True
                 
                 item_info_dict: dict[tuple[str, int], list[list[str]]] = {}
@@ -2496,7 +2479,9 @@ class Player(Character):
                     # とりあえずprintfであるかどうかに関わらず同じメッセージを入れる
                     MSGWND.set(chara.message)
             else:
-                sys.exit(f"chara expression info in line {chara.linenum} is not found")
+                self.sender.send_event(Game2DebuggerEvent())
+                received_event = self.sender.receive_json()
+                MSGWND.set(received_event["message"])
             
             chara.linenum = None
         elif isinstance(chara, CharaCheckCondition):
@@ -2539,15 +2524,8 @@ class Player(Character):
                     chara.execution_info["line"]
                 )
 
-                if (func_skip_index := received_event.get("func_skip")) is not None:
-                    self.set_checking_function(chara, func_skip_index)
-                    MSGWND.set(
-                        received_event['message'], 
-                        (
-                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                            'func_skip'
-                        )
-                    )
+                if self.handle_func_skip_request(received_event, chara):
+                    return True
                 elif received_event.get("loop_skip", False):
                     MSGWND.set(received_event['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
                     self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
@@ -2578,51 +2556,44 @@ class Player(Character):
                         chara.execution_info["line"]
                     )
                     
-                    if (func_skip_index := received_event.get("func_skip")) is not None:
-                        self.set_checking_function(chara, func_skip_index)
-                        MSGWND.set(
-                            received_event['message'], 
-                            (
-                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                                'func_skip'
-                            )
-                        )
-                    else:
-                        self.set_completed_checked_func_location(
-                            mymap.name, 
-                            chara.func, 
-                            chara.execution_info["line"]
-                        )
+                    if self.handle_func_skip_request(received_event, chara):
+                        return True
+                    
+                    self.set_completed_checked_func_location(
+                        mymap.name, 
+                        chara.func, 
+                        chara.execution_info["line"]
+                    )
 
-                        self.append_move5History(
-                            {
-                                'mapname': mymap.name, 
-                                'x': self.x, 
-                                'y': self.y, 
-                                'cItems': self.common_itembag.get_current_item_layer(), 
-                                'items': self.itembag.get_current_item_layer(), 
-                                'return':True
-                            }
-                        )
+                    self.append_move5History(
+                        {
+                            'mapname': mymap.name, 
+                            'x': self.x, 
+                            'y': self.y, 
+                            'cItems': self.common_itembag.get_current_item_layer(), 
+                            'items': self.itembag.get_current_item_layer(), 
+                            'return':True
+                        }
+                    )
 
-                        move = self.move_history.pop(-1)
-                        self.itembag.items.pop(-1)
-                        self.remove_itemvalue()
-                        self.add_log(f"Came back to {move["func"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{move["func"]}に戻りました")
-                        
-                        for variable_info in received_event["items"]:
-                            if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
-                                item.update_value(variable_info["value"])
-                        
-                        self.append_analyzed_func_state(received_event["return_value"])
+                    move = self.move_history.pop(-1)
+                    self.itembag.items.pop(-1)
+                    self.remove_itemvalue()
+                    self.add_log(f"Came back to {move["func"]} from {chara.func}" if ISENGLISH else f"{chara.func}から{move["func"]}に戻りました")
+                    
+                    for variable_info in received_event["items"]:
+                        if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
+                            item.update_value(variable_info["value"])
+                    
+                    self.append_analyzed_func_state(received_event["return_value"])
 
-                        self.func = move["func"]
-                        self.waitingMove = chara
-                        self.waitingMove.dest_map = move['mapname']
-                        self.waitingMove.dest_x = move['x']
-                        self.waitingMove.dest_y = move['y']
-                        self.fp.write("moveout, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "\n")
-                        MSGWND.set(chara.message)
+                    self.func = move["func"]
+                    self.waitingMove = chara
+                    self.waitingMove.dest_map = move['mapname']
+                    self.waitingMove.dest_x = move['x']
+                    self.waitingMove.dest_y = move['y']
+                    self.fp.write("moveout, " + mymap.name + "," + str(self.x)+", " + str(self.y) + "\n")
+                    MSGWND.set(chara.message)
                     return True
             # mainのreturnキャラ
             else:
@@ -2634,37 +2605,51 @@ class Player(Character):
                         chara.execution_info["line"]
                     )
 
-                    if (func_skip_index := received_event.get("func_skip")) is not None:
-                        self.set_checking_function(chara, func_skip_index)
-                        MSGWND.set(
-                            received_event['message'], 
-                            (
-                                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
-                                'func_skip'
-                            )
-                        )
-                    elif received_event.get('is_finished', False):
-                        SMANAGER.stop_bgm()
-                        SMANAGER.play_se("goal")
-                        self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
+                    if self.handle_func_skip_request(received_event, chara):
+                        return True
 
-                        if mymap.name in ("tutorial", "tutorial_en"):
-                            received_event['message'] += (
-                                "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
-                                if ISENGLISH else
-                                "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
-                            )
-                        
-                        MSGWND.set(received_event['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
-                        self.fp.write("finished\n")
-                    else:
+                    if received_event.get("is_finished") is None:
                         sys.exit("is_finished is not found in a sent event of return statement")
+
+                    SMANAGER.stop_bgm()
+                    SMANAGER.play_se("goal")
+                    self.add_log("Here is a goal" if ISENGLISH else "ゴールに辿り着いた")
+
+                    if mymap.name in ("tutorial", "tutorial_en"):
+                        received_event['message'] += (
+                            "\fTutorial is end !!\fCheck how to play this game with the Pause button left-bottom !!\n(There is also a button back to the Stage-Select menu)\fNow begins the Dungeon Game !!"
+                            if ISENGLISH else
+                            "\fこれでチュートリアルは終了です!!\fゲーム途中で分からない操作があれば左下のPauseボタンで確認しましょう!!\n(ステージ選択画面に戻るボタンもその画面にあります)\fでは、C言語ダンジョンを楽しんでください!!"
+                        )
+                    
+                    MSGWND.set(received_event['message'], (["Back to the Stage-Select menu"] if ISENGLISH else ["ステージ選択画面に戻る"], 'finished'))
+                    self.fp.write("finished\n")
                     return True
             
             MSGWND.set(received_event['message'])
         
         return True
-    
+
+    def handle_func_skip_request(self, received_event: Debugger2GameEvent, object: Event | Character) -> bool:
+        '''
+        デバッガ側からfunc_skipリクエストがあれば、func_skipするか否かをプレイヤーが選べるようにする
+        リクエストがない(= 関数自体はない) のであれば、本メソッドの呼び出し元にFalseを返す(ない場合の次の処理に進ませるため)
+        '''
+        if (func_skip_index := received_event.get("func_skip_index")) is None:
+            return False
+
+        self.set_checking_function(object, func_skip_index)
+
+        MSGWND.set(
+            received_event["message"],
+            (
+                ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"],
+                "func_skip",
+            )
+        )
+
+        return True
+
     def add_log_of_action(self, execution_info: ExecutionInfo):
         if execution_info["type"] == "if":
             # else以外のif文
@@ -4646,7 +4631,8 @@ class CodeElementWindow(Window):
 
             condition_description_list: list[str] = []
             for line, condition in comment["execution_condition"].items():
-                condition_str = expr_description_str_to_show[line]["expr"]
+                print(expr_description_str_to_show)
+                condition_str = expr_description_str_to_show[int(line)]["expr"]
                 condition_description_list.append(
                     f"{condition_str} is {"True" if condition else "False"}" 
                     if ISENGLISH else 
@@ -5505,7 +5491,7 @@ class StageButtonWindow:
         if self.english_mode_button_rect.collidepoint(pos):
             return "switch_language"
         
-        return self.sm_window.touchKnob(pos)
+        return self.sm_window.scroll_knob(pos)
     
     def start_checking_lldb(self, host='localhost', port=9999, timeout=20.0, wait_timeout=10.0):
         start = time.time()
@@ -6028,7 +6014,6 @@ class ProgramCodeWindow(ScrollableWindow):
 
     def __init__(self, rect, name):
         ScrollableWindow.__init__(self, rect, self.FONT_SIZE)
-        
         self.c_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", name.lower(), name.lower() + ".c")
         self.lines = self.load_code_lines()
         self.maxY = len(self.lines) * (self.font_size + 4) + self.TITLE_FONT_SIZE + 4
@@ -6052,7 +6037,7 @@ class ProgramCodeWindow(ScrollableWindow):
         if self.is_auto_scroll:
             self.update_displayed_area(self.linenum)
         
-    def draw(self, screen):
+    def draw(self, screen: pygame.Surface, fieldmap: Map):
         if not self.is_visible:
             return
         
@@ -6073,19 +6058,21 @@ class ProgramCodeWindow(ScrollableWindow):
 
             text = f"{str(i+1):>{digit_line}}  {line.rstrip()}"
             if (i + 1) == self.linenum:
+                bottom_line = fieldmap.execution_lines.get(i+1, i+1)
                 bg_rect = pygame.Rect(
                     5,
                     self.offset_y + y,
                     self.rect.width - 10,
-                    self.FONT_SIZE + 4
+                    (self.FONT_SIZE + 4) * (bottom_line - i)
                 )
                 pygame.draw.rect(self.surface, self.HIGHLIGHT_COLOR, bg_rect)
             if self.rollback_index is not None and (i + 1) == self.history[self.rollback_index][1]:
+                bottom_line = fieldmap.execution_lines.get(i+1, i+1)
                 bg_rect = pygame.Rect(
                     5,
                     self.offset_y + y,
                     self.rect.width - 10,
-                    self.FONT_SIZE + 4
+                    (self.FONT_SIZE + 4) * (bottom_line - i)
                 )
                 pygame.draw.rect(self.surface, self.ROLLBACK_COLOR, bg_rect)
             
@@ -6117,7 +6104,7 @@ class ProgramCodeWindow(ScrollableWindow):
 
         self.update_displayed_area(self.history[self.rollback_index][1])
 
-    def selectRollBackLine(self, dir: int):
+    def select_rollback_line(self, dir: int):
         if self.rollback_index is None or (self.rollback_index == 1 and dir == -1) or (self.rollback_index == len(self.history) - 1 and dir == 1):
             return
 
@@ -6202,8 +6189,7 @@ class EventSender:
                     # PLAYER.status["HP"] -= 10
                     # PLAYER.damage = "-10"
                     # PLAYER.damage_motion = [2,2,2,-2,-2,-2,0]
-                    if "message" in msg:
-                        msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
+                    msg["message"] += "\fPLAYER took 10 damage !!" if ISENGLISH else "\fプレイヤーに10ダメージ !!"
                     # if PLAYER.status["HP"] == 30:
                     #     SMANAGER.play_se_loop("hp_warning")
                     # elif PLAYER.status["HP"] == 0:
@@ -6298,9 +6284,6 @@ class EventSender:
                         MSGWND.memory_message = f"liberate {memory_info['address']} memory" if ISENGLISH else f"freeにより、アドレス{memory_info['address']}のメモリを解放しました"
                         # PLAYER.address_to_size.pop(memory_info["address"], None)
                 
-                if "type" in msg:
-                    PLAYER.is_before_loop_statement_in = True
-
                 if ITEMWND:
                     ITEMWND.file_window.read_filelines()
 
@@ -6337,32 +6320,10 @@ class SoundManager:
         self.se_volume: float = 1.0
 
     def load_initial(self):
-        self.load("button_io")
-        self.load("scroll")
-        self.load("stage_entry")
-        self.load("pause_open")
-        self.load("pause_close")
-        self.load("game_over")
-        self.load("walk")
-        self.load("grass_walk")
-        self.load("sand_walk")
-        self.load("iron_walk")
-        self.load("steel_walk")
-        self.load("goal")
-        self.load("warp")
-        self.load("skip")
-        self.load("rollback")
-        self.load("message_window")
-        self.load("select_menu_cursor")
-        self.load("treasure_open")
-        self.load("door_open")
-        self.load("door_close")
-        self.load("command_open")
-        self.load("command_close")
-        self.load("rollback_cursor")
-        self.load("incorrect_action")
-        self.load("hp_warning")
-
+        for name in ("button_io", "scroll", "stage_entry", "pause_open", "pause_close", "game_over", "walk", "grass_walk", "sand_walk", "iron_walk", "steel_walk", "goal", "warp", "skip", "rollback",
+            "message_window", "select_menu_cursor", "treasure_open", "door_open", "door_close", "command_open", "command_close", "rollback_cursor", "incorrect_action", "hp_warning",):
+            self.load(name)
+    
     def load(self, name: str):
         self.sounds[name] = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_effect", f"{name}.wav"))
     
@@ -6481,7 +6442,7 @@ class SoundManageWindow(Window):
         
         Window.blit(self, screen)
 
-    def touchKnob(self, pos: tuple[int, int]):
+    def scroll_knob(self, pos: tuple[int, int]):
         if (self.bgm_knob_x - self.KNOB_SIZE <= pos[0] <= self.bgm_knob_x + self.KNOB_SIZE
             and self.bgm_knob_y - self.KNOB_SIZE <= pos[1] <= self.bgm_knob_y + self.KNOB_SIZE):
             return "bgm slider"

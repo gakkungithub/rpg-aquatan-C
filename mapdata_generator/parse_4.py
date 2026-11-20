@@ -555,7 +555,7 @@ class AST2Flowchart:
                 
                 self.func_info_dict[self.scanning_func].args = [
                     VarInfo(
-                        varNode = self.create_var_node(arg_name, self.get_var_type(arg_type)), 
+                        var_node = self.create_var_node(arg_name, self.get_var_type(arg_type)), 
                         start = arg_lines[0], 
                         end = arg_lines[1]
                     )
@@ -644,11 +644,11 @@ class AST2Flowchart:
     def parse_stmt(self, cr: ci.Cursor, nodeID: str | None, edgeName: str = "") -> str | None:
         self.check_cursor_error(cr)
 
-        #break or continueの後なら何も行わない。ただし、ラベルを現在探索中でラベルを発見した時はラベルを見る
+        # break or continueの後なら何も行わない。ただし、ラベルを現在探索中でラベルを発見した時はラベルを見る
         if nodeID is None and cr.kind != ci.CursorKind.LABEL_STMT:
             return None
         
-        #部屋のサイズを1上げる
+        # 部屋のサイズを1上げる
         self.room_size_estimate = (self.room_size_estimate[0], self.room_size_estimate[1] + 1)
 
         # 変数や関数の宣言
@@ -990,6 +990,7 @@ class AST2Flowchart:
 
             if "size" not in type_info_for_array:
                 sys.exit("error in type_info")
+            
             index_num: int = 0
 
             content_cursors = self.get_child_cursor_list(cursor, (1, None)) 
@@ -1018,7 +1019,7 @@ class AST2Flowchart:
                             )
                         ], 
                         expr=[TextPart(text = "")],
-                        execution_condition={}
+                        execution_condition = {}
                     )
                     
                     # ここは必ずTypeInfoになるので型を固定する
@@ -1030,7 +1031,6 @@ class AST2Flowchart:
                 if len(content_cursors) == 0:
                     sys.exit("error in number of children cursors of array")
 
-                print(content_cursors[0].spelling)
                 expr_description = self.parse_expr(content_cursors.pop(0), index_expr_info, {})
                 index_expr_info.append_expr_description(
                     description=[
@@ -1045,7 +1045,7 @@ class AST2Flowchart:
                         }
                     ], 
                     expr=[expr_description],
-                    execution_condition={}
+                    execution_condition = {}
                 )
                 type_info_for_array = type_info_for_array["children"]
                 index_num += 1
@@ -1071,7 +1071,7 @@ class AST2Flowchart:
                             ],
                             expr = [TextPart(text = "")]
                         ),
-                        execution_condition={}
+                        execution_condition = {}
                     )
                 )
 
@@ -1102,7 +1102,7 @@ class AST2Flowchart:
                                 ], 
                                 expr = [TextPart(text = "")]
                             ),
-                            execution_condition={}
+                            execution_condition = {}
                         )
                     ]
                 else:
@@ -1170,7 +1170,7 @@ class AST2Flowchart:
         self.func_info_dict[self.scanning_func].set_start(start_line, isStatic)
 
         self.var_info[f'"{var_nodeID}"'] = VarInfo(
-            varNode = varNode, 
+            var_node = varNode, 
             start = start_line, 
             end = end_line
         )
@@ -1324,7 +1324,7 @@ class AST2Flowchart:
             node["funcs"] = expr_info.func_references
             return True
         elif cursor.kind == ci.CursorKind.STRING_LITERAL:
-            str_literals = self.get_cursor_spelling(cursor)
+            str_literals = self.get_cursor_spelling(cursor)[1:-1]
             if len(node["children"]) < len(str_literals):
                 sys.exit("error in number of string")
 
@@ -1335,8 +1335,7 @@ class AST2Flowchart:
                 child["comments"] = [
                     Comment(
                         id = 1,
-                        comment = 
-                        ExprDescription(
+                        comment = ExprDescription(
                             description = [TextPart(text=f"letter '{str_literals[i]}' was set" if self.is_english else f"文字 '{str_literals[i]}' を設定しました")],
                             expr = [TextPart(text=f"'{str_literals[i]}'")]
                         ) if i < len(str_literals) else
@@ -1344,7 +1343,7 @@ class AST2Flowchart:
                             description = [TextPart(text="letter '\0' (null) was set" if self.is_english else f"文字 '\0' (ヌル文字) を設定しました")],
                             expr = [TextPart(text="'\0'")]
                         ),
-                        execution_condition={} # ここは空辞書で良いのか?
+                        execution_condition = {} # ここは空辞書で良いのか?
                     )
                 ]
                 child["initialized"] = True
@@ -2169,10 +2168,10 @@ class AST2Flowchart:
         )
 
         # trueの後の処理の終点を作る (後でif構文の終点をまとめる)
-        trueEnd_nodeID = self.create_node("", 'terminator')
+        true_end_nodeID = self.create_node("", 'terminator')
         end_line = self.get_cursor_extent_end(then_cursor).line
 
-        self.create_edge(then_end_nodeID, trueEnd_nodeID)
+        self.create_edge(then_end_nodeID, true_end_nodeID)
 
         # else節の処理がある場合
         if len(children) > 2:
@@ -2183,7 +2182,7 @@ class AST2Flowchart:
                 # else if の再帰処理
                 # 現在のifがFalseの場合に該当するので、edgeNameは"False"にする
                 nodeIDs: list[str] = [
-                    trueEnd_nodeID, 
+                    true_end_nodeID, 
                     *self.parse_if_branch(
                         else_cursor, 
                         cond_nodeID, 
@@ -2194,7 +2193,7 @@ class AST2Flowchart:
                 ]
             else:
                 # else
-                falseEnd_nodeID = self.create_node("", 'terminator')
+                false_end_nodeID = self.create_node("", 'terminator')
                 in_else_cursor = self.get_child_cursor_list(else_cursor)
                 # 「elseが真の時」の処理がある場合
                 if len(in_else_cursor):
@@ -2211,22 +2210,22 @@ class AST2Flowchart:
                     )
                     end_line = self.get_cursor_line(in_else_cursor[-1])
                     self.line_info_dict[self.scanning_func].set_execution_line(end_line)
-                    self.create_edge(nodeID, falseEnd_nodeID)
+                    self.create_edge(nodeID, false_end_nodeID)
                 # 「elseが真の時」の処理がない場合
                 else:
                     nodeID = cond_nodeID
                     # self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_line(else_cursor))
                     # 現在の階層のif条件がFalse, else条件がTrueなのでそれら二つを追加する (parse_if_branch_startには入らないのでここで追加する必要がある)
                     self.register_execution_info(false_nodeID, create_if_execution_info(first_line, self.get_cursor_line(else_cursor), -1))
-                    self.create_edge(nodeID, falseEnd_nodeID, "False")
-                nodeIDs = [trueEnd_nodeID, falseEnd_nodeID]
+                    self.create_edge(nodeID, false_end_nodeID, "False")
+                nodeIDs = [true_end_nodeID, false_end_nodeID]
         # elseがない場合
         else:
             # elseがなくても終点を作る
-            falseEnd_nodeID = self.create_node("", 'terminator')
-            self.register_execution_info(falseEnd_nodeID, create_if_execution_info(first_line, 0, -1))
-            self.create_edge(cond_nodeID, falseEnd_nodeID, "False")
-            nodeIDs = [trueEnd_nodeID, falseEnd_nodeID]
+            false_end_nodeID = self.create_node("", 'terminator')
+            self.register_execution_info(false_end_nodeID, create_if_execution_info(first_line, 0, -1))
+            self.create_edge(cond_nodeID, false_end_nodeID, "False")
+            nodeIDs = [true_end_nodeID, false_end_nodeID]
         
         return nodeIDs
     
@@ -2389,7 +2388,7 @@ class AST2Flowchart:
                     for var_cr in var_cr_list:
                         var_nodeID = self.parse_var_decl(var_cr, var_nodeID, "")
                 else:
-                    init_nodeID = self.get_expr(cr, shape='invhouse')
+                    init_nodeID = self.get_expr(cr, shape='invhouse', label = str(self.get_cursor_line(cursor)))
                     self.register_execution_info(init_nodeID, create_for_initializer_execution_info(self.get_cursor_line(cursor)))
                 self.create_room_size_estimate(init_nodeID)
                 self.create_edge(nodeID, init_nodeID, edgeName)
@@ -2651,6 +2650,7 @@ class AST2Flowchart:
         continue_list  = loop_breaker["continue"]
 
         for breaker_pos in break_list:
+            self.create_room_size_estimate(breaker_pos["nodeID"])
             self.create_edge(breaker_pos["nodeID"], breakTo_nodeID)
             self.register_execution_info(
                 breaker_pos["nodeID"], 
@@ -2663,6 +2663,7 @@ class AST2Flowchart:
             self.line_info_dict[self.scanning_func].set_execution_line(breaker_pos["line"])
 
         for breaker_pos in continue_list:
+            self.create_room_size_estimate(breaker_pos["nodeID"])
             self.create_edge(breaker_pos["nodeID"], continueTo_nodeID)
             self.register_execution_info(
                 breaker_pos["nodeID"], 
@@ -2694,6 +2695,7 @@ class AST2Flowchart:
         break_in_switch = self.break_in_switch_list.pop(-1)
         break_pos_list = break_in_switch["break"]
         for breaker_pos in break_pos_list:
+            self.create_room_size_estimate(breaker_pos["nodeID"])
             self.create_edge(breaker_pos["nodeID"], end_nodeID)
             self.register_execution_info(
                 breaker_pos["nodeID"], 
