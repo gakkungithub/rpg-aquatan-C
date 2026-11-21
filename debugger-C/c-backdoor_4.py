@@ -26,11 +26,417 @@ DATA_DIR = BASE_DIR + "/mapdata_for_test"
 CONTINUE = 1
 PROGRESS = 0
 
+# ループ処理の開始地点から終了地点を登録するクラス 
+# ループスキップ処理の判断の際に用いる
 class LoopLineInfo(TypedDict):
     type: Literal["while", "do_while", "for"]
     top_edge: int
     bottom_edge: int
 
+
+# 計算式解析ハンドラクラス
+class DynamicCommentHandler:
+    def __init__(self, comments: list[Comment], side_effect_values: dict[str, SideEffectValue] | None = None):
+        # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
+        # 計算式の評価がどうなろうと、このリストの内容は一定(計算式の生文字列)なので初期化時に全て取得しておく
+        self.expr_str_to_show_by_id: list[str] = self.get_str_base(comments)
+        # 分析初期化メソッドでリセットする
+        self.initialize_analysis(comments)
+        # 演算子による副作用後の値を登録する (計算中に使われる値と、計算後の値)
+        self.side_effect_values = side_effect_values if side_effect_values is not None else {}
+
+    # while, do_while, for文がもう一度来たときのために分析部分の所だけリセットできるメソッドを設けておく
+    def initialize_analysis(self, comments: list[Comment]):
+        self.index_scanned_currently = 0
+        # a + b (=9) のような、途中式(comment)の結果を記録する 
+        self.expr_result_by_id: list[str | None] = [None] * len(comments) 
+        # 「aとbをかけます」のような、説明文をidごとに記録する
+        self.expr_description_to_show_by_id: list[str | Comment] = comments.copy()
+        # a[i] = a[1] のような、計算用の文字列を取得する (side_effect_valuesへの登録に用いる)
+        self.str_for_evaluation_by_id: list[str | None] = [None] * len(comments)
+
+        # 計算されずに飛ばされた自作関数を登録するリスト
+        self.skipped_function_list: list[str] = []
+
+        self.current_function_comment: FunctionComment | None = None
+
+    # 計算式そのものの文字列を取得する。その結果は解析中に動的に取得し、str_base (= 結果)のようにして表示メッセージを生成する
+    def get_str_base(self, comments: list[Comment]):
+        expr_str_base_list: list[str] = []
+
+        for comment in comments:
+            expr_description = comment["comment"]
+
+            if "func_name" in expr_description:
+                arg_list = [
+                    arg_expr_part["text"] 
+                    if "text" in arg_expr_part else 
+                    expr_str_base_list[arg_expr_part["expr_id"]] 
+                    for arg_expr_part in expr_description["expr"]
+                ]
+                
+                expr_str_base_list.append(f"{expr_description["func_name"]}({','.join(arg_list)})")
+            else:
+                expr_str_base_list_by_part: list[str] = []
+
+                for expr_part in expr_description["expr"]:
+                    if "type" in expr_part:
+                        expr_str_base_list_by_part.append(self.get_reference_str_base(expr_part, expr_str_base_list))
+                    elif "text" in expr_part:
+                        expr_str_base_list_by_part.append(expr_part["text"])
+                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
+                        expr_str_base_list_by_part.append(expr_part["macro"])
+                    elif "operator" in expr_part:
+                        if "is_front_operator" in expr_part:
+                            expr_str_base = (
+                                f"{expr_part["operator"]}{expr_str_base_list[expr_part["operand_id"]]}" # 前置
+                                if expr_part["is_front_operator"] else 
+                                f"{expr_str_base_list[expr_part["operand_id"]]}{expr_part["operator"]}" # 後置
+                            )
+                        else:
+                            expr_str_base = f"{expr_str_base_list[expr_part["left_operand_id"]]} {expr_part["operator"]} {expr_str_base_list[expr_part["right_operand_id"]]}"
+                        expr_str_base_list_by_part.append(expr_str_base)
+                    else: # expr_id
+                        expr_str_base_list_by_part.append(expr_str_base_list[expr_part["expr_id"]])
+
+                expr_str_base_list.append(" ".join(expr_str_base_list_by_part))
+        
+        return expr_str_base_list
+
+    # 変数そのものの文字列を取得する
+    def get_reference_str_base(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_str_to_show_by_id: list[str]):
+        if expr_part["type"] == "scalar":
+            # scalar variableの結果自体は取得する必要がない
+            reference = expr_part["name"]
+        elif expr_part["type"] == "struct":
+            # struct variableの結果自体は取得する必要がない。
+            struct_base = self.get_reference_str_base(expr_part["parent"], expr_str_to_show_by_id)
+            reference = '.'.join([struct_base, *expr_part["members"]])
+        else: # array
+            # 計算結果を含めていない、計算式の文字列
+            reference_index_base_list: list[str] = [
+                f"[{expr_str_to_show_by_id[index_part["expr_id"]]}]" 
+                if "expr_id" in index_part else 
+                f"[{index_part["text"]}]" 
+                for index_part in expr_part["indexes"]
+            ]
+            array_base = self.get_reference_str_base(expr_part["parent"], expr_str_to_show_by_id)
+            reference = ''.join([array_base, *reference_index_base_list])
+        return reference
+
+    def set_expr_comments(self, frame: lldb.SBFrame):
+        self.current_function_comment = None
+        
+        while self.index_scanned_currently < len(self.expr_description_to_show_by_id):
+            comment = self.expr_description_to_show_by_id[self.index_scanned_currently]
+
+            if isinstance(comment, str):
+                sys.exit("error in type of unscanned comment(should not \"str\")")
+            
+            '''
+            現在の計算式を解析するかどうかを判別する 
+            (ただし、該当する計算式が評価されていない場合、本計算式も評価されないものだとして、
+            None is True or Falseになってis_not_to_evaluateがTrueになる)
+            '''
+            is_not_to_evaluate = False
+            for line, condition in comment["execution_condition"].items():
+                if self.check_value_bool(self.get_expr_result(int(line))) is not condition:
+                    is_not_to_evaluate = True
+                    break
+
+            # もし、評価されないと判断された場合、計算式の評価をスキップする
+            if is_not_to_evaluate:
+                if "func_name" in expr_description and expr_description["is_custom"]:
+                    self.skipped_function_list.append(expr_description["func_name"])
+
+                self.index_scanned_currently += 1
+                continue
+
+            expr_description = comment["comment"]
+
+            if "func_name" in expr_description:
+                # exprリストにおけるFuncPartなので、'func_name', '(', ')' を追加してexpr_str_dataに登録する
+                # ただし、自作関数の場合、not_to_evaluateがTrue ( = スキップされる関数 ) でない場合は登録しない
+                if expr_description["is_custom"]:
+                    self.current_function_comment = expr_description
+                    return self
+
+                ### 今は自作関数のみを考えている
+                arg_list = [
+                    arg_expr_part["text"] 
+                    if "text" in arg_expr_part else 
+                    self.get_expr_to_show(arg_expr_part["expr_id"])
+                    for arg_expr_part in expr_description["expr"]
+                ]
+
+                str_for_evaluation = ''.join([expr_description["func_name"], "(", *arg_list, ")"])
+
+                description_part_list = [
+                    arg_expr_part["text"] 
+                    if "text" in arg_expr_part else 
+                    self.get_expr_to_show(arg_expr_part["expr_id"])
+                    for arg_expr_part in expr_description["description"]
+                ]
+
+                description_to_show = ''.join(description_part_list)
+            else:
+                str_for_evaluation_list: list[str | None] = []
+                str_to_show_list: list[str] = []
+                special_operator: Literal["||", "&&", "?"] | None = None
+
+                for expr_part in expr_description["expr"]:
+                    if "type" in expr_part:
+                        reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, frame)
+
+                        str_for_evaluation_list.append(reference_str_base)
+                        str_to_show_list.append(f"<{reference_str_to_show}>(={frame.EvaluateExpression(reference_str_base).GetValue()})")
+                    elif "text" in expr_part:
+                        if expr_part["text"] in ("||", "&&", "?"):
+                            if special_operator is not None:
+                                sys.exit("condition operator cannot be overlapped")
+                            special_operator = expr_part["text"]
+
+                        str_for_evaluation_list.append(expr_part["text"])
+                        str_to_show_list.append(expr_part["text"])
+                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
+                        str_for_evaluation_list.append(expr_part["macro"])
+                        str_to_show_list.append(f"<{expr_part["macro"]}>(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
+                    elif "operator" in expr_part:
+                        if "is_front_operator" in expr_part:
+                            str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
+
+                            operand_str = self.get_str_for_evaluation(expr_part["operand_id"])
+
+                            if (operand_result := self.get_expr_result(expr_part["operand_id"])) is None:
+                                sys.exit("result of operand of unary expression is not found")
+
+                            # 未定義動作を弾く
+                            if (variable_value_str_after_side_effect := self.side_effect_values.get(operand_str)) is not None:
+                                if variable_value_str_after_side_effect["result_value_str"] is not None:
+                                    sys.exit("undefined expression is found")
+
+                            if expr_part["is_front_operator"]:
+                                current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result} {'+' if expr_part["operator"] == "++" else '-'} 1"
+                                result_value_str = current_value_str
+                            else:
+                                current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result
+                                result_value_str = f"{current_value_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
+
+                            if variable_value_str_after_side_effect:
+                                variable_value_str_after_side_effect["current_value_str"] = current_value_str
+                                variable_value_str_after_side_effect["result_value_str"] = result_value_str
+                            else:
+                                self.side_effect_values[operand_str] = SideEffectValue(
+                                    current_value_str = current_value_str,
+                                    result_value_str = result_value_str
+                                )
+                        else:
+                            str_to_show_base = self.get_expr_to_show(expr_part["right_operand_id"] + 1)
+                            left_operand_str = self.get_str_for_evaluation(expr_part["left_operand_id"])
+                            # right_operand_str = self.get_str_for_evaluation(expr_part["right_operand_id"])
+
+                            # 未定義動作を弾く
+                            if (variable_value_str_after_side_effect := self.side_effect_values.get(left_operand_str)) is not None:
+                                if variable_value_str_after_side_effect["result_value_str"] is not None:
+                                    sys.exit("undefined expression is found")
+
+                            if expr_part["operator"] == "=":
+                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit("result of right operand of \"=\" operator is not found")
+                                current_value_str = right_operand_result
+                            else:
+                                if (left_operand_result := self.get_expr_result(expr_part["left_operand_id"])) is None:
+                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
+                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
+                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
+                                current_value_str = f"{left_operand_result} {expr_part["operator"][:-1]} {right_operand_result}"
+
+                            if variable_value_str_after_side_effect:
+                                variable_value_str_after_side_effect["current_value_str"] = current_value_str
+                                variable_value_str_after_side_effect["result_value_str"] = current_value_str
+                            else:
+                                self.side_effect_values[left_operand_str] = SideEffectValue(
+                                    current_value_str = current_value_str,
+                                    result_value_str = current_value_str
+                                )
+                        
+                        str_for_evaluation_list.append(current_value_str)
+                        str_to_show_list.append(f"<{str_to_show_base}>(={current_value_str})")
+                    else: # expr_id
+                        str_to_show_base = self.get_expr_to_show(expr_part["expr_id"])
+                        if (result := self.get_expr_result(expr_part["expr_id"])) is None:
+                            sys.exit(f"result of {str_to_show_base} is not found")
+
+                        str_for_evaluation_list.append(result)
+                        str_to_show_list.append(f"<{str_to_show_base}>(={result})")
+
+                '''
+                ここで"||", "&&", "?"の演算子の処理を行う
+                a || b の時はbが未処理なら"1"(aが真であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
+                a && b の時はbが未処理なら"0"(aが偽であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
+                c ? a : b の時はaが未処理ならbの値, bが未処理ならaの値をstr_for_evaluationリストに登録する
+                未処理の計算式については、Noneをstr_for_evaluationに登録する
+                '''
+                description_to_show_list = []
+                for expr_part in expr_description["description"]:
+                    if "type" in expr_part:
+                        reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, frame)
+                        value: str | None = frame.EvaluateExpression(reference_description_base).GetValue()
+                        description_to_show_list.append(
+                            f"{reference_description_to_show}(={value})"
+                            if value is not None else
+                            reference_description_to_show
+                        )
+                    elif "text" in expr_part:
+                        description_to_show_list.append(expr_part["text"])
+                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
+                        description_to_show_list.append(f"{expr_part["macro"]}(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
+                    # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
+                    elif "operator" in expr_part:
+                        sys.exit("description parts cannot include side-effect part")
+                    else: # expr_id
+                        description_to_show_list.append(self.get_expr_result(expr_part["expr_id"]))
+
+                description_to_show = " ".join(description_to_show_list)
+                if special_operator == "||":
+                    if str_for_evaluation_list[-1] is None:
+                        str_for_evaluation = "1"
+                    else:
+                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
+                elif special_operator == "&&":
+                    if str_for_evaluation_list[-1] is None:
+                        str_for_evaluation = "0"
+                    else:
+                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
+                elif special_operator == "?":
+                    if str_for_evaluation_list[-1] is None:
+                        str_for_evaluation = str_for_evaluation_list[-3]
+                    elif str_for_evaluation_list[-3] is None:
+                        str_for_evaluation = str_for_evaluation_list[-1]
+                    else:
+                        sys.exit("error in ? condition")
+                else:
+                    if None in str_for_evaluation_list:
+                        sys.exit("all expression parts have to be calculated")
+                    str_for_evaluation: str = " ".join(str_for_evaluation_list)
+
+
+            self.expr_result_by_id[self.index_scanned_currently] = frame.EvaluateExpression(str_for_evaluation).GetValue()
+            self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {description_to_show}'
+            self.str_for_evaluation_by_id[self.index_scanned_currently] = str_for_evaluation
+
+            self.index_scanned_currently += 1
+
+        return None
+
+    def set_function_comment(self, return_value: str):
+        if self.current_function_comment is None:
+            sys.exit("current function comment is not found")
+
+        self.expr_result_by_id[self.index_scanned_currently] = return_value
+        self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {return_value}'
+
+        self.skipped_function_list = []
+
+        self.index_scanned_currently += 1
+
+    def check_value_bool(self, value: str | None, frame: lldb.SBFrame) -> bool | None:
+        if value is None:
+            return None
+        return frame.EvaluateExpression(f"(int)!!({value})").GetValueAsSigned() != 0
+
+    def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, frame: lldb.SBFrame):
+        if expr_part["type"] == "scalar":
+            # scalar variableの結果自体は取得する必要がない
+            reference = expr_part["name"]
+            reference_w_result = reference
+        elif expr_part["type"] == "struct":
+            # struct variableの結果自体は取得する必要がない。
+            struct_base, struct_base_w_result = self.get_reference_expr_comments(expr_part["parent"], frame)
+            reference = '.'.join([struct_base, *expr_part["members"]])
+            reference_w_result = '.'.join([struct_base_w_result, *expr_part["members"]])
+        else: # array
+            reference_index_to_show_list: list[str] = []
+            # 計算結果を含めていない、計算式の文字列
+            reference_index_base_list: list[str] = []
+            # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
+            for index_part in expr_part["indexes"]:
+                if "expr_id" in index_part:
+                    # expr_id
+                    reference_index_to_show_list.append(f"[<{self.get_expr_to_show(index_part["expr_id"])}>(={self.get_expr_result(index_part["expr_id"]) | "not to evaluate"})]")
+                    reference_index_base_list.append(f"[{self.get_expr_to_show(index_part["expr_id"])}]")
+                else:
+                    # text
+                    reference_index_to_show_list.append(f"[{index_part["text"]}]")
+                    reference_index_base_list.append(f"[{index_part["text"]}]")
+            reference_top, reference_top_w_result = self.get_reference_expr_comments(expr_part["parent"], frame)
+            reference = ''.join([reference_top, *reference_index_base_list])
+            reference_w_result = ''.join([reference_top_w_result, *reference_index_to_show_list])
+        return reference, reference_w_result
+
+    def get_expr_result(self, index: int = -1):
+        if index >= len(self.expr_result_by_id):
+            sys.exit("error in id number for getting expression result")
+
+        return self.expr_result_by_id[index]
+
+    def get_str_for_evaluation(self, index: int):
+        if index >= len(self.str_for_evaluation_by_id):
+            sys.exit("error in id number for getting string for evaluation")
+
+        if (str_for_evaluation := self.str_for_evaluation_by_id[index]) is None:
+            sys.exit(f"string for evaluation no.{id} is not found")
+
+        return str_for_evaluation
+
+    def get_expr_to_show(self, index: int):
+        if index >= len(self.expr_str_to_show_by_id):
+            sys.exit("error in id number for getting expression result")
+        
+        return self.expr_str_to_show_by_id[index]
+
+    def get_current_function(self):
+        if self.current_function_comment is None:
+            sys.exit("current function comment is not found")
+        return self.current_function_comment["func_name"]
+
+    def get_arg_comment_of_current_function(self):
+        if self.current_function_comment is None:
+            sys.exit("current function comment is not found")
+
+        return [
+            self.get_expr_result(expr_part["expr_id"]) if "expr_id" in expr_part else None
+            for expr_part in self.current_function_comment["description"]
+        ]
+
+    def get_result_bool(self, frame: lldb.SBFrame):
+        if len(self.expr_result_by_id) != self.index_scanned_currently:
+            sys.exit("expression is not completely analyzed yet")
+
+        result_bool = self.check_value_bool(self.expr_result_by_id[-1], frame)
+        if result_bool is None:
+            sys.exit("error in result")
+
+        return result_bool
+    
+    def get_str_after_analysis_completed(self) -> str:
+        if any(not isinstance(expr_description, str) for expr_description in self.expr_description_to_show_by_id):
+            sys.exit("this expression is not completely analyzed yet")
+        
+        return '\f'.join(self.expr_description_to_show_by_id)
+
+    def is_analysis_potentially_completed(self):
+        for comment in self.expr_description_to_show_by_id[self.index_scanned_currently:]:
+            if isinstance(comment, str):
+                sys.exit("str is found in an analyzed parts of expr_description_to_show_by_id")
+            
+            if "func_name" in comment["comment"] and all(self.get_expr_result(int(index)) is result for index, result in comment["execution_condition"].items()):
+                return False
+
+        return True
+
+
+# 変数の実行処理ハンドラ
 class DynamicVarInfo(TypedDict):
     dynamic_var_node: DynamicVarNode
     start: int
@@ -46,6 +452,8 @@ class DynamicVarNode(TypedDict):
     initialized: bool
     is_analysis_completed: bool
 
+
+# 変数以外の実行処理ハンドラのベース
 class DynamicNonVarStatusHandler:
     def __init__(self, line: int, is_english: bool):
         self.line = line
@@ -77,97 +485,88 @@ class IfStatusHandler(DynamicNonVarStatusHandler):
             ) 
             for if_condition_comment in conditions
         ]
-        self.results: list[bool] = []
+        self.scanning_condition_index: int = 0
+        # (条件文のインデックス, 条件文の行番)のタプルを取得し、self.check_conditionsで合致するかを確認する
+        self.true_condition: tuple[int, int] | None = None
 
     def analyze_comment(self, frame: lldb.SBFrame):
-        num_of_results = len(self.results)
-        if num_of_results == len(self.conditions):
+        if self.true_condition is not None:
             return
 
-        for dynamic_comment_handler in self.dynamic_conditions[num_of_results:]:
-            # まずは解析
-            if dynamic_comment_handler.set_expr_comments(frame):
-                # 解析が途中で終了する = 自作関数が現れた → ひとまずは解析を終了する
-                break
-            
-            # 解析終了 → 本条件の値の真偽値を取得し、その結果をresultsに格納する
-            result = dynamic_comment_handler.get_result_bool(frame)
-            self.results.append(result)
+        ### 今までは全ての条件を一気に解析していたが、現在の実行状況(self.line_numberなど)と同期していなかったので、
+        dynamic_comment_handler = self.dynamic_conditions[self.scanning_condition_index]
 
-            # 条件がTrueならそれ以降の条件は確認しないので
-            if result is True:
-                break
+        if dynamic_comment_handler.current_function_comment is not None:
+            return
+        
+        # まずは解析
+        if dynamic_comment_handler.set_expr_comments(frame):
+            # 解析が途中で終了する = 自作関数が現れた → ひとまずは解析を終了する
+            return
+        
+        # 解析終了 → 本条件の値の真偽値を取得し、その結果をresultsに格納する
+        result = dynamic_comment_handler.get_result_bool(frame)
 
-            side_effect_values = dynamic_comment_handler.side_effect_values
-            for value in side_effect_values.values():
-                value["current_value_str"] = value["result_value_str"]
-                value["result_value_str"] = None
+        # 条件がTrueならそれ以降の条件は確認しないので
+        if result is True:
+            self.true_condition = (self.scanning_condition_index, self.conditions[self.scanning_condition_index]["line"])
+            return
+
+        # side_effect_values = dynamic_comment_handler.side_effect_values
+        # for value in side_effect_values.values():
+        #     value["current_value_str"] = value["result_value_str"]
+        #     value["result_value_str"] = None
+        dynamic_comment_handler.side_effect_values.clear()
+        self.scanning_condition_index += 1
+
+        if len(self.conditions) == self.scanning_condition_index and self.true_condition is None:
+            self.true_condition = (-1, self.conditions[-1]["line"])
 
     def get_next_function(self):
-        num_of_results = len(self.results)
-        if True in self.results or num_of_results == len(self.conditions):
+        if self.true_condition is not None:
             sys.exit("this if statement is already completely scanned")
 
-        return self.dynamic_conditions[num_of_results], num_of_results
+        return self.dynamic_conditions[self.scanning_condition_index], self.scanning_condition_index
 
     def get_skipped_functions(self):
-        return [dynamic_comment_handler.skipped_function_list for dynamic_comment_handler in self.dynamic_conditions]
+        return [
+            dynamic_comment_handler.skipped_function_list 
+            for dynamic_comment_handler in self.dynamic_conditions
+        ]
     
     def check_conditions(self, send_event: Debugger2GameEvent, true_condition_index: int):
         if true_condition_index < -1 or len(self.conditions) <= true_condition_index:
             sys.exit(f"a given true condition index has to between -1 and {len(self.conditions)}")
 
-        if true_condition_index == -1:
-            if True in self.results:
-                return "incorrect"
+        if self.true_condition is None:
+            return "next_function"
             
-            # まだ解析できていない条件がある
-            if len(self.results) != len(self.conditions):
-                return "next_function"
+        if self.true_condition[0] != true_condition_index:
+            return "incorrect"
 
-            # 全ての条件がFalse → どの条件にも該当しない = true_case_indexは-1で正しい
-            send_event["execution_and_result_str_list"] = [
-                ExecutionAndResultStr(
-                    execution = dynamic_comment_handler.get_str_after_analysis_completed(),
-                    result = f"so, the {i+1}th condition is False" if self.is_english else f"ゆえに、{i+1}番目の条件は偽です"
+        condition_count = (
+            len(self.dynamic_conditions)
+            if true_condition_index == -1
+            else true_condition_index + 1
+        )
+
+        send_event["execution_and_result_str_list"] = [
+            ExecutionAndResultStr(
+                execution=dynamic_comment_handler.get_str_after_analysis_completed(),
+                result=(
+                    f"so, the {i+1}th condition is {'True' if i == true_condition_index else 'False'}"
+                    if self.is_english else 
+                    f"ゆえに、{i+1}番目の条件は{'真' if i == true_condition_index else '偽'}です"
                 )
-                for i, dynamic_comment_handler in enumerate(self.dynamic_conditions)
-            ]
-        else:
-            # 今回選んだ条件より前の条件が正しい = 間違った条件を選んだ
-            if True in self.results[:true_condition_index]:
-                return "incorrect"
-            
-            # まだ探索中であれば(どこかしらの自作関数で止まっているなら)、その関数を確かめる方向に行く
-            if len(self.results) <= true_condition_index:
-                return "next_function"
-
-            # 間違った条件を選んだ
-            if self.results[true_condition_index] is False:
-                return "incorrect"
-            
-            # executioin_info["true_condition_index"]番目の条件が正しい → 正しい条件を選んだ
-            execution_and_result_str_list: list[ExecutionAndResultStr] = []
-            for i, dynamic_comment_handler in enumerate(self.dynamic_conditions):
-                is_true = i == true_condition_index
-                execution_and_result_str_list.append(
-                    ExecutionAndResultStr(
-                        execution = dynamic_comment_handler.get_str_after_analysis_completed(),
-                        result = f"so, the {i+1}th condition is {"True" if is_true else "False"}" if self.is_english else f"ゆえに、{i+1}番目の条件は{"真" if is_true else "偽"}です"
-                    )
-                )
-                if is_true:
-                    break
-
-            send_event["execution_and_result_str_list"] = execution_and_result_str_list
+            )
+            for i, dynamic_comment_handler
+            in enumerate(self.dynamic_conditions[:condition_count])
+        ]
 
         return "correct"
 
     def check_expr_automatically(self):
-        if True in self.results:
-            return "end"
-
-        if len(self.results) == len(self.conditions):
+        if self.true_condition is not None:
             return "end"
 
         return "next_function"
@@ -721,8 +1120,7 @@ class ExpressionStatusHandler(DynamicNonVarStatusHandler):
         
         return "end"
     
-# void関数は、自由に戻れるキャラにする 
-# ただし、frame_numが減らない場合(到達先の関数が異なる場合)は戻れない = プレイヤーはダメージを受けるようにする
+
 class ReturnStatusHandler(DynamicNonVarStatusHandler):
     def __init__(self, line: int, expr: list[Comment], thread: lldb.SBThread, is_english: bool):
         super().__init__(line, is_english)
@@ -770,406 +1168,6 @@ class ReturnStatusHandler(DynamicNonVarStatusHandler):
 class SideEffectValue(TypedDict):
     current_value_str: str
     result_value_str: str | None
-
-class DynamicCommentHandler:
-    def __init__(self, comments: list[Comment], side_effect_values: dict[str, SideEffectValue] | None = None):
-        # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
-        # 計算式の評価がどうなろうと、このリストの内容は一定(計算式の生文字列)なので初期化時に全て取得しておく
-        self.expr_str_to_show_by_id: list[str] = self.get_str_base(comments)
-        # 分析初期化メソッドでリセットする
-        self.initialize_analysis(comments)
-        # 演算子による副作用後の値を登録する (計算中に使われる値と、計算後の値)
-        self.side_effect_values = side_effect_values if side_effect_values is not None else {}
-
-    # while, do_while, for文がもう一度来たときのために分析部分の所だけリセットできるメソッドを設けておく
-    def initialize_analysis(self, comments: list[Comment]):
-        self.index_scanned_currently = 0
-        # a + b (=9) のような、途中式(comment)の結果を記録する 
-        self.expr_result_by_id: list[str | None] = [None] * len(comments) 
-        # 「aとbをかけます」のような、説明文をidごとに記録する
-        self.expr_description_to_show_by_id: list[str | Comment] = comments.copy()
-        # a[i] = a[1] のような、計算用の文字列を取得する (side_effect_valuesへの登録に用いる)
-        self.str_for_evaluation_by_id: list[str | None] = [None] * len(comments)
-
-        # 計算されずに飛ばされた自作関数を登録するリスト
-        self.skipped_function_list: list[str] = []
-
-        self.current_function_comment: FunctionComment | None = None
-
-    # 計算式そのものの文字列を取得する。その結果は解析中に動的に取得し、str_base (= 結果)のようにして表示メッセージを生成する
-    def get_str_base(self, comments: list[Comment]):
-        expr_str_base_list: list[str] = []
-
-        for comment in comments:
-            expr_description = comment["comment"]
-
-            if "func_name" in expr_description:
-                arg_list = [
-                    arg_expr_part["text"] 
-                    if "text" in arg_expr_part else 
-                    expr_str_base_list[arg_expr_part["expr_id"]] 
-                    for arg_expr_part in expr_description["expr"]
-                ]
-                
-                expr_str_base_list.append(f"{expr_description["func_name"]}({','.join(arg_list)})")
-            else:
-                expr_str_base_list_by_part: list[str] = []
-
-                for expr_part in expr_description["expr"]:
-                    if "type" in expr_part:
-                        expr_str_base_list_by_part.append(self.get_reference_str_base(expr_part, expr_str_base_list))
-                    elif "text" in expr_part:
-                        expr_str_base_list_by_part.append(expr_part["text"])
-                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        expr_str_base_list_by_part.append(expr_part["macro"])
-                    elif "operator" in expr_part:
-                        if "is_front_operator" in expr_part:
-                            expr_str_base = (
-                                f"{expr_part["operator"]}{expr_str_base_list[expr_part["operand_id"]]}" # 前置
-                                if expr_part["is_front_operator"] else 
-                                f"{expr_str_base_list[expr_part["operand_id"]]}{expr_part["operator"]}" # 後置
-                            )
-                        else:
-                            expr_str_base = f"{expr_str_base_list[expr_part["left_operand_id"]]} {expr_part["operator"]} {expr_str_base_list[expr_part["right_operand_id"]]}"
-                        expr_str_base_list_by_part.append(expr_str_base)
-                    else: # expr_id
-                        expr_str_base_list_by_part.append(expr_str_base_list[expr_part["expr_id"]])
-
-                expr_str_base_list.append(" ".join(expr_str_base_list_by_part))
-        
-        return expr_str_base_list
-
-    # 変数そのものの文字列を取得する
-    def get_reference_str_base(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_str_to_show_by_id: list[str]):
-        if expr_part["type"] == "scalar":
-            # scalar variableの結果自体は取得する必要がない
-            reference = expr_part["name"]
-        elif expr_part["type"] == "struct":
-            # struct variableの結果自体は取得する必要がない。
-            struct_base = self.get_reference_str_base(expr_part["parent"], expr_str_to_show_by_id)
-            reference = '.'.join([struct_base, *expr_part["members"]])
-        else: # array
-            # 計算結果を含めていない、計算式の文字列
-            reference_index_base_list: list[str] = [
-                f"[{expr_str_to_show_by_id[index_part["expr_id"]]}]" 
-                if "expr_id" in index_part else 
-                f"[{index_part["text"]}]" 
-                for index_part in expr_part["indexes"]
-            ]
-            array_base = self.get_reference_str_base(expr_part["parent"], expr_str_to_show_by_id)
-            reference = ''.join([array_base, *reference_index_base_list])
-        return reference
-
-    def set_expr_comments(self, frame: lldb.SBFrame):
-        self.current_function_comment = None
-        
-        while self.index_scanned_currently < len(self.expr_description_to_show_by_id):
-            comment = self.expr_description_to_show_by_id[self.index_scanned_currently]
-
-            if isinstance(comment, str):
-                sys.exit("error in type of unscanned comment(should not \"str\")")
-            
-            '''
-            現在の計算式を解析するかどうかを判別する 
-            (ただし、該当する計算式が評価されていない場合、本計算式も評価されないものだとして、
-            None is True or Falseになってis_not_to_evaluateがTrueになる)
-            '''
-            is_not_to_evaluate = False
-            for line, condition in comment["execution_condition"].items():
-                if self.check_value_bool(self.get_expr_result(int(line))) is not condition:
-                    is_not_to_evaluate = True
-                    break
-
-            # もし、評価されないと判断された場合、計算式の評価をスキップする
-            if is_not_to_evaluate:
-                if "func_name" in expr_description and expr_description["is_custom"]:
-                    self.skipped_function_list.append(expr_description["func_name"])
-
-                self.index_scanned_currently += 1
-                continue
-
-            expr_description = comment["comment"]
-
-            if "func_name" in expr_description:
-                # exprリストにおけるFuncPartなので、'func_name', '(', ')' を追加してexpr_str_dataに登録する
-                # ただし、自作関数の場合、not_to_evaluateがTrue ( = スキップされる関数 ) でない場合は登録しない
-                if expr_description["is_custom"]:
-                    self.current_function_comment = expr_description
-                    return self
-
-                ### 今は自作関数のみを考えている
-                arg_list = [
-                    arg_expr_part["text"] 
-                    if "text" in arg_expr_part else 
-                    self.get_expr_to_show(arg_expr_part["expr_id"])
-                    for arg_expr_part in expr_description["expr"]
-                ]
-
-                str_for_evaluation = ''.join([expr_description["func_name"], "(", *arg_list, ")"])
-
-                description_part_list = [
-                    arg_expr_part["text"] 
-                    if "text" in arg_expr_part else 
-                    self.get_expr_to_show(arg_expr_part["expr_id"])
-                    for arg_expr_part in expr_description["description"]
-                ]
-
-                description_to_show = ''.join(description_part_list)
-            else:
-                str_for_evaluation_list: list[str | None] = []
-                str_to_show_list: list[str] = []
-                special_operator: Literal["||", "&&", "?"] | None = None
-
-                for expr_part in expr_description["expr"]:
-                    if "type" in expr_part:
-                        reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, frame)
-
-                        str_for_evaluation_list.append(reference_str_base)
-                        str_to_show_list.append(f"<{reference_str_to_show}>(={frame.EvaluateExpression(reference_str_base).GetValue()})")
-                    elif "text" in expr_part:
-                        if expr_part["text"] in ("||", "&&", "?"):
-                            if special_operator is not None:
-                                sys.exit("condition operator cannot be overlapped")
-                            special_operator = expr_part["text"]
-
-                        str_for_evaluation_list.append(expr_part["text"])
-                        str_to_show_list.append(expr_part["text"])
-                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        str_for_evaluation_list.append(expr_part["macro"])
-                        str_to_show_list.append(f"<{expr_part["macro"]}>(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
-                    elif "operator" in expr_part:
-                        if "is_front_operator" in expr_part:
-                            str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
-
-                            operand_str = self.get_str_for_evaluation(expr_part["operand_id"])
-
-                            if (operand_result := self.get_expr_result(expr_part["operand_id"])) is None:
-                                sys.exit("result of operand of unary expression is not found")
-
-                            # 未定義動作を弾く
-                            if (variable_value_str_after_side_effect := self.side_effect_values.get(operand_str)) is not None:
-                                if variable_value_str_after_side_effect["result_value_str"] is not None:
-                                    sys.exit("undefined expression is found")
-
-                            if expr_part["is_front_operator"]:
-                                current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result} {'+' if expr_part["operator"] == "++" else '-'} 1"
-                                result_value_str = current_value_str
-                            else:
-                                current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result
-                                result_value_str = f"{current_value_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
-
-                            if variable_value_str_after_side_effect:
-                                variable_value_str_after_side_effect["current_value_str"] = current_value_str
-                                variable_value_str_after_side_effect["result_value_str"] = result_value_str
-                            else:
-                                self.side_effect_values[operand_str] = SideEffectValue(
-                                    current_value_str = current_value_str,
-                                    result_value_str = result_value_str
-                                )
-                        else:
-                            str_to_show_base = self.get_expr_to_show(expr_part["right_operand_id"] + 1)
-                            left_operand_str = self.get_str_for_evaluation(expr_part["left_operand_id"])
-                            # right_operand_str = self.get_str_for_evaluation(expr_part["right_operand_id"])
-
-                            # 未定義動作を弾く
-                            if (variable_value_str_after_side_effect := self.side_effect_values.get(left_operand_str)) is not None:
-                                if variable_value_str_after_side_effect["result_value_str"] is not None:
-                                    sys.exit("undefined expression is found")
-
-                            if expr_part["operator"] == "=":
-                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
-                                    sys.exit("result of right operand of \"=\" operator is not found")
-                                current_value_str = right_operand_result
-                            else:
-                                if (left_operand_result := self.get_expr_result(expr_part["left_operand_id"])) is None:
-                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
-                                if (right_operand_result := self.get_expr_result(expr_part["right_operand_id"])) is None:
-                                    sys.exit(f"result of right operand of \"{expr_part["operator"]}\" operator is not found")
-                                current_value_str = f"{left_operand_result} {expr_part["operator"][:-1]} {right_operand_result}"
-
-                            if variable_value_str_after_side_effect:
-                                variable_value_str_after_side_effect["current_value_str"] = current_value_str
-                                variable_value_str_after_side_effect["result_value_str"] = current_value_str
-                            else:
-                                self.side_effect_values[left_operand_str] = SideEffectValue(
-                                    current_value_str = current_value_str,
-                                    result_value_str = current_value_str
-                                )
-                        
-                        str_for_evaluation_list.append(current_value_str)
-                        str_to_show_list.append(f"<{str_to_show_base}>(={current_value_str})")
-                    else: # expr_id
-                        str_to_show_base = self.get_expr_to_show(expr_part["expr_id"])
-                        if (result := self.get_expr_result(expr_part["expr_id"])) is None:
-                            sys.exit(f"result of {str_to_show_base} is not found")
-
-                        str_for_evaluation_list.append(result)
-                        str_to_show_list.append(f"<{str_to_show_base}>(={result})")
-
-                '''
-                ここで"||", "&&", "?"の演算子の処理を行う
-                a || b の時はbが未処理なら"1"(aが真であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
-                a && b の時はbが未処理なら"0"(aが偽であるため), bが未処理でないならbool(b)で真偽(1, 0)を確かめ、その値をstr_for_evaluationリストに登録する
-                c ? a : b の時はaが未処理ならbの値, bが未処理ならaの値をstr_for_evaluationリストに登録する
-                未処理の計算式については、Noneをstr_for_evaluationに登録する
-                '''
-                description_to_show_list = []
-                for expr_part in expr_description["description"]:
-                    if "type" in expr_part:
-                        reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, frame)
-                        value: str | None = frame.EvaluateExpression(reference_description_base).GetValue()
-                        description_to_show_list.append(
-                            f"{reference_description_to_show}(={value})"
-                            if value is not None else
-                            reference_description_to_show
-                        )
-                    elif "text" in expr_part:
-                        description_to_show_list.append(expr_part["text"])
-                    elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        description_to_show_list.append(f"{expr_part["macro"]}(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
-                    # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
-                    elif "operator" in expr_part:
-                        sys.exit("description parts cannot include side-effect part")
-                    else: # expr_id
-                        description_to_show_list.append(self.get_expr_result(expr_part["expr_id"]))
-
-                description_to_show = " ".join(description_to_show_list)
-                if special_operator == "||":
-                    if str_for_evaluation_list[-1] is None:
-                        str_for_evaluation = "1"
-                    else:
-                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
-                elif special_operator == "&&":
-                    if str_for_evaluation_list[-1] is None:
-                        str_for_evaluation = "0"
-                    else:
-                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
-                elif special_operator == "?":
-                    if str_for_evaluation_list[-1] is None:
-                        str_for_evaluation = str_for_evaluation_list[-3]
-                    elif str_for_evaluation_list[-3] is None:
-                        str_for_evaluation = str_for_evaluation_list[-1]
-                    else:
-                        sys.exit("error in ? condition")
-                else:
-                    if None in str_for_evaluation_list:
-                        sys.exit("all expression parts have to be calculated")
-                    str_for_evaluation: str = " ".join(str_for_evaluation_list)
-
-
-            self.expr_result_by_id[self.index_scanned_currently] = frame.EvaluateExpression(str_for_evaluation).GetValue()
-            self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {description_to_show}'
-            self.str_for_evaluation_by_id[self.index_scanned_currently] = str_for_evaluation
-
-            self.index_scanned_currently += 1
-
-        return None
-
-    def set_function_comment(self, return_value: str):
-        if self.current_function_comment is None:
-            sys.exit("current function comment is not found")
-
-        self.expr_result_by_id[self.index_scanned_currently] = return_value
-        self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {return_value}'
-
-        self.skipped_function_list = []
-
-        self.index_scanned_currently += 1
-
-    def check_value_bool(self, value: str | None, frame: lldb.SBFrame) -> bool | None:
-        if value is None:
-            return None
-        return frame.EvaluateExpression(f"(int)!!({value})").GetValueAsSigned() != 0
-
-    def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, frame: lldb.SBFrame):
-        if expr_part["type"] == "scalar":
-            # scalar variableの結果自体は取得する必要がない
-            reference = expr_part["name"]
-            reference_w_result = reference
-        elif expr_part["type"] == "struct":
-            # struct variableの結果自体は取得する必要がない。
-            struct_base, struct_base_w_result = self.get_reference_expr_comments(expr_part["parent"], frame)
-            reference = '.'.join([struct_base, *expr_part["members"]])
-            reference_w_result = '.'.join([struct_base_w_result, *expr_part["members"]])
-        else: # array
-            reference_index_to_show_list: list[str] = []
-            # 計算結果を含めていない、計算式の文字列
-            reference_index_base_list: list[str] = []
-            # indexごとにresultを取得する(arrayの結果自体はここで取得する必要がない)
-            for index_part in expr_part["indexes"]:
-                if "expr_id" in index_part:
-                    # expr_id
-                    reference_index_to_show_list.append(f"[<{self.get_expr_to_show(index_part["expr_id"])}>(={self.get_expr_result(index_part["expr_id"]) | "not to evaluate"})]")
-                    reference_index_base_list.append(f"[{self.get_expr_to_show(index_part["expr_id"])}]")
-                else:
-                    # text
-                    reference_index_to_show_list.append(f"[{index_part["text"]}]")
-                    reference_index_base_list.append(f"[{index_part["text"]}]")
-            reference_top, reference_top_w_result = self.get_reference_expr_comments(expr_part["parent"], frame)
-            reference = ''.join([reference_top, *reference_index_base_list])
-            reference_w_result = ''.join([reference_top_w_result, *reference_index_to_show_list])
-        return reference, reference_w_result
-
-    def get_expr_result(self, index: int = -1):
-        if index >= len(self.expr_result_by_id):
-            sys.exit("error in id number for getting expression result")
-
-        return self.expr_result_by_id[index]
-
-    def get_str_for_evaluation(self, index: int):
-        if index >= len(self.str_for_evaluation_by_id):
-            sys.exit("error in id number for getting string for evaluation")
-
-        if (str_for_evaluation := self.str_for_evaluation_by_id[index]) is None:
-            sys.exit(f"string for evaluation no.{id} is not found")
-
-        return str_for_evaluation
-
-    def get_expr_to_show(self, index: int):
-        if index >= len(self.expr_str_to_show_by_id):
-            sys.exit("error in id number for getting expression result")
-        
-        return self.expr_str_to_show_by_id[index]
-
-    def get_current_function(self):
-        if self.current_function_comment is None:
-            sys.exit("current function comment is not found")
-        return self.current_function_comment["func_name"]
-
-    def get_arg_comment_of_current_function(self):
-        if self.current_function_comment is None:
-            sys.exit("current function comment is not found")
-
-        return [
-            self.get_expr_result(expr_part["expr_id"]) if "expr_id" in expr_part else None
-            for expr_part in self.current_function_comment["description"]
-        ]
-
-    def get_result_bool(self, frame: lldb.SBFrame):
-        if len(self.expr_result_by_id) != self.index_scanned_currently:
-            sys.exit("expression is not completely analyzed yet")
-
-        result_bool = self.check_value_bool(self.expr_result_by_id[-1], frame)
-        if result_bool is None:
-            sys.exit("error in result")
-
-        return result_bool
-    
-    def get_str_after_analysis_completed(self) -> str:
-        if any(not isinstance(expr_description, str) for expr_description in self.expr_description_to_show_by_id):
-            sys.exit("this expression is not completely analyzed yet")
-        
-        return '\f'.join(self.expr_description_to_show_by_id)
-
-    def is_analysis_potentially_completed(self):
-        for comment in self.expr_description_to_show_by_id[self.index_scanned_currently:]:
-            if isinstance(comment, str):
-                sys.exit("str is found in an analyzed parts of expr_description_to_show_by_id")
-            
-            if "func_name" in comment["comment"] and all(self.get_expr_result(int(index)) is result for index, result in comment["execution_condition"].items()):
-                return False
-
-        return True
 
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
@@ -1801,14 +1799,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
                     self.line_data: dict[str, LineInfoDataByFunc] = json.load(f)
                     self.func_name = self.func_crnt_name
-                    # self.next_lines = {
-                    #     int(line): (
-                    #         {int(condition): next_line for condition, next_line in info.items()}
-                    #         if isinstance(info, dict)
-                    #         else info
-                    #     )
-                    #     for line, info in self.line_data[self.func_name]["next_lines"].items()
-                    # }
                     self.frame_num: int = 1
                     self.get_std_outputs()
 
@@ -1912,6 +1902,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             return state, results, remaining_text, errors
 
 
+        # 次の処理を取得するためのメソッド
         def step_conditionally(self):
             # プロセスの状態を更新
             if self.is_end:
@@ -2143,6 +2134,75 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             self.get_std_outputs()
 
+            if self.is_end:
+                return
+            
+            if not isinstance((current_expr_status_handler := self.get_expr_status_handler(False)), IfStatusHandler):
+                return
+
+            # 真となる条件が存在する = その行番はself.line_numberと合致 → 解析が終わっているのでこれ以上はstep_condtionallyを必要としない
+            if current_expr_status_handler.true_condition is not None:
+                return
+
+            # 現在の処理が自作関数の確認で止まっている → その解析待ちなのでこれ以上はstep_conditionallyを必要としない
+            if current_expr_status_handler.dynamic_conditions[current_expr_status_handler.scanning_condition_index].current_function_comment is not None:
+                return
+
+            # 今は次の行番に進めるはずなのに、次が同じ行番または他の関数に遷移する場合を考えていない (今後ありそうなら適宜修正する)
+            if self.line_number == self.next_line_number:
+                sys.exit(f"if-statement condition line {self.line_number} has to be already completely analyzed")
+            if self.frame_num != self.next_frame_num:
+                sys.exit(f"it is impossible that there is a function transfer from {self.func_name} to {self.func_crnt_name} here")
+
+            self.expr_status_handler_dict_by_frame[self.next_frame_num-2][self.next_line_number] = self.pop_expr_status_handler(False)
+            self.step_conditionally()
+
+        # 次の処理の内容を設定する
+        def set_expr_status(self, expr: NonVarComment, line: int) -> DynamicNonVarStatusHandler:
+            if expr["type"] == "if":
+                expr_status_handler = IfStatusHandler(line, expr["conditions"], self.is_english)
+            elif expr["type"] == "while":
+                expr_status_handler = WhileStatusHandler(line, expr["condition"], self.is_english)
+                self.append_line_loop("while", line)
+            elif expr["type"] == "do_while":
+                # do (最初のdo-whileループに入る = コメントがない)
+                expr_status_handler = (
+                    DoWhileStatusHandler(
+                        line, 
+                        expr["condition"], 
+                        self.is_english
+                    ) if len(expr["condition"]) else 
+                    DoWhileInitializerStatusHandler(
+                        line, 
+                        self.is_english
+                    )
+                )
+                self.append_line_loop("do_while", line)
+            elif expr["type"] == "for":
+                expr_status_handler = ForStatusHandler(line, expr, self.is_english)
+                # if "var_initializer" in expr:
+                #     self.vars_tracker.dynamic_variable_info_by_line[line] = [
+                #         DynamicVarInfo(
+                #             dynamic_var_node = self.vars_tracker.transform_2_dynamic_var_node(var_info["varNode"]),
+                #             start = var_info["start"],
+                #             end = var_info["end"],
+                #             skipped_function_list = [],
+                #             current_comment = None
+                #         ) for var_info in expr["var_initializer"]
+                #     ]
+                self.append_line_loop("for", line)
+            elif expr["type"] == "switch":
+                expr_status_handler = SwitchStatusHandler(line, expr, self.is_english)
+            elif expr["type"] in ("continue", "break"):
+                expr_status_handler = ControlFlowStatusHandler(line, expr["type"], expr["condition_line"], self.is_english)
+            elif expr["type"] == "expression":
+                expr_status_handler = ExpressionStatusHandler(line, expr["expr"], self.is_english)
+            else: # return
+                expr_status_handler = ReturnStatusHandler(line, expr["expr"], thread, self.is_english)
+            
+            return expr_status_handler
+
+        # 次の処理情報を取得して移行するためのメソッド
         def get_next_state(self) -> tuple[int, lldb.SBFrame, str, int, str, int] | None:
             state = self.process.GetState()
 
@@ -2211,7 +2271,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 )
             return value_unchanged_dict_list
 
-        def set_skipped_var_declaration_lines(self, send_event: Debugger2GameEvent, previous_line: int | tuple[int, int], is_func_entry: bool = False):
+        def set_next_line(self, send_event: Debugger2GameEvent, previous_line: int | tuple[int, int], is_func_entry: bool = False):
             self.skipped_var_declaration_lines = []
 
             if is_func_entry:
@@ -2225,7 +2285,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                 self.skipped_var_declaration_lines.append(str(previous_line))
 
-            next_line_number = self.get_next_line(previous_line)
+            next_line_number = self.get_next_line(previous_line, is_func_entry)
 
             if not is_func_entry:
                 send_event["line"] = next_line_number
@@ -2235,11 +2295,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     return
 
                 self.skipped_var_declaration_lines.append(str(next_line_number))
-                next_line_number = self.get_next_line(next_line_number)
+                next_line_number = self.get_next_line(next_line_number, is_func_entry)
                 
-        def get_next_line(self, previous_line: int | tuple[int, int]):
-            if (line_data := self.line_data.get(self.func_name)) is None:
-                sys.exit(f"line data of function {self.func_name} is not found")
+        def get_next_line(self, previous_line: int | tuple[int, int], is_next: bool):
+            if (line_data := self.line_data.get(self.func_crnt_name if is_next else self.func_name)) is None:
+                sys.exit(f"line data of function {self.func_crnt_name if is_next else self.func_name} is not found")
 
             next_line_data_dict = line_data["next_lines"]
             if isinstance(previous_line, int):
@@ -2392,7 +2452,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                             # 変数宣言が全て完了した時の処理
                             if not is_skipped_var_check:
-                                self.set_skipped_var_declaration_lines(send_event, self.line_number)
+                                self.set_next_line(send_event, self.line_number)
 
                             self.event_sender(
                                 send_event
@@ -2445,57 +2505,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             #     self.thread.StepInto()
 
             expr_status_handler.analyze_comment(self.frame)
+            
             # ここでswitch文の下処理(defaultの場合)を行う
-
             if isinstance(expr_status_handler, SwitchStatusHandler):
                 self.switch_expr_status_handler = expr_status_handler
 
             return None
-
-        # 次の処理の内容を取得する
-        def set_expr_status(self, expr: NonVarComment, line: int) -> DynamicNonVarStatusHandler:
-            if expr["type"] == "if":
-                expr_status_handler = IfStatusHandler(line, expr["conditions"], self.is_english)
-            elif expr["type"] == "while":
-                expr_status_handler = WhileStatusHandler(line, expr["condition"], self.is_english)
-                self.append_line_loop("while", line)
-            elif expr["type"] == "do_while":
-                # do (最初のdo-whileループに入る = コメントがない)
-                expr_status_handler = (
-                    DoWhileStatusHandler(
-                        line, 
-                        expr["condition"], 
-                        self.is_english
-                    ) if len(expr["condition"]) else 
-                    DoWhileInitializerStatusHandler(
-                        line, 
-                        self.is_english
-                    )
-                )
-                self.append_line_loop("do_while", line)
-            elif expr["type"] == "for":
-                expr_status_handler = ForStatusHandler(line, expr, self.is_english)
-                # if "var_initializer" in expr:
-                #     self.vars_tracker.dynamic_variable_info_by_line[line] = [
-                #         DynamicVarInfo(
-                #             dynamic_var_node = self.vars_tracker.transform_2_dynamic_var_node(var_info["varNode"]),
-                #             start = var_info["start"],
-                #             end = var_info["end"],
-                #             skipped_function_list = [],
-                #             current_comment = None
-                #         ) for var_info in expr["var_initializer"]
-                #     ]
-                self.append_line_loop("for", line)
-            elif expr["type"] == "switch":
-                expr_status_handler = SwitchStatusHandler(line, expr, self.is_english)
-            elif expr["type"] in ("continue", "break"):
-                expr_status_handler = ControlFlowStatusHandler(line, expr["type"], expr["condition_line"], self.is_english)
-            elif expr["type"] == "expression":
-                expr_status_handler = ExpressionStatusHandler(line, expr["expr"], self.is_english)
-            else: # return
-                expr_status_handler = ReturnStatusHandler(line, expr["expr"], thread, self.is_english)
-            
-            return expr_status_handler
 
         def check_expr_status(self, execution_info: ExecutionInfo) -> Literal["correct", "incorrect", "after_loop_skip"]:
             if (current_expr_status_handler := self.get_expr_status_handler(False)) is None:
@@ -2518,10 +2533,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # これらは、他の実行文に対しても同じ (これによって、複数行にまたがる一処理も解析できるのでは?)
             # 要するに、引っ掛かりの行番(最初に実行される行番)でこれらの処理ハンドラを取得し、その解析に突入させると良いかも?
             if isinstance(current_expr_status_handler, IfStatusHandler) and execution_info["type"] == "if":
-                check_result = current_expr_status_handler.check_conditions(send_event, execution_info["true_condition_index"])
+                true_condition_index = execution_info["true_condition_index"]
+                check_result = current_expr_status_handler.check_conditions(send_event, true_condition_index)
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(True)))
+                    self.set_next_line(send_event, (self.line_number, int(true_condition_index != -1)))
             elif (isinstance(current_expr_status_handler, WhileStatusHandler) and execution_info["type"] == "while") or (isinstance(current_expr_status_handler, DoWhileStatusHandler) and execution_info["type"] == "do_while"):
                 condition = execution_info["condition"]
                 if condition is None:
@@ -2533,7 +2549,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                     else: # falseなら、一番下の行をstart_lineに設定して、next_line_numberをend_lineに設定する
                         self.pop_expr_status_handler(False)
-                        self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(False)))
+                        self.set_next_line(send_event, (self.line_number, int(False)))
                         self.remove_line_loop(self.line_number)
             elif isinstance(current_expr_status_handler, DoWhileInitializerStatusHandler) and execution_info["type"] == "do_while":
                 # あり得ないが
@@ -2543,7 +2559,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_arrival(send_event)
                 self.pop_expr_status_handler(False)
                 
-                self.set_skipped_var_declaration_lines(send_event, self.line_number)
+                self.set_next_line(send_event, self.line_number)
             elif isinstance(current_expr_status_handler, ForStatusHandler):
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
 
@@ -2554,7 +2570,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                             return "after_loop_skip" if self.check_loop_statement_skip(send_event, current_expr_status_handler) else "correct"
                         else:
                             self.pop_expr_status_handler(False)
-                            self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(False)))
+                            self.set_next_line(send_event, (self.line_number, int(False)))
                             self.remove_line_loop(self.line_number)
                     elif execution_info["type"] == "for_initializer":
                         get_line = False
@@ -2565,21 +2581,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 check_result = current_expr_status_handler.check_status(send_event, execution_info)
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    self.set_skipped_var_declaration_lines(send_event, (self.line_number, execution_info["true_case_index"]))
+                    self.set_next_line(send_event, (self.line_number, execution_info["true_case_index"]))
             elif isinstance(current_expr_status_handler, ControlFlowStatusHandler):
                 if current_expr_status_handler.type == execution_info["type"]:
                     check_result = current_expr_status_handler.check_status(send_event)
                     self.pop_expr_status_handler(False)
                     if execution_info["type"] == "break":
                         self.remove_line_loop(current_expr_status_handler.condition_line)
-                    self.set_skipped_var_declaration_lines(send_event, self.line_number)
+                    self.set_next_line(send_event, self.line_number)
                 else:
                     check_result = "incorrect"
             elif isinstance(current_expr_status_handler, ExpressionStatusHandler) and execution_info["type"] == "expression":
                 check_result = current_expr_status_handler.check_expr(send_event)
                 if check_result == "correct":
                     self.pop_expr_status_handler(False)
-                    self.set_skipped_var_declaration_lines(send_event, self.line_number)
+                    self.set_next_line(send_event, self.line_number)
             elif isinstance(current_expr_status_handler, ReturnStatusHandler) and execution_info["type"] == "return":
                 check_result = current_expr_status_handler.check_status(send_event)
 
@@ -2730,7 +2746,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         )
                     )
 
-                    self.set_skipped_var_declaration_lines(send_event, func_warp["line"], is_func_entry = True)
+                    self.set_next_line(send_event, func_warp["line"], is_func_entry = True)
 
                     self.event_sender(
                         send_event
@@ -3062,7 +3078,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     vars_w_value_unchanged = self.get_vars_w_value_unchanged()
                 )
 
-                self.set_skipped_var_declaration_lines(send_event, (self.line_number, int(True)))
+                self.set_next_line(send_event, (self.line_number, int(True)))
                 
                 self.event_sender(
                     send_event

@@ -2250,9 +2250,8 @@ class Player(Character):
                             )
                         )
                     else:
+                        self.add_log_of_action(event.execution_info)
                         self.set_completed_checked_func_location(mymap.name, event.func, event.execution_info["line"])
-                    
-                    self.add_log_of_action(event.execution_info)
 
                     dest_map = event.dest_map
                     dest_x = event.dest_x
@@ -2460,6 +2459,7 @@ class Player(Character):
                         for h in chara.codeElementWindow_dict[str(chara.linenum)].hoverComment_list[0]
                     ]
                 )
+                
                 self.add_log(
                     f"executed expression {log_comment} of line {chara.linenum}"
                     if ISENGLISH else
@@ -2526,17 +2526,23 @@ class Player(Character):
 
                 if self.handle_func_skip_request(received_event, chara):
                     return True
-                elif received_event.get("loop_skip", False):
-                    MSGWND.set(received_event['message'], (["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 'loop_skip'))
-                    self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
-                    # self.ccchara = chara.set_checked()
+
+                if received_event.get("loop_skip", False):
+                    MSGWND.set(
+                        received_event['message'], 
+                        (
+                            ["Yes", "No"] if ISENGLISH else ["はい", "いいえ"], 
+                            'loop_skip'
+                        )
+                    )
                 else:
-                    self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
                     self.ccchara = chara.set_checked()
 
                     self.add_log_of_action(chara.execution_info)
 
                     MSGWND.set("Condition checked !! Please get in !!" if ISENGLISH else "条件を確認済みです!!　どうぞお通りください!!")
+                    
+                    self.set_completed_checked_func_location(mymap.name, chara.func, chara.execution_info["line"])
         elif isinstance(chara, CharaReturn):
             # main以外のreturnキャラ
             # void関数のreturnについては後で考える

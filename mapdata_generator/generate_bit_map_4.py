@@ -1308,7 +1308,7 @@ class BitMapGenerator:
                 else:
                     self.track_function_body(
                         crnt_room_nodeID, 
-                        to_nodeID, 
+                        to_nodeID,
                         condition_comment_window_info = self.create_comment_window_info(
                             "cond-check", 
                             detail = [
@@ -1648,6 +1648,7 @@ class BitMapGenerator:
                     sys.exit("number of nodes which are derived from a if-end node has to be 1")
 
                 to_nodeID, _ = if_end_node_info[0]
+
 
             self.map_info.set_move_event(
                 crnt_room_nodeID, 
@@ -2002,7 +2003,8 @@ class BitMapGenerator:
                 crnt_room_nodeID, 
                 nodeID, 
                 None,
-                self.func_name
+                self.func_name,
+                warp_nodeID = ""
             )
             crnt_room_nodeID = nodeID
             next_nodeID_info = self.pop_next_node_info(nodeID)
@@ -2086,6 +2088,7 @@ class BitMapGenerator:
             # break文の場合
             elif self.get_node_label(nodeID) == "break":
                 self.create_room(next_nodeID, crnt_room_nodeID)
+
                 self.map_info.set_move_event(
                     crnt_room_nodeID, 
                     next_nodeID,
