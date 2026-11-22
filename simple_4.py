@@ -421,20 +421,20 @@ def main():
         sender = EventSender(PCODEWND)
         
         PLAYER = Player(init_player_chara, (init_player_x, init_player_y), DOWN, sender)
-        initialResult = sender.receive_json()
-        if "is_end" in initialResult:
+        first_result = sender.receive_json()
+        if "is_end" in first_result:
             PLAYER.fp.write("end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
             PLAYER.fp.close()
             server.terminate()
             sys.exit()
         
-        PLAYER.func = initialResult["first_func"]
+        PLAYER.func = first_result["first_func"]
 
         ITEMWND_RECT = pygame.Rect(SCR_WIDTH - RIGHT_WND_WIDTH - 10, 10, RIGHT_WND_WIDTH, SCR_HEIGHT - MIN_CODE_SIZE_Y - 30)
         ITEMWND = ItemWindow(ITEMWND_RECT, PLAYER)
         ITEMWND.show()
 
-        for gvar_info in initialResult["items"]:
+        for gvar_info in first_result["items"]:
             PLAYER.common_itembag.add(
                 Item(
                     gvar_info["name"], 
@@ -905,6 +905,7 @@ def main():
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and PAUSEWND.is_visible:
                         if (button_name := PAUSEWND.sm_window.scroll_knob(event.pos)):
                             continue
+                        
                         if PAUSEWND.button_toGame_rect.collidepoint(event.pos):
                             SMANAGER.play_se("pause_close")
                             PAUSEWND.hide()
@@ -926,22 +927,23 @@ def main():
                             SMANAGER.set_all_se_volume((PAUSEWND.sm_window.se_knob_x - PAUSEWND.sm_window.knob_min_x) / (PAUSEWND.sm_window.knob_max_x - PAUSEWND.sm_window.knob_min_x)) 
                         button_name = None
 
-                    if button_name:
-                        if event.type == pygame.MOUSEMOTION:
-                            if button_name == "bgm slider":
-                                if PAUSEWND.sm_window.knob_min_x < event.pos[0] < PAUSEWND.sm_window.knob_max_x:
-                                    PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
-                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.bgm_knob_x:
-                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_min_x
-                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.bgm_knob_x:
-                                    PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_max_x
-                            elif button_name == "se slider":
-                                if PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
-                                    PAUSEWND.sm_window.se_knob_x = event.pos[0]
-                                elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.se_knob_x:
-                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_min_x
-                                elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.se_knob_x:
-                                    PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_max_x
+                    if button_name is None or event.type != pygame.MOUSEMOTION:
+                        continue
+
+                    if button_name == "bgm slider":
+                        if PAUSEWND.sm_window.knob_min_x < event.pos[0] < PAUSEWND.sm_window.knob_max_x:
+                            PAUSEWND.sm_window.bgm_knob_x = event.pos[0]
+                        elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.bgm_knob_x:
+                            PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_min_x
+                        elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.bgm_knob_x:
+                            PAUSEWND.sm_window.bgm_knob_x = PAUSEWND.sm_window.knob_max_x
+                    elif button_name == "se slider":
+                        if PAUSEWND.sm_window.knob_min_x <= event.pos[0] <= PAUSEWND.sm_window.knob_max_x:
+                            PAUSEWND.sm_window.se_knob_x = event.pos[0]
+                        elif event.pos[0] <= PAUSEWND.sm_window.knob_min_x != PAUSEWND.sm_window.se_knob_x:
+                            PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_min_x
+                        elif event.pos[0] >= PAUSEWND.sm_window.knob_max_x != PAUSEWND.sm_window.se_knob_x:
+                            PAUSEWND.sm_window.se_knob_x = PAUSEWND.sm_window.knob_max_x
                 
                 offset = calc_offset(PLAYER)
                 fieldmap.draw(screen, offset)
@@ -1293,8 +1295,8 @@ class Map:
     bg_images: list[pygame.Surface] = []
     movable_type = []  # マップチップが移動可能か？（0:移動不可, 1:移動可）
 
-    def __init__(self, name):
-        self.name: str = name
+    def __init__(self, name: str):
+        self.name: str = ""
         self.row: int = -1  # 行数
         self.col: int = -1  # 列数
         self.map: list[list[int]] = []  # マップデータ（2次元リスト）
@@ -1304,20 +1306,17 @@ class Map:
         self.lights: list[Light] = []  # マップにある光源リスト
         self.floor: int = 0
         self.red_overlay = pygame.Surface((SCR_WIDTH, SCR_HEIGHT), pygame.SRCALPHA)
-        self.execution_lines: dict[int, int] = {}
-        self.load_json()
+        # self.execution_lines: dict[int, int] = {}
 
-    def create(self, dest_map: str):
+        self.load_map_data(name)
+
+    def load_new_map(self, dest_map: str):
         """dest_mapでマップを初期化"""
-        if self.name == dest_map:
-            self.execution_lines.clear()
-
-        self.name = dest_map
         self.charas = []
         self.events = []
         self.lights = []
 
-        self.load_json()
+        self.load_map_data(dest_map)
 
     def add_chara(self, chara):
         """キャラクターをマップに追加する"""
@@ -1333,27 +1332,28 @@ class Map:
         """マップを描画する"""
         offset_x, offset_y = offset
         # マップの描画範囲を計算
-        startx = offset_x // GS
-        endx = startx + SCR_RECT.width//GS + 1
-        starty = offset_y // GS
-        endy = starty + SCR_RECT.height//GS + 1
+        start_x = offset_x // GS
+        end_x = start_x + SCR_RECT.width//GS + 1
+        start_y = offset_y // GS
+        end_y = start_y + SCR_RECT.height//GS + 1
 
         # マップの描画
-        for y in range(starty, endy):
-            for x in range(startx, endx):
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
                 # マップの範囲外はデフォルトイメージで描画
                 # この条件がないとマップの端に行くとエラー発生
                 if x < 0 or y < 0 or x > self.col-1 or y > self.row-1:
                     screen.blit(self.images[self.default], (x*GS-offset_x, y*GS-offset_y))
+                    continue
+
+                if 3200 <= self.map[y][x] <= 3299:
+                    screen.blit(self.images[32], (x*GS-offset_x, y*GS-offset_y))
+                    screen.blit(self.bg_images[self.map[y][x] % 100], (x*GS-offset_x, y*GS-offset_y))
+                elif self.map[y][x] == 16000:
+                    screen.blit(self.images[160], (x*GS-offset_x, y*GS-offset_y))
+                    screen.blit(self.bg_images[100], (x*GS-offset_x, y*GS-offset_y))
                 else:
-                    if 3200 <= self.map[y][x] <= 3299:
-                        screen.blit(self.images[32], (x*GS-offset_x, y*GS-offset_y))
-                        screen.blit(self.bg_images[self.map[y][x] % 100], (x*GS-offset_x, y*GS-offset_y))
-                    elif self.map[y][x] == 16000:
-                        screen.blit(self.images[160], (x*GS-offset_x, y*GS-offset_y))
-                        screen.blit(self.bg_images[100], (x*GS-offset_x, y*GS-offset_y))
-                    else:
-                        screen.blit(self.images[self.map[y][x]], (x*GS-offset_x, y*GS-offset_y))
+                    screen.blit(self.images[self.map[y][x]], (x*GS-offset_x, y*GS-offset_y))
 
         if self.name in ("tutorial", "tutorial_en"):
             is_visible = (pygame.time.get_ticks() // 300) % 5 != 0
@@ -1381,7 +1381,7 @@ class Map:
             self.red_overlay.fill((255, 0, 0, 110 - PLAYER.status["HP"] * 3))
             screen.blit(self.red_overlay, (0, 0))
 
-    def is_movable(self, x, y):
+    def is_movable(self, x: int, y: int):
         """(x,y)は移動可能か？"""
         # マップ範囲内か？
         if x < 0 or x > self.col-1 or y < 0 or y > self.row-1:
@@ -1395,23 +1395,14 @@ class Map:
             return False
         
         # キャラクターと衝突しないか？
-        for chara in self.charas:
-            if chara.pos() == (x, y):
-                return False
+        if self.get_chara(x, y):
+            return False
             
         # イベントと衝突しないか？
-        for event in self.events:
-            if self.movable_type[event.mapchip] != 0:
-                continue
+        if (event := self.get_event(x, y)) is not None and self.movable_type[event.mapchip] == 0:
+            if not isinstance(event, SmallDoor) or event.status != 1:
+                return False
 
-            if event.pos() != (x, y):
-                continue
-
-            if isinstance(event, SmallDoor) and event.status == 1:
-                break
-
-            return False
-                
         return True
 
     def is_movable_but_chara(self, x: int, y: int):
@@ -1428,12 +1419,8 @@ class Map:
             return False
         
         # イベントと衝突しないか？
-        for event in self.events:
-            # print(event.mapchip)
-            if self.movable_type[event.mapchip] == 0:
-                if event.pos() == (x, y):
-                    return False
-        return True
+        event = self.get_event(x, y)
+        return event is None or self.movable_type[event.mapchip] != 0
 
     def get_chara(self, x: int, y: int):
         """(x,y)にいるキャラクターを返す。いなければNone"""
@@ -1453,12 +1440,23 @@ class Map:
         """eventを削除する"""
         self.events.remove(event)
 
-    def load_json(self):
+    def load_map_data(self, name: str):
         """json形式のマップ・イベントを読み込む"""
         # ここのファイル名は後々変える -----------------------------------------------------------
-        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mapdata_for_test", self.name.lower(), self.name.lower() + ".json")
+        file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 
+            "mapdata_for_test", 
+            name.lower(), 
+            name.lower() + ".json"
+        )
         with codecs.open(file, "r", "utf-8") as fp:
             json_data: MapData = json.load(fp)
+
+        if self.name != name:
+            self.execution_lines = {
+                int(start): end
+                for start, end in json_data["execution_lines"].items()
+            }
 
         self.row = json_data["row"]
         self.col = json_data["col"]
@@ -1504,7 +1502,6 @@ class Map:
                 self.create_sign_j(event)
             elif event_type == "TREASURE":  # 宝箱
                 self.create_treasure_j(event)
-                self.execution_lines[event["start"]] = event["end"]
             elif event_type == "DOOR":  # ドア
                 self.create_door_j(event)
             elif event_type == "SDOOR":  #  小さいドア
@@ -1692,7 +1689,7 @@ class Map:
         if PLAYER is None:
             sys.exit("player is not found")
         
-        self.create(map_name)  # 移動先のマップで再構成
+        self.load_new_map(map_name)  # 移動先のマップで再構成
         PLAYER.set_pos(dest_x, dest_y, DOWN)  # プレイヤーを移動先座標へ
         self.add_chara(PLAYER)  # マップに再登録
     
@@ -2099,29 +2096,31 @@ class Player(Character):
                     self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
             elif direction is None and not MSGWND.selectMsgText:
                 # 接触イベントチェック
-                event = mymap.get_event(self.x, self.y)
+                event = mymap.get_event(*self.pos())
                 if isinstance(event, (MoveEvent, Treasure)):
                     self.append_code_element_window(event.codeElementWindow)
                     self.is_foot_action_valid = True
 
                 if self.direction == DOWN:
-                    nextx = self.x
-                    nexty = self.y + 1
+                    next_x = self.x
+                    next_y = self.y + 1
                 elif self.direction == LEFT:
-                    nextx = self.x - 1
-                    nexty = self.y
+                    next_x = self.x - 1
+                    next_y = self.y
                 elif self.direction == RIGHT:
-                    nextx = self.x + 1
-                    nexty = self.y
+                    next_x = self.x + 1
+                    next_y = self.y
                 else:
-                    nextx = self.x
-                    nexty = self.y - 1
-                if event is None and (len(mymap.helps) and (self.x, self.y) in mymap.helps) and not MSGWND.is_visible:
-                    MSGWND.set(mymap.helps[(self.x, self.y)], (None, 'help'))
-                    self.helps_aquired.append((self.x, self.y))
-                    mymap.helps.pop((self.x, self.y))
+                    next_x = self.x
+                    next_y = self.y - 1
 
-                chara = mymap.get_chara(nextx, nexty)
+                player_pos = self.pos()
+                if event is None and (len(mymap.helps) and player_pos in mymap.helps) and not MSGWND.is_visible:
+                    MSGWND.set(mymap.helps[player_pos], (None, 'help'))
+                    self.helps_aquired.append(player_pos)
+                    mymap.helps.pop(player_pos)
+
+                chara = mymap.get_chara(next_x, next_y)
                 if isinstance(chara, (CharaCheckCondition, CharaReturn)):
                     self.append_code_element_window(chara.codeElementWindow)
                     self.is_foward_action_valid = True
@@ -2129,18 +2128,16 @@ class Player(Character):
                     self.append_code_element_window(chara.codeElementWindow_dict.get(str(self.sender.programCodeWindow.linenum)))
                     self.is_foward_action_valid = True
 
-                event = mymap.get_event(nextx, nexty)
+                event = mymap.get_event(next_x, next_y)
                 if isinstance(event, SmallDoor) and not event.status:
                     self.is_foward_action_valid = True
 
-            if self.moving and self.ccchara:
-                if self.ccchara["x"] == self.x and self.ccchara["y"] == self.y:
-                    chara = mymap.get_chara(self.ccchara["avoiding_x"], self.ccchara["avoiding_y"])
-                    if isinstance(chara, CharaCheckCondition):
-                        if chara.initial_direction != self.direction:
-                            chara.back_to_init_pos()
-                            self.ccchara = None
-                            self.close_opened_door(mymap)
+            if self.moving and self.ccchara and (self.ccchara["x"], self.ccchara["y"]) == self.pos():
+                chara = mymap.get_chara(self.ccchara["avoiding_x"], self.ccchara["avoiding_y"])
+                if isinstance(chara, CharaCheckCondition) and chara.initial_direction != self.direction:
+                    chara.back_to_init_pos()
+                    self.ccchara = None
+                    self.close_opened_door(mymap)
         
         # if self.speed != 8:
         #     self.speed = 8
@@ -2166,7 +2163,7 @@ class Player(Character):
 
     def search(self, mymap: Map):
         """足もとに宝箱またはワープゾーンがあるか調べる"""
-        event = mymap.get_event(self.x, self.y)
+        event = mymap.get_event(*self.pos())
         if isinstance(event, Treasure):
             # 宝箱を開けることの情報を送信する
             self.sender.send_event(
@@ -2306,17 +2303,17 @@ class Player(Character):
     def unlock(self, mymap: Map):
         """キャラクターが向いている方向にドアがあるか調べる"""
         # 向いている方向のとなりの座標を求める
-        nextx, nexty = self.x, self.y
+        next_x, next_y = self.x, self.y
         if self.direction == DOWN:
-            nexty = self.y + 1
+            next_y = self.y + 1
         elif self.direction == LEFT:
-            nextx = self.x - 1
+            next_x = self.x - 1
         elif self.direction == RIGHT:
-            nextx = self.x + 1
+            next_x = self.x + 1
         elif self.direction == UP:
-            nexty = self.y - 1
+            next_y = self.y - 1
         # その方向にドアがあるか？
-        if not isinstance((event := mymap.get_event(nextx, nexty)), Door):
+        if not isinstance((event := mymap.get_event(next_x, next_y)), Door):
             return False
         
         # SmallDoorはDoorの子クラスなので、isinstance(event, Door)はTrueになってしまう
@@ -2355,23 +2352,22 @@ class Player(Character):
         """キャラクターが向いている方向のとなりにキャラクターがいるか調べる"""
 
         # 向いている方向のとなりの座標を求める
-        nextx, nexty = self.pos()
+        next_x, next_y = self.pos()
         if self.direction == DOWN:
-            nexty = self.y + 1
+            next_y = self.y + 1
         elif self.direction == LEFT:
-            nextx = self.x - 1
+            next_x = self.x - 1
         elif self.direction == RIGHT:
-            nextx = self.x + 1
+            next_x = self.x + 1
         else: # UP
-            nexty = self.y - 1
+            next_y = self.y - 1
         
         # その方向にキャラクターがいるか？
-        chara = mymap.get_chara(nextx, nexty)
-        # キャラクターがいればプレイヤーの方向へ向ける
-        if chara is None:
+        if (chara := mymap.get_chara(next_x, next_y)) is None:
             MSGWND.set("Nobody is in this direction" if ISENGLISH else "そのほうこうには　だれもいない。")
             return False
-        
+
+        # キャラクターがいればプレイヤーの方向へ向ける
         if self.direction == DOWN:
             chara.direction = UP
         elif self.direction == LEFT:
@@ -5767,7 +5763,7 @@ class ControllerGuideWindow(ScrollableWindow):
         self.mmapwnd = mmapwnd
         self.cmndwnd = cmndwnd
 
-    def draw(self, screen: pygame.Surface, isSelectMsgText: bool):
+    def draw(self, screen: pygame.Surface, is_selectMsgText: bool):
         if not self.is_visible:
             return
         
@@ -5790,7 +5786,7 @@ class ControllerGuideWindow(ScrollableWindow):
             # y += self.FONT_SIZE
             # self.draw_string(x, y, "input A B..." if ISENGLISH else "A B...を標準入力")
             # y += self.FONT_SIZE + 4
-        elif isSelectMsgText:
+        elif is_selectMsgText:
             self.draw_string(x, y, "←/→: select" if ISENGLISH else "←/→: 選択")
             y += self.FONT_SIZE + 4
             self.draw_string(x, y, "space: decide" if ISENGLISH else "space: 決定")

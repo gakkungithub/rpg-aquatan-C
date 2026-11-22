@@ -43,6 +43,7 @@ class MapData(TypedDict):
     map: list[list[int]]
     events: list[MoveEventData | TreasureData | SDoorData]
     characters: list[CharaReturnData | CharaCheckConditionData | CharaExpressionData]
+    execution_lines: dict[int | str, int]
 
 class TreasureData(TypedDict):
     type: Literal["TREASURE"]

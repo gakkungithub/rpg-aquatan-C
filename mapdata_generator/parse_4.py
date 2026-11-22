@@ -348,6 +348,9 @@ class AST2Flowchart:
         include_path = f'{sdk_path}/usr/include'
 
         for c_file in c_files:
+            if c_file == "":
+                sys.exit("empty c file name is not allowed")
+
             tu = index.parse(
                 c_file,
                 args=[

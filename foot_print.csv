@@ -1,12 +1,3 @@
-start,103_loops,109, 102
-itemget, 103_loops,111, 106,base_calorie
-itemget, 103_loops,106, 97,total
-itemget, 103_loops,95, 92,days
-itemget, 103_loops,84, 91,i
-itemget, 103_loops,62, 74,goal
-itemget, 103_loops,52, 69,exercise
-itemget, 103_loops,48, 61,session
-jump, 103_loops,22, 46
-jump, 103_loops,37, 56
-itemget, 103_loops,30, 30,cooldown_days
-end, 103_loops,43, 28
+start,104_array_struct,42, 73
+itemget, ,39, 72,students
+end, 104_array_struct,33, 62

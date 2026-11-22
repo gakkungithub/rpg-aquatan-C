@@ -341,6 +341,7 @@ class ExecutionCommentHandler:
         return execution_comments
 
 # マップデータ生成に必要な情報はここに格納
+# 現在は、プログラム名 = cソースファイル名 としているが、今後cファイルが複数ある場合はファイルごとに分けてこのインスタンスを生成する必要がある?
 class MapInfo:
     ISEVENT = 2
 
@@ -365,6 +366,7 @@ class MapInfo:
         self.memory_lines: dict[str, dict[int, list[dict]]] = {}
         self.str_lines: dict[str, dict[int, list[dict]]] = {}
         self.execution_comment_handler = ExecutionCommentHandler()
+        self.execution_lines: dict[int, int] = {}
 
         self.is_english = is_english
         self.is_universal = is_universal
@@ -391,8 +393,8 @@ class MapInfo:
         return (local_y+y, local_x+x)
 
     # 話しかけると戻るキャラの設定
-    def set_chara_return(self, roomNodeID: str, execution_info_nodeID: str, comment_window_info: TempCommentWindowInfo, func_name: str):
-        local_y, local_x, height, width = self.room_info[roomNodeID]["room_size"]
+    def set_chara_return(self, room_nodeID: str, execution_info_nodeID: str, comment_window_info: TempCommentWindowInfo, func_name: str):
+        local_y, local_x, height, width = self.room_info[room_nodeID]["room_size"]
         y, x = self.pick_random_space_pos_from_map(self.event_map[local_y+self.offset["y"]+1:local_y+self.offset["y"]+height-1, local_x+self.offset["x"]+1:local_x+self.offset["x"]+width-1])
         self.event_map[local_y+self.offset["y"]+y+1, local_x+self.offset["x"]+x+1] = self.ISEVENT
         # type (ifやexp等) と line_track を取得していた
@@ -414,8 +416,6 @@ class MapInfo:
         to_local_pos = (int(to_local_y+y), int(to_local_x+x))
         self.event_map[to_local_y+self.offset["y"]+y, to_local_x+self.offset["x"]+x] = self.ISEVENT
 
-        execution_info = self.execution_info.get(warp_nodeID, None) if warp_nodeID is not None else self.execution_info.get(to_nodeID, None)
-
         # ステージによってマップチップ(UI)番号(158)を変えるかは今後判断する
         self.move_events.append(
             MoveEvent(
@@ -423,17 +423,25 @@ class MapInfo:
                 to_local_pos, 
                 comment_window_info, 
                 158, 
-                execution_info, 
+                self.execution_info.get(warp_nodeID, None) if warp_nodeID is not None else self.execution_info.get(to_nodeID, None), 
                 crnt_func_name
             )
         )
 
     # スカラー変数に対応した宝箱の設定 (item_exp_infoは、変数名、値の計算式で使われている変数、計算式で使われている関数、宣言の行数を格納している)
-    def set_treasure(self, roomNodeID: str, item_name: str, var_info: VarInfo, crnt_func_name: str):
-        local_y, local_x, height, width = self.room_info[roomNodeID]["room_size"]
+    def set_treasure(self, room_nodeID: str, item_name: str, var_info: VarInfo, crnt_func_name: str):
+        local_y, local_x, height, width = self.room_info[room_nodeID]["room_size"]
         y, x = self.pick_random_space_pos_from_map(self.event_map[local_y+self.offset["y"]:local_y+self.offset["y"]+height, local_x+self.offset["x"]:local_x+self.offset["x"]+width])
+        self.treasures.append(
+            Treasure(
+                (local_y+y, local_x+x), 
+                item_name, 
+                var_info, 
+                crnt_func_name
+            )
+        )
+        self.execution_lines[var_info["start"]] = var_info["end"]
         self.event_map[local_y+self.offset["y"]+y, local_x+self.offset["x"]+x] = self.ISEVENT
-        self.treasures.append(Treasure((local_y+y, local_x+x), item_name, var_info, crnt_func_name))
 
     # 処理上逆戻りを禁止するドアの生成
     def set_door(self, pos: tuple[int, int], dir: int, comment_window_info: TempCommentWindowInfo):
@@ -453,7 +461,16 @@ class MapInfo:
         #     parts.append(segment)
 
         # door_name = "AND\n".join(parts) if self.is_english else "かつ\n".join(parts) 
-        self.doors.append(Door((pos[0] - self.offset["y"], pos[1] - self.offset["x"]), dir, ""))
+        self.doors.append(
+            Door(
+                pos = (
+                    pos[0] - self.offset["y"], 
+                    pos[1] - self.offset["x"]
+                ), 
+                dir = dir, 
+                name = ""
+            )
+        )
         self.event_map[pos[0], pos[1]] = self.ISEVENT
 
     # 条件文キャラの生成
@@ -482,10 +499,6 @@ class MapInfo:
 
     # マップデータの生成
     def mapdata_generator(self, gvar_str: str, floor_map: NDArray[np.float64], wall_chip_type: int):
-        # for func_name, line_info in self.line_info_dict.items():
-        #     print(func_name)
-        #     print(line_info.next_lines)
-        
         default_mapchips = [503, 343, 160, 32]
         floor_mapchip = random.choice([390, 43, 402, 31])
         floor_map = np.where(floor_map == 0, floor_mapchip, floor_map) 
@@ -692,18 +705,18 @@ class MapInfo:
         )
 
         with open(f'{DATA_DIR}/{self.program_name}/{self.program_name}.json', 'w') as f:
-            fileContent = MapData(
+            file_content = MapData(
                 row = bit_map.shape[0], 
                 col = bit_map.shape[1], 
                 default = default_mapchip, 
                 floor = floor_mapchip, 
                 map = bit_map.astype(int).tolist(), 
                 characters = characters, 
-                events = events
+                events = events,
+                execution_lines = self.execution_lines
             )
-
-            self.check_data_format_is_true(fileContent)
-            json.dump(fileContent, f) 
+            self.check_data_format_is_true(file_content)
+            json.dump(file_content, f) 
 
         with open(f'{DATA_DIR}/{self.program_name}/{self.program_name}_variables.json', 'w') as f:
             json.dump(
@@ -2227,32 +2240,39 @@ class BitMapGenerator:
             ### ここでprevious_lineとexpr_lineを登録する
             self.set_next_line(previous_line, expr_line)
 
-            detail = TempExpressionDetail(
-                expr = self.create_comment_window_info(
-                    "exps",
-                    detail = [
-                        ["execute", f"of line {expr_line}"] 
-                        if self.is_english else 
-                        [f"{expr_line}行目の", "を実行します"]
-                    ], 
-                    hover = [
-                        expr_node_info["comments"]
-                    ],
-                    func_reference_group = FuncReferenceGroup(
-                        name = f"expression line of {expr_line}" if self.is_english else f"{expr_line}行目の計算式",
-                        func = expr_node_info["funcs"]
-                    ) if len(expr_node_info["funcs"]) else None
-                ),
-                vars = expr_node_info["vars"], 
-                execution_info = execution_info
-            )
-
+            # 既に登録されている計算式なら解析することなく戻る
+            if expr_line in self.map_info.execution_comment_handler.expression_comments:
+                return
+            
             self.map_info.execution_comment_handler.register_expression_comment(
                 expr_line, 
                 expr_node_info["comments"]
             )
 
-            self.map_info.add_expression_2_chara_expression(crnt_room_nodeID, detail, expr_line, self.func_name)
+            self.map_info.add_expression_2_chara_expression(
+                crnt_room_nodeID, 
+                TempExpressionDetail(
+                    expr = self.create_comment_window_info(
+                        "exps",
+                        detail = [
+                            ["execute", f"of line {expr_line}"] 
+                            if self.is_english else 
+                            [f"{expr_line}行目の", "を実行します"]
+                        ], 
+                        hover = [
+                            expr_node_info["comments"]
+                        ],
+                        func_reference_group = FuncReferenceGroup(
+                            name = f"expression line of {expr_line}" if self.is_english else f"{expr_line}行目の計算式",
+                            func = expr_node_info["funcs"]
+                        ) if len(expr_node_info["funcs"]) else None
+                    ),
+                    vars = expr_node_info["vars"], 
+                    execution_info = execution_info
+                ), 
+                expr_line, 
+                self.func_name
+            )
 
             next_nodeID_info = self.pop_next_node_info(nodeID)
             if len(next_nodeID_info) != 1:
