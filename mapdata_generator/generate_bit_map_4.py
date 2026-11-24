@@ -186,7 +186,7 @@ class ExecutionCommentHandler:
             sys.exit('type of for comments has to be "for"')
 
         if comment_type in for_comment:
-            sys.exit(f"{comment_type} comments of for statement cannot be overlapped")
+            return
 
         if comment_type == "initializer" and "var_initializer" in for_comment:
             sys.exit(f"{comment_type} element cannot be mixed up with variable initializer")
@@ -636,13 +636,14 @@ class MapInfo:
             pos = (int(chara_checkCondition.local_pos[0] + self.offset["y"]), int(chara_checkCondition.local_pos[1] + self.offset["x"]))
             
             max_y, max_x = bit_map.shape
-            if max_y >= pos[0] + 1 and bit_map[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
+            # 
+            if max_y > pos[0] + 1 and bit_map[pos[0] + 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(0)
-            if pos[1] >= 0 and bit_map[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
+            if pos[1] > 0 and bit_map[pos[0], pos[1] - 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(1)
-            if max_x >= pos[1] + 1 and bit_map[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
+            if max_x > pos[1] + 1 and bit_map[pos[0], pos[1] + 1] not in [390, 43, 402, 31]:
                 move_dir_list.append(2)
-            if pos[0] >= 0 and bit_map[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
+            if pos[0] > 0 and bit_map[pos[0] - 1, pos[1]] not in [390, 43, 402, 31]:
                 move_dir_list.append(3)
 
             move_dir = random.choice(move_dir_list)

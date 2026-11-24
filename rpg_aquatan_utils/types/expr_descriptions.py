@@ -10,6 +10,7 @@ type ExprDescriptionPart = (
     | ArrayVariablePart
     | MacroPart
     | UnaryExprPart
+    | AddressOperandPart
     | AssignmentExprPart
 )
 
@@ -41,9 +42,14 @@ class MacroPart(TypedDict):
     macro: str
 
 class UnaryExprPart(TypedDict):
-    operator: Literal["++", "--"]
+    operator: Literal["+", "-", "!", "~", "&", "*", "++", "--"]
     operand_id: int
     is_front_operator: bool
+
+class AddressOperandPart(TypedDict):
+    addr_operator: Literal["*", "&"]
+    operand_id: int
+    result_type: str
 
 class AssignmentExprPart(TypedDict):
     operator: Literal[

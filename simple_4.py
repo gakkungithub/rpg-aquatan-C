@@ -1105,7 +1105,7 @@ class ItemChips():
                 frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-25.png'), (32,32)),
             },
             'float' : {
-                frozenset() : load_image('mapchip', 'foods-35.png'),
+                frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-35.png'), (28, 28)),
             },
             'double' : {
                 frozenset() : pygame.transform.smoothscale(load_image('mapchip', 'foods-33.png'), (24,24)),
@@ -1115,7 +1115,7 @@ class ItemChips():
                 frozenset() : self.load_itemChip('jewel2t-5.png'),
             }
         }
-        self.constUIMap = {
+        self.constUIMap: dict[bool, pygame.Surface] = {
             True : pygame.transform.smoothscale(self.load_itemChip('shield.png'), (12,12)),
             False: None
         }
@@ -1123,7 +1123,7 @@ class ItemChips():
     def load_itemChip(self, name):
         return load_image('itemchip', name)
     
-    def getChip(self, type_name: str):
+    def get_chip(self, type_name: str) -> tuple[pygame.Surface | list[pygame.Surface], pygame.Surface | None]:
         tokens = type_name.strip().split()
 
         is_const = 'const' in tokens
@@ -1153,7 +1153,7 @@ class ItemChips():
                 break
 
         if struct_type is not None:
-            return [pygame.transform.smoothscale(self.load_itemChip('struct.png'), (8,8)) for _ in range(3)] if is_array else pygame.transform.smoothscale(self.load_itemChip('struct.png'), (24,24)), self.constUIMap[is_const]
+            return [pygame.transform.smoothscale(self.load_itemChip('struct.png'), (8,8)) for _ in range(3)] if is_array else pygame.transform.smoothscale(self.load_itemChip('struct.png'), (20,20)), self.constUIMap[is_const]
         
         tokens = [t for t in tokens if t not in tokens_to_remove]
 
@@ -1457,6 +1457,7 @@ class Map:
                 int(start): end
                 for start, end in json_data["execution_lines"].items()
             }
+        self.name = name
 
         self.row = json_data["row"]
         self.col = json_data["col"]
@@ -1894,7 +1895,7 @@ class Player(Character):
     def __init__(self, name: str, pos: tuple[int, int], direction: int, sender: EventSender):
         Character.__init__(self, name, pos, direction, False, None)
         self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
-        self.prevPos = [pos, pos]
+        self.prev_pos = [pos, pos]
         self.damage_motion: list[int] = []
         self.dest = {}
         self.place_label = "away"
@@ -1981,6 +1982,7 @@ class Player(Character):
         self.codeElementWindow_list = []
         self.is_foot_action_valid = False
         self.is_foward_action_valid = False
+
         # プレイヤーの移動処理
         if self.moving:
             # ピクセル移動中ならマスにきっちり収まるまで移動を続ける
@@ -2025,7 +2027,7 @@ class Player(Character):
             # ここで自動移動の判定
             direction = None
             pressed_keys = None
-            tempPrevPos = None
+            temp_prev_pos = None
 
             # region command input
             global cmd
@@ -2059,41 +2061,41 @@ class Player(Character):
                 if mymap.is_movable(self.x, self.y+1) and mymap.is_movable(self.x, self.y+2):
                     self.vx, self.vy = 0, self.speed
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+(self.speed//8))]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x, self.y+(self.speed//8))]
                 elif mymap.is_movable(self.x, self.y+1):
                     self.vx, self.vy = 0, 8
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y+1)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x, self.y+1)]
             elif direction == 'l' or (pressed_keys and pressed_keys[K_LEFT]):
                 self.direction = LEFT
                 if mymap.is_movable(self.x-1, self.y) and mymap.is_movable(self.x-2, self.y):
                     self.vx, self.vy = -self.speed, 0
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-(self.speed//8), self.y)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x-(self.speed//8), self.y)]
                 elif mymap.is_movable(self.x-1, self.y):
                     self.vx, self.vy = -8, 0
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x-1, self.y)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x-1, self.y)]
             elif direction == 'r' or (pressed_keys and pressed_keys[K_RIGHT]):
                 self.direction = RIGHT
                 if mymap.is_movable(self.x+1, self.y) and mymap.is_movable(self.x+2, self.y):
                     self.vx, self.vy = self.speed, 0
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else  [self.prevPos[1], (self.x+(self.speed//8), self.y)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else  [self.prev_pos[1], (self.x+(self.speed//8), self.y)]
                 elif mymap.is_movable(self.x+1, self.y):
                     self.vx, self.vy = 8, 0
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x+1, self.y)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x+1, self.y)]
             elif direction == 'u' or (pressed_keys and pressed_keys[K_UP]):
                 self.direction = UP
                 if mymap.is_movable(self.x, self.y-1) and mymap.is_movable(self.x, self.y-2):
                     self.vx, self.vy = 0, -self.speed
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-(self.speed//8))]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x, self.y-(self.speed//8))]
                 elif mymap.is_movable(self.x, self.y-1):
                     self.vx, self.vy = 0, -8
                     self.moving = True
-                    self.prevPos = tempPrevPos if tempPrevPos else [self.prevPos[1], (self.x, self.y-1)]
+                    self.prev_pos = temp_prev_pos if temp_prev_pos else [self.prev_pos[1], (self.x, self.y-1)]
             elif direction is None and not MSGWND.selectMsgText:
                 # 接触イベントチェック
                 event = mymap.get_event(*self.pos())
@@ -2654,95 +2656,105 @@ class Player(Character):
 
     def add_log_of_action(self, execution_info: ExecutionInfo):
         if execution_info["type"] == "if":
-            # else以外のif文
-            if execution_info["true_condition_index"]:
-                self.add_log(
-                    f"Checked if condition of line {str(execution_info["condition_line"])} is true" 
-                    if ISENGLISH else 
-                    f"if文の{str(execution_info["condition_line"])}行目の条件が真であることを確認"
+            if execution_info["true_condition_index"] != -1:
+                line = execution_info["condition_line"]
+                message = (
+                    f"Checked if condition of line {line} is true"
+                    if ISENGLISH else
+                    f"{line}行目のif文の条件が真であることを確認"
                 )
-            # elseの場合
             elif execution_info["condition_line"]:
-                self.add_log(
-                    f"Chose 'else' because all if conditions began from line {str(execution_info["line"])} were false" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行目から始まるif文の条件が全て偽であるためにelseを選んだ"
+                line = execution_info["line"]
+                message = (
+                    f"Chose 'else' because all if conditions began from line {line} were false"
+                    if ISENGLISH else
+                    f"{line}行目から始まるif文の条件が全て偽であるためにelseを選んだ"
                 )
-            # elseがない場合
             else:
-                self.add_log(
-                    f"Got over if statement began from line {str(execution_info["line"])} because the all conditions were wrong" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行目から始まるif文の条件が全て偽であることを確認し、何もしないで通過"
+                line = execution_info["line"]
+                message = (
+                    f"Got over if statement began from line {line} because all conditions were false"
+                    if ISENGLISH else
+                    f"{line}行目から始まるif文の条件が全て偽であることを確認し、何も実行せず通過"
                 )
         elif execution_info["type"] == "while":
-            is_true = execution_info["condition"]
-            self.add_log(
-                f"Checked while condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のwhile文の条件が{"真" if is_true else "偽"}であることを開始"
+            line = execution_info["line"]
+            condition = execution_info["condition"]
+            message = (
+                f"Checked while condition of line {line} is {'true' if condition else 'false'}"
+                if ISENGLISH else
+                f"{line}行目のwhile文の条件が{'真' if condition else '偽'}であることを確認"
             )
         elif execution_info["type"] == "do_while":
+            line = execution_info["line"]
             condition = execution_info["condition"]
-            self.add_log(
-                (
-                    f"the first do-while loop began from line {str(execution_info["line"])}" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行から最初のdo while処理が始まりました"
-                ) 
-                if condition is None else
-                (
-                    f"Checked do while condition of line {str(execution_info["line"])} is {"true" if condition else "false"}" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行目のdo while文の条件が{"真" if condition else "偽"}であることを確認"
-                )
-            )
-        elif execution_info["type"] == "for":
-            is_true = execution_info["condition"]
-            self.add_log(
-                f"Checked for-condition of line {str(execution_info["line"])} is {"true" if is_true else "false"}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のfor文の条件が{"真" if is_true else "偽"}であることを確認"
-            )
-        elif execution_info["type"] == "for_initializer":
-            self.add_log(
-                f"Checked for-initializer of line {str(execution_info["line"])}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のfor文の初期化式を確認"
-            )
-        elif execution_info["type"] == "for_change":
-            self.add_log(
-                f"Checked for-change of line {str(execution_info["line"])}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のfor文の更新式を確認"
-            )
-        elif execution_info["type"] == "switch":
-            if execution_info["true_case_index"] >= 0:
-                self.add_log(
-                    f"Checked switch condition of line {str(execution_info["line"])} matched one of its cases" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行目のswithc文の条件に合致するcaseを発見"
+
+            if condition is None:
+                message = (
+                    f"The first do-while loop began from line {line}"
+                    if ISENGLISH else
+                    f"{line}行目から最初のdo while処理が始まりました"
                 )
             else:
-                self.add_log(
-                    f"Checked switch condition of line {str(execution_info["line"])} did not match any of its cases" 
-                    if ISENGLISH else 
-                    f"{str(execution_info["line"])}行目のswithc文にて、条件式の値がいずれのcaseにも合致しなかった"
+                message = (
+                    f"Checked do-while condition of line {line} is {'true' if condition else 'false'}"
+                    if ISENGLISH else
+                    f"{line}行目のdo while文の条件が{'真' if condition else '偽'}であることを確認"
+                )
+        elif execution_info["type"] == "for":
+            line = execution_info["line"]
+            condition = execution_info["condition"]
+            message = (
+                f"Checked for-condition of line {line} is {'true' if condition else 'false'}"
+                if ISENGLISH else
+                f"{line}行目のfor文の条件が{'真' if condition else '偽'}であることを確認"
+            )
+        elif execution_info["type"] == "for_initializer":
+            line = execution_info["line"]
+            message = (
+                f"Checked for-initializer of line {line}"
+                if ISENGLISH else
+                f"{line}行目のfor文の初期化式を確認"
+            )
+        elif execution_info["type"] == "for_change":
+            line = execution_info["line"]
+            message = (
+                f"Checked for-change of line {line}"
+                if ISENGLISH else
+                f"{line}行目のfor文の更新式を確認"
+            )
+        elif execution_info["type"] == "switch":
+            line = execution_info["line"]
+            if execution_info["true_case_index"] != -1:
+                message = (
+                    f"Checked switch condition of line {line} matched one of its cases"
+                    if ISENGLISH else
+                    f"{line}行目のswitch文の条件に合致するcaseを発見"
+                )
+            else:
+                message = (
+                    f"Checked switch condition of line {line} did not match any of its cases"
+                    if ISENGLISH else
+                    f"{line}行目のswitch文にて、条件式の値がいずれのcaseにも合致しなかった"
                 )
         elif execution_info["type"] == "break":
-            self.add_log(
-                f"Got out of a loop with break statement of line {str(execution_info["line"])}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のbreakでループを1つ抜けました"
+            line = execution_info["line"]
+            message = (
+                f"Got out of a loop with break statement of line {line}"
+                if ISENGLISH else
+                f"{line}行目のbreakでループを1つ抜けました"
             )
         elif execution_info["type"] == "continue":
-            self.add_log(
-                f"Enter into a next loop with continue statement of line {str(execution_info["line"])}" 
-                if ISENGLISH else 
-                f"{str(execution_info["line"])}行目のcontinueで次のループに移ります"
+            line = execution_info["line"]
+            message = (
+                f"Enter into a next loop with continue statement of line {line}"
+                if ISENGLISH else
+                f"{line}行目のcontinueで次のループに移ります"
             )
         else:
             sys.exit("unknown execution-info type is found")
+
+        self.add_log(message)
 
     # グローバル変数リスト→ローカル変数リスト
     def find_item_belong_to_player(self, name: str, line: int | str):
@@ -3024,7 +3036,8 @@ class ScrollableWindow(Window):
     def draw_string(self, x: int, y: int, string: str, color: pygame.Color | None = None):
         """文字列出力"""
         surf, rect = self.font.render(string, color or self.STRING_COLOR)
-        if self.offset_y+y >= 10+self.TITLE_FONT_SIZE+4:
+        if self.offset_y + y >= 10+self.TITLE_FONT_SIZE:
+            y += (self.font_size + 4 - rect.height) // 2
             self.surface.blit(surf, (self.offset_x+x, self.offset_y+y))
         self.local_right_edge_x = max(self.local_right_edge_x, x+rect.width+4)
         self.local_bottom_edge_y = max(self.local_bottom_edge_y, y+rect.height+4)
@@ -3266,7 +3279,7 @@ class MessageWindow(Window):
         self.var_quiz_list: list[tuple[tuple[str,...], bool]] = []
         self.var_quiz_answer = True
 
-    def set(self, base_message: str, selectMessages: tuple[list[str],str] | None = None):
+    def set(self, base_message: str, choice_messages: tuple[list[str],str] | None = None):
         """メッセージをセットしてウィンドウを画面に表示する"""
         message_list: list[str] = []
         if base_message or len(self.new_std_messages) or len(self.str_messages) or len(self.file_message) or len(self.memory_message):
@@ -3286,10 +3299,10 @@ class MessageWindow(Window):
                 message_list.append(self.memory_message)
                 self.memory_message = ""
 
-        if selectMessages is not None:
+        if choice_messages is not None:
             # 選択肢を選ぶコメントウィンドウが表示されている時は要素ウィンドウを表示させない (画面全体がごちゃごちゃするのを防ぐため)
             PLAYER.codeElementWindow_list = []
-            self.selectMsgText, self.select_type = selectMessages
+            self.selectMsgText, self.select_type = choice_messages
             if self.select_type == "var_quiz":
                 var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
                 varname = var_path[0]
@@ -3300,7 +3313,7 @@ class MessageWindow(Window):
                         varname += '.' + var_path_element
                 message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
 
-        if len(message_list) or selectMessages:
+        if len(message_list) or choice_messages:
             self.cur_pos = 0
             self.cur_page = 0
             self.next_flag = False
@@ -3671,7 +3684,7 @@ class MessageWindow(Window):
 
                     fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
 
-                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+                    PLAYER.prev_pos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
 
                     MSGWND.set(f"{player_history[1]}行目の処理の実行前まで巻き戻しました")
                 else:
@@ -3706,7 +3719,7 @@ class MessageWindow(Window):
                     del self.sender.programCodeWindow.history[self.sender.programCodeWindow.rollback_index:]
                     
                     fieldmap.warp_player(fieldmap.name, player_history[2]["x"], player_history[2]["y"])
-                    PLAYER.prevPos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
+                    PLAYER.prev_pos = [(PLAYER.x, PLAYER.y), (PLAYER.x, PLAYER.y)]
 
                     MSGWND.set("Back to rightly after game began" if ISENGLISH else "ゲーム開始時点まで巻き戻しました")
                 else:
@@ -3923,7 +3936,7 @@ class ItemWindow(ScrollableWindow):
         self.is_inAction = True
         self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
 
-    def draw_itemValueChangedRect(self, comments: str, local_y: int):
+    def draw_changed_itemvalue_rect(self, comments: str, local_y: int):
         y = self.offset_y + local_y
         if y < 34:
             return
@@ -3934,6 +3947,7 @@ class ItemWindow(ScrollableWindow):
             else:
                 MSGWND.set(comments)
                 self.check_comments_line = (self.check_comments_line[0], True)
+                
         self.item_changed_lines.add(y // 24)
         pygame.draw.rect(
             self.surface, 
@@ -3964,26 +3978,26 @@ class ItemWindow(ScrollableWindow):
             is_item_changed = True
             # 値が変化している変数に対しては白ハイライトをつける
             if item.itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
+                self.draw_changed_itemvalue_rect(item.itemvalue.declared_comments, y)
             elif item.itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
+                self.draw_changed_itemvalue_rect(item.itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
                 
             icon_x = x
             if item.itemvalue.children:
-                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.GREEN)
+                self.draw_string(icon_x, y, '▼' if item.itemvalue.is_open else '▶', self.GREEN)
                 if self.is_inAction:
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）(typeの型はまだ修正途中なのでNoneの場合は""にする)
-            icon, constLock = self.itemChips.getChip(item.itemvalue.type or "")
+            icon, constLock = self.itemChips.get_chip(item.itemvalue.type or "")
 
             if isinstance(icon, list):
-                self.draw_icon(icon[0], icon_x+8, y+4)
-                self.draw_icon(icon[1], icon_x+4, y+12)
-                self.draw_icon(icon[2], icon_x+12, y+12)
+                self.draw_icon(icon[0], icon_x+8, y)
+                self.draw_icon(icon[1], icon_x+4, y+8)
+                self.draw_icon(icon[2], icon_x+12, y+8)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 self.draw_icon(icon, icon_x, y)
@@ -3993,43 +4007,49 @@ class ItemWindow(ScrollableWindow):
                 self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, y+4, f"{item.name:<8}", self.GREEN)
+            self.draw_string(text_x, y, f"{item.name:<8}", self.GREEN)
 
             offset_name = self.font.get_rect(item.name).width + text_x
 
             # 配列などの値がないvalueは表示しない
             if item.itemvalue.value is not None:
                 offset_name += 30
-                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", self.GREEN)
+                self.draw_string(offset_name, y, f"({item.itemvalue.value})", self.GREEN)
             
             y += 24
 
             if item.itemvalue.is_open:
-                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, False)
+                y = self.draw_values(
+                    [item.name],
+                    item.name,
+                    item.itemvalue.children, 
+                    y, icon_x, 
+                    False
+                )
             
         # ローカル変数
         for item in PLAYER.itembag.get_current_item_layer():
             is_item_changed = True
             if item.itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.declared_comments, y)
+                self.draw_changed_itemvalue_rect(item.itemvalue.declared_comments, y)
             elif item.itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(item.itemvalue.changed_comments, y)
+                self.draw_changed_itemvalue_rect(item.itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
 
             icon_x = x
             if item.itemvalue.children and item.itemvalue.type != "FILE *":
-                self.draw_string(icon_x, y+4, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
+                self.draw_string(icon_x, y, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
                 if self.is_inAction:
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
             # 型に応じたアイコンを blit（描画）
-            icon, constLock = self.itemChips.getChip(item.itemvalue.type or "")
+            icon, constLock = self.itemChips.get_chip(item.itemvalue.type or "")
             if isinstance(icon, list):
-                self.draw_icon(icon[0], icon_x+8, y+4)
-                self.draw_icon(icon[1], icon_x+4, y+12)
-                self.draw_icon(icon[2], icon_x+12, y+12)
+                self.draw_icon(icon[0], icon_x+8, y)
+                self.draw_icon(icon[1], icon_x+4, y+8)
+                self.draw_icon(icon[2], icon_x+12, y+8)
                 text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
@@ -4039,10 +4059,10 @@ class ItemWindow(ScrollableWindow):
                 self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
             if item.itemvalue.value in PLAYER.address_to_size:
-                self.draw_string(text_x - 12, y + 6, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
+                self.draw_string(text_x - 12, y, PLAYER.address_to_size[item.itemvalue.value]["size"], self.BLACK if is_item_changed else self.WHITE)
 
             # アイコンの右に名前と値を描画
-            self.draw_string(text_x, y+4, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
+            self.draw_string(text_x, y, f"{item.name:<8}", self.BLACK if is_item_changed else self.WHITE)
 
             if item.itemvalue.type == "FILE *" and item.itemvalue.value in PLAYER.address_to_fname and self.offset_y+y >= 34:
                 offset_name = self.font.get_rect(item.name).width + 30
@@ -4058,12 +4078,18 @@ class ItemWindow(ScrollableWindow):
             if item.itemvalue.value is not None and item.itemvalue.type != "FILE *":
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 offset_name += 30
-                self.draw_string(offset_name, y+4, f"({item.itemvalue.value})", value_color)
+                self.draw_string(offset_name, y, f"({item.itemvalue.value})", value_color)
 
             y += 24
 
             if item.itemvalue.is_open and item.itemvalue.type != "FILE *":
-                y = self.draw_values([item.name], item.itemvalue.children, y, icon_x, True)
+                y = self.draw_values(
+                    [item.name],
+                    item.name,
+                    item.itemvalue.children, 
+                    y, icon_x, 
+                    True
+                )
 
         if self.is_inAction:
             self.is_inAction = False
@@ -4074,71 +4100,95 @@ class ItemWindow(ScrollableWindow):
         self.file_window.draw(screen)
         ScrollableWindow.blit(self, screen)
 
-    def draw_values(self, var_path: list[str], itemvalue_children: dict[str, ItemValue], y: int, x: int, isLocal: bool):
-        for valuename, itemvalue in itemvalue_children.items():
+    def draw_values(self, var_path: list[str], var_name: str, itemvalue_children: dict[str, ItemValue], y: int, x: int, is_local: bool):
+        for child_part_name, itemvalue in itemvalue_children.items():
             is_item_changed = True
             if itemvalue.declared_comments is not None:
-                self.draw_itemValueChangedRect(itemvalue.declared_comments, y)
+                self.draw_changed_itemvalue_rect(itemvalue.declared_comments, y)
             elif itemvalue.changed_comments is not None:
-                self.draw_itemValueChangedRect(itemvalue.changed_comments, y)
+                self.draw_changed_itemvalue_rect(itemvalue.changed_comments, y)
             else:
                 is_item_changed = False
                 
             # 型に応じたアイコンを blit（描画)
-            if valuename[0] == '[' or valuename == '*':
-                icon, constLock = self.itemChips.getChip(itemvalue.type or "")
+            if child_part_name[0] == '[' or child_part_name == '*':
+                icon, constLock = self.itemChips.get_chip(itemvalue.type or "")
             else:
-                icon, constLock = self.itemChips.getChip(itemvalue.type or "")
+                icon, constLock = self.itemChips.get_chip(itemvalue.type or "")
 
             # アイコンの右に名前と値を描画
-            if isLocal:
+            if is_local:
                 color = self.BLACK if is_item_changed else self.WHITE
             else:
                 color = self.GREEN
                 
             icon_x = x
             if itemvalue.children:
-                self.draw_string(icon_x, y+4, '▼' if itemvalue.is_open else '▶', color)
+                self.draw_string(icon_x, y, '▼' if itemvalue.is_open else '▶', color)
                 if self.is_inAction:
                     self.action_trigger_line_dict[y // 24] = (itemvalue, icon_x)
                 icon_x += 15
 
             if isinstance(icon, list):
                 # (4,4),(12,4),(8,12)の順で描画
-                self.draw_icon(icon[0], icon_x+8, y+4)
-                self.draw_icon(icon[1], icon_x+4, y+12)
-                self.draw_icon(icon[2], icon_x+12, y+12)
-                text_x: int = icon_x + icon[0].get_width() * 2 + 10
+                self.draw_icon(icon[0], icon_x+8, y)
+                self.draw_icon(icon[1], icon_x+4, y+8)
+                self.draw_icon(icon[2], icon_x+12, y+8)
+                text_x = icon_x + icon[0].get_width() * 2 + 10
             else:
                 self.draw_icon(icon, icon_x, y)
-                text_x: int = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
+                text_x = icon_x + icon.get_width() + 10  # アイコン幅 + 余白（10px）
 
             if constLock:
                 self.draw_icon(constLock, icon_x + icon.get_width() - 12, y)
 
-            varname = ''.join([valuename, *var_path]) if valuename == '*' else ''.join([*var_path, valuename]) if valuename[0] == '[' else ''.join([*var_path, ".", valuename])
+            if child_part_name == '*':
+                if var_name[-1] == ')' or not (len(var_path) >= 2 and (var_path[-2] == '.' or var_path[-1][0] == '[')):
+                    var_name = f"*{var_name}"
+                else:
+                    var_name = f"*({var_name})"
+                display_var_name = var_name
+                var_path = [child_part_name, *var_path]
+            else:
+                if child_part_name[0] == '[':
+                    if var_name[0] == '*':
+                        var_name = f"({var_name}){child_part_name}"
+                    else:
+                        var_name = f"{var_name}{child_part_name}"
+                    display_var_name = child_part_name
+                    var_path = [*var_path, child_part_name]
+                else:
+                    if var_name[0] == '*':
+                        var_name = f"({var_name}).{child_part_name}"
+                    else:
+                        var_name = f"{var_name}.{child_part_name}"
+                    display_var_name = child_part_name
+                    var_path = [*var_path, ".", child_part_name]
             
-            self.draw_string(text_x, y+4, f"{varname:<8}", color)
-            offset_name = self.font.get_rect(varname).width + text_x
+            self.draw_string(text_x, y, f"{display_var_name:<8}", color)
+            offset_name = self.font.get_rect(display_var_name).width + text_x
 
             # 配列などの値がないvalueは表示しない
             if itemvalue.value is not None:
                 value_color = self.BLACK if is_item_changed else self.WHITE 
                 offset_name += 30
-                self.draw_string(offset_name, y+4, f"({itemvalue.value})", value_color)
+                self.draw_string(offset_name, y, f"({itemvalue.value})", value_color)
 
             y += 24
 
-            if itemvalue.is_open:
-                y = self.draw_values(
-                    [valuename, *var_path] if valuename == '*' else [*var_path, valuename] if valuename[0] == '[' else [*var_path, ".", valuename], 
-                    itemvalue.children, 
-                    y, 
-                    icon_x, 
-                    isLocal)
+            if not itemvalue.is_open:
+                continue
+
+            y = self.draw_values(
+                var_path,
+                var_name,
+                itemvalue.children, 
+                y, icon_x, 
+                is_local
+            )
 
         return y
-    
+
     def is_cursor_in_window(self, pos: tuple[int, int]):
         if self.is_inAction:
             return None
@@ -4634,7 +4684,6 @@ class CodeElementWindow(Window):
 
             condition_description_list: list[str] = []
             for line, condition in comment["execution_condition"].items():
-                print(expr_description_str_to_show)
                 condition_str = expr_description_str_to_show[int(line)]["expr"]
                 condition_description_list.append(
                     f"{condition_str} is {"True" if condition else "False"}" 
@@ -4688,6 +4737,8 @@ class CodeElementWindow(Window):
                                     str_to_show_list.append(f"{expr_description_str_to_show[expr_part["operand_id"]]["expr"]}{expr_part["operator"]}")
                             else:
                                 str_to_show_list.append(f"{expr_description_str_to_show[expr_part["left_operand_id"]]["expr"]} {expr_part["operator"]} {expr_description_str_to_show[expr_part["right_operand_id"]]["expr"]}")
+                        elif "addr_operator" in expr_part:
+                            str_to_show_list.append(f"{expr_part["addr_operator"]}{expr_description_str_to_show[expr_part["operand_id"]]["expr"]}")
                         else: # expr_id
                             str_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["expr"])
 
@@ -4714,7 +4765,9 @@ class CodeElementWindow(Window):
                             description_to_show_list.append(expr_part["macro"])
                         # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
                         elif "operator" in expr_part:
-                            sys.exit("description parts cannot include side-effect part")
+                            sys.exit("description parts cannot include unary or binary part")
+                        elif "addr_operator" in expr_part:
+                            sys.exit("description parts cannot include address part")
                         else: # expr_id
                             description_to_show_list.append(expr_description_str_to_show[expr_part["expr_id"]]["description"])
 

@@ -33,6 +33,39 @@ class LoopLineInfo(TypedDict):
     top_edge: int
     bottom_edge: int
 
+# EvaluateExpressionのラッパーメソッド
+def evaluate_expression_wrapper(frame: lldb.SBFrame, expression: str):
+    if not isinstance((sb_value := frame.EvaluateExpression(expression)), lldb.SBValue):
+        sys.exit("error in evaluate expression")
+    return sb_value
+
+# 計算式文字列からその計算結果を取得する
+def evaluate_expression(frame: lldb.SBFrame, expression: str) -> str | None:
+    return evaluate_expression_wrapper(frame, expression).GetValue()
+
+def get_thread(frame: lldb.SBFrame):
+    sb_thread = frame.GetThread()
+    if not isinstance(sb_thread, lldb.SBThread):
+        sys.exit("error in GetThread")
+    if not sb_thread.IsValid():
+        sys.exit("invalid SBThread is found")
+    return sb_thread
+
+def get_process(thread: lldb.SBThread):
+    sb_process = thread.GetProcess()
+    if not isinstance(sb_process, lldb.SBProcess):
+        sys.exit("error in GetProcess")
+    if not sb_process.IsValid():
+        sys.exit("invalid SBProcess is found")
+    return sb_process
+
+def get_target(process: lldb.SBProcess):
+    sb_target = process.GetTarget()
+    if not isinstance(sb_target, lldb.SBTarget):
+        sys.exit("error in GetTarget")
+    if not sb_target.IsValid():
+        sys.exit("invalid SBTarget is found")
+    return sb_target
 
 # 計算式解析ハンドラクラス
 class DynamicCommentHandler:
@@ -96,6 +129,8 @@ class DynamicCommentHandler:
                         else:
                             expr_str_base = f"{expr_str_base_list[expr_part["left_operand_id"]]} {expr_part["operator"]} {expr_str_base_list[expr_part["right_operand_id"]]}"
                         expr_str_base_list_by_part.append(expr_str_base)
+                    elif "addr_operator" in expr_part:
+                        expr_str_base_list_by_part.append(f"{expr_part["addr_operator"]}{expr_str_base_list[expr_part["operand_id"]]}")
                     else: # expr_id
                         expr_str_base_list_by_part.append(expr_str_base_list[expr_part["expr_id"]])
 
@@ -140,7 +175,7 @@ class DynamicCommentHandler:
             '''
             is_not_to_evaluate = False
             for line, condition in comment["execution_condition"].items():
-                if self.check_value_bool(self.get_expr_result(int(line))) is not condition:
+                if self.check_value_bool(self.get_expr_result(int(line)), frame) is not condition:
                     is_not_to_evaluate = True
                     break
 
@@ -187,9 +222,8 @@ class DynamicCommentHandler:
                 for expr_part in expr_description["expr"]:
                     if "type" in expr_part:
                         reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, frame)
-
                         str_for_evaluation_list.append(reference_str_base)
-                        str_to_show_list.append(f"<{reference_str_to_show}>(={frame.EvaluateExpression(reference_str_base).GetValue()})")
+                        str_to_show_list.append(f"<{reference_str_to_show}>(={evaluate_expression(frame, reference_str_base)})")
                     elif "text" in expr_part:
                         if expr_part["text"] in ("||", "&&", "?"):
                             if special_operator is not None:
@@ -200,7 +234,7 @@ class DynamicCommentHandler:
                         str_to_show_list.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
                         str_for_evaluation_list.append(expr_part["macro"])
-                        str_to_show_list.append(f"<{expr_part["macro"]}>(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
+                        str_to_show_list.append(f"<{expr_part["macro"]}>(={evaluate_expression(frame, expr_part["macro"])})")
                     elif "operator" in expr_part:
                         if "is_front_operator" in expr_part:
                             str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
@@ -210,26 +244,29 @@ class DynamicCommentHandler:
                             if (operand_result := self.get_expr_result(expr_part["operand_id"])) is None:
                                 sys.exit("result of operand of unary expression is not found")
 
-                            # 未定義動作を弾く
-                            if (variable_value_str_after_side_effect := self.side_effect_values.get(operand_str)) is not None:
-                                if variable_value_str_after_side_effect["result_value_str"] is not None:
-                                    sys.exit("undefined expression is found")
+                            if (operator := expr_part["operator"]) in ("++", "--"):
+                                # 未定義動作を弾く
+                                if (variable_value_str_after_side_effect := self.side_effect_values.get(operand_str)) is not None:
+                                    if variable_value_str_after_side_effect["result_value_str"] is not None:
+                                        sys.exit("undefined expression is found")
 
-                            if expr_part["is_front_operator"]:
-                                current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result} {'+' if expr_part["operator"] == "++" else '-'} 1"
-                                result_value_str = current_value_str
-                            else:
-                                current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result
-                                result_value_str = f"{current_value_str} {'+' if expr_part["operator"] == "++" else '-'} 1"
+                                if expr_part["is_front_operator"]:
+                                    current_value_str = f"{variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result} {'+' if operator == "++" else '-'} 1"
+                                    result_value_str = current_value_str
+                                else:
+                                    current_value_str = variable_value_str_after_side_effect["current_value_str"] if variable_value_str_after_side_effect is not None else operand_result
+                                    result_value_str = f"{current_value_str} {'+' if operator == "++" else '-'} 1"
 
-                            if variable_value_str_after_side_effect:
-                                variable_value_str_after_side_effect["current_value_str"] = current_value_str
-                                variable_value_str_after_side_effect["result_value_str"] = result_value_str
+                                if variable_value_str_after_side_effect:
+                                    variable_value_str_after_side_effect["current_value_str"] = current_value_str
+                                    variable_value_str_after_side_effect["result_value_str"] = result_value_str
+                                else:
+                                    self.side_effect_values[operand_str] = SideEffectValue(
+                                        current_value_str = current_value_str,
+                                        result_value_str = result_value_str
+                                    )
                             else:
-                                self.side_effect_values[operand_str] = SideEffectValue(
-                                    current_value_str = current_value_str,
-                                    result_value_str = result_value_str
-                                )
+                                current_value_str = f"{operator}{operand_result}" if expr_part["is_front_operator"] else f"{operand_result}{operator}"
                         else:
                             str_to_show_base = self.get_expr_to_show(expr_part["right_operand_id"] + 1)
                             left_operand_str = self.get_str_for_evaluation(expr_part["left_operand_id"])
@@ -262,6 +299,14 @@ class DynamicCommentHandler:
                         
                         str_for_evaluation_list.append(current_value_str)
                         str_to_show_list.append(f"<{str_to_show_base}>(={current_value_str})")
+                    elif "addr_operator" in expr_part:
+                        str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
+                        if expr_part["addr_operator"] == "*":
+                            value = self.get_value_at_address(frame, expr_part)
+                        else:
+                            value = evaluate_expression(frame, f"{expr_part["addr_operator"]}{self.get_str_for_evaluation(expr_part["operand_id"])}")
+                        str_for_evaluation_list.append(value)
+                        str_to_show_list.append(f"<{str_to_show_base}>(={value})")
                     else: # expr_id
                         str_to_show_base = self.get_expr_to_show(expr_part["expr_id"])
                         if (result := self.get_expr_result(expr_part["expr_id"])) is None:
@@ -281,7 +326,7 @@ class DynamicCommentHandler:
                 for expr_part in expr_description["description"]:
                     if "type" in expr_part:
                         reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, frame)
-                        value: str | None = frame.EvaluateExpression(reference_description_base).GetValue()
+                        value = evaluate_expression(frame, reference_description_base)
                         description_to_show_list.append(
                             f"{reference_description_to_show}(={value})"
                             if value is not None else
@@ -290,10 +335,12 @@ class DynamicCommentHandler:
                     elif "text" in expr_part:
                         description_to_show_list.append(expr_part["text"])
                     elif "macro" in expr_part: # 今はスカラー値のみを考えるが、後々、関数やifdefも考えられると良いかも
-                        description_to_show_list.append(f"{expr_part["macro"]}(={frame.EvaluateExpression(expr_part["macro"]).GetValue()})")
+                        description_to_show_list.append(f"{expr_part["macro"]}(={evaluate_expression(frame, expr_part["macro"])})")
                     # 型定義でdescriptionの方だけ取り除くのは面倒なので、ここでエラーを出させる
                     elif "operator" in expr_part:
-                        sys.exit("description parts cannot include side-effect part")
+                        sys.exit("description parts cannot include unary or binary part")
+                    elif "addr_operator" in expr_part:
+                        sys.exit("description parts cannot include address part")
                     else: # expr_id
                         description_to_show_list.append(self.get_expr_result(expr_part["expr_id"]))
 
@@ -302,12 +349,12 @@ class DynamicCommentHandler:
                     if str_for_evaluation_list[-1] is None:
                         str_for_evaluation = "1"
                     else:
-                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
+                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1], frame) else "0"
                 elif special_operator == "&&":
                     if str_for_evaluation_list[-1] is None:
                         str_for_evaluation = "0"
                     else:
-                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1]) else "0"
+                        str_for_evaluation = "1" if self.check_value_bool(str_for_evaluation_list[-1], frame) else "0"
                 elif special_operator == "?":
                     if str_for_evaluation_list[-1] is None:
                         str_for_evaluation = str_for_evaluation_list[-3]
@@ -320,8 +367,7 @@ class DynamicCommentHandler:
                         sys.exit("all expression parts have to be calculated")
                     str_for_evaluation: str = " ".join(str_for_evaluation_list)
 
-
-            self.expr_result_by_id[self.index_scanned_currently] = frame.EvaluateExpression(str_for_evaluation).GetValue()
+            self.expr_result_by_id[self.index_scanned_currently] = evaluate_expression(frame, str_for_evaluation)
             self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {description_to_show}'
             self.str_for_evaluation_by_id[self.index_scanned_currently] = str_for_evaluation
 
@@ -343,7 +389,7 @@ class DynamicCommentHandler:
     def check_value_bool(self, value: str | None, frame: lldb.SBFrame) -> bool | None:
         if value is None:
             return None
-        return frame.EvaluateExpression(f"(int)!!({value})").GetValueAsSigned() != 0
+        return evaluate_expression_wrapper(frame, f"(int)!!({value})").GetValueAsSigned() != 0
 
     def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, frame: lldb.SBFrame):
         if expr_part["type"] == "scalar":
@@ -363,7 +409,7 @@ class DynamicCommentHandler:
             for index_part in expr_part["indexes"]:
                 if "expr_id" in index_part:
                     # expr_id
-                    reference_index_to_show_list.append(f"[<{self.get_expr_to_show(index_part["expr_id"])}>(={self.get_expr_result(index_part["expr_id"]) | "not to evaluate"})]")
+                    reference_index_to_show_list.append(f"[<{self.get_expr_to_show(index_part["expr_id"])}>(={self.get_expr_result(index_part["expr_id"])})]")
                     reference_index_base_list.append(f"[{self.get_expr_to_show(index_part["expr_id"])}]")
                 else:
                     # text
@@ -385,7 +431,7 @@ class DynamicCommentHandler:
             sys.exit("error in id number for getting string for evaluation")
 
         if (str_for_evaluation := self.str_for_evaluation_by_id[index]) is None:
-            sys.exit(f"string for evaluation no.{id} is not found")
+            sys.exit(f"string for evaluation no.{index} is not found")
 
         return str_for_evaluation
 
@@ -399,6 +445,37 @@ class DynamicCommentHandler:
         if self.current_function_comment is None:
             sys.exit("current function comment is not found")
         return self.current_function_comment["func_name"]
+
+    def get_value_at_address(self, frame: lldb.SBFrame, addr_operand_part: AddressOperandPart) -> str | None:
+        target = get_target(get_process(get_thread(frame)))
+        result_type = addr_operand_part["result_type"]
+        pointer_count = result_type.count("*")
+        base_type_name = result_type.replace("*", "").strip()
+
+        sb_type = target.FindFirstType(base_type_name)
+
+        if not (isinstance(sb_type, lldb.SBType) and not sb_type.IsValid()):
+            sys.exit(f"invalid type: {base_type_name}")
+
+        for i in range(pointer_count):
+            sb_type = sb_type.GetPointerType()
+            if not (isinstance(sb_type, lldb.SBType) and sb_type.IsValid()):
+                sys.exit(f"invalid type: {base_type_name}{"*" * (i+1)}")
+
+        if (operand_address_str := self.get_expr_result(addr_operand_part["operand_id"])) is None:
+            sys.exit("result of operand of unary expression is not found")
+        operand_address = lldb.SBAddress(int(operand_address_str, 16), target)
+        
+        sb_value = target.CreateValueFromAddress(
+            "value",
+            operand_address,
+            result_type
+        )
+
+        if not (isinstance(sb_value, lldb.SBValue) and sb_value.IsValid()):
+            sys.exit(f"value is not found at address {operand_address_str}")
+
+        return sb_value.GetValue()
 
     def get_arg_comment_of_current_function(self):
         if self.current_function_comment is None:
@@ -1359,11 +1436,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 reference_w_result = ''.join([reference_top_w_result, *reference_index_to_show_list])
             return reference, reference_w_result
 
-        # 取得した値がC言語にて真か偽かを確かめる
-        # GetValueAsSignedで真偽値をintで
-        def check_value_bool(self, value: str, frame: lldb.SBFrame) -> bool:
-            return frame.EvaluateExpression(f"(int)!!({value})").GetValueAsSigned() != 0
-
         # 解析した結果がTrueなら、その部分の計算式の解析は全て終了したことになる
         def set_expr_comments(self, dynamic_comment_handler: DynamicCommentHandler, frame: lldb.SBFrame):
             return dynamic_comment_handler.set_expr_comments(frame)
@@ -1704,6 +1776,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
         def get_declared_var_value_w_comment(self, var_node: DynamicVarNode):
             dynamic_comment_handler = var_node["comments"]
+            print(var_node["name"], [child["name"] for child in var_node["children"]], dynamic_comment_handler.get_expr_result() if dynamic_comment_handler else None)
             return VariableValueWComment(
                 value = dynamic_comment_handler.get_expr_result() if dynamic_comment_handler else None, # previous_valueで取得するかは後で考える
                 type = var_node["type"],
@@ -1927,7 +2000,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.func_name = self.func_crnt_name
                         self.switch_expr_status_handler = None
                                 
-            self.thread = self.frame.GetThread()
+            self.thread = get_thread(self.frame)
             self.process = self.thread.GetProcess()
 
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
@@ -2070,7 +2143,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     if str(self.file_check_num[(self.frame_num, self.line_number)][1]) in self.file_check_num[(self.frame_num, self.line_number)][0]:
                         file_check = str(self.file_check_num[(self.frame_num, self.line_number)][1])
                         for file_info in self.file_check_num[(self.frame_num, self.line_number)][0][file_check]:
-                            file_info["address"] = self.frame.EvaluateExpression(file_info["varname"]).GetValue()
+                            file_info["address"] = evaluate_expression(self.frame, file_info["varname"])
                             self.file_info_to_send.append(file_info)
                         self.file_check_num[(self.frame_num, self.line_number)][0].pop(file_check)
                         if len(self.file_check_num[(self.frame_num, self.line_number)][0]) == 0:
@@ -2089,18 +2162,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                 self.memory_info_to_send.append(
                                     {
                                         "type": memory_info["type"], 
-                                        "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), 
+                                        "size": evaluate_expression(self.frame, f"{memory_info["size"]} / sizeof({memory_info["vartype"]})"), 
                                         "vartype": memory_info["vartype"], 
                                         "source_address": memory_info.get("source_address", None)
                                     }
                                 )
-                                # self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": str(self.frame.EvaluateExpression(f"{memory_info["size"]} / sizeof({memory_info["vartype"]})").GetValue()), "vartype": memory_info["vartype"], "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue(), "source_address": memory_info.get("source_address", None)})
+                                # self.memory_info_to_send.append({"type": memory_info["type"], "varname": memory_info["varname"], "size": evaluate_expression(self.frame, f"{memory_info["size"]} / sizeof({memory_info["vartype"]})"), "vartype": memory_info["vartype"], "address": evaluate_expression(self.frame, memory_info["varname"]), "source_address": memory_info.get("source_address", None)})
                             else:
                                 self.memory_info_to_send.append(
                                     {
                                         "type": memory_info["type"], 
                                         "varname": memory_info["varname"], 
-                                        "address": self.frame.EvaluateExpression(memory_info["varname"]).GetValue()
+                                        "address": evaluate_expression(self.frame, memory_info["varname"])
                                     }
                                 )
                         self.memory_check_num[(self.frame_num, self.line_number)][0].pop(memory_check)
@@ -2118,7 +2191,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         for str_info in self.str_check_num[(self.frame_num, self.line_number)][0][str_check]:
                             self.str_info_to_send.append(
                                 StrcpyInfo(
-                                    value = self.frame.EvaluateExpression(str_info["original"]).GetValue(),
+                                    value = evaluate_expression(self.frame, str_info["original"]),
                                     original = str_info["original"],
                                     destination = str_info["destination"]
                                 )
@@ -2325,19 +2398,17 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             # これだとスコープ外の変数を拾ってしまうことがある
             # for文の条件文内の宣言だとfalseの時にself.vars_tracker.declared_variables_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
             if is_for_false:
-                varsDeclLines = []
+                declared_vars = []
             else:
-                varsDeclLines = [
+                declared_vars = [
                     dynamic_variable_info
                     for dynamic_variable_info in self.vars_tracker.dynamic_variable_info_by_line.get(str(line_number), []) 
                     if (dynamic_variable_info["dynamic_var_node"]["name"], line_number) not in self.vars_tracker.vars_declared[-1]
                 ]
 
-            varsDeclLines_copy = varsDeclLines.copy()
-
-            # やはり、変数は順番に取得させる
-            while len(varsDeclLines_copy):
-                dynamic_variable_info = varsDeclLines_copy.pop(0)
+            # 変数は順番に取得させる
+            while len(declared_vars):
+                dynamic_variable_info = declared_vars.pop(0)
                 var = (dynamic_variable_info["dynamic_var_node"]["name"], line_number)
                 errorCnt = 0
                 while True:
@@ -2410,54 +2481,6 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     # current_comment is None = 未処理の関数がない = アイテムを正しく取得できた → 次の変数に移る
                     if (current_comment := dynamic_variable_info["current_comment_w_index"]) is None:
-                        # 取得した変数を宣言済リストに登録する
-                        self.vars_tracker.set_variable_declared(var)
-
-                        # まだ全ての宣言が完了していない場合
-                        if len(varsDeclLines_copy):
-                            self.event_sender(
-                                Debugger2GameEvent(
-                                    message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!",
-                                    status = "ok",
-                                    item = DeclaredVariableInfo(
-                                        value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
-                                        line = var[1]
-                                    ),
-                                    skipped_function_list = dynamic_variable_info["skipped_function_list"],
-                                ),
-                                False
-                            )
-                        # 全ての宣言が完了している場合
-                        else:
-                            # vars_changedとvarsTrackerの共通項とvarsDeclLinesの差項を、値が変化した変数として検知する
-                            # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
-                            values_changed = [
-                                varname
-                                for varname in self.vars_tracker.vars_changed.keys()
-                                if varname in self.vars_tracker.vars_declared[-1] and varname not in varsDeclLines
-                            ]
-
-                            send_event = Debugger2GameEvent(
-                                message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!", 
-                                status = "ok",
-                                item = DeclaredVariableInfo(
-                                    value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
-                                    line = var[1]  
-                                ),
-                                vars_w_value_changed = self.get_vars_w_value_changed(values_changed), 
-                                vars_w_value_unchanged = self.get_vars_w_value_unchanged(),
-                                skipped_function_list = dynamic_variable_info["skipped_function_list"],
-                                # line = self.get_next_line(line_number)
-                            )
-
-                            # 変数宣言が全て完了した時の処理
-                            if not is_skipped_var_check:
-                                self.set_next_line(send_event, self.line_number)
-
-                            self.event_sender(
-                                send_event
-                            )
-
                         break
 
                     # non_varの時と同じくこのメソッドで次の関数を解析する
@@ -2467,6 +2490,43 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     self.vars_tracker.analyze_var_nodes(str(var[1]), self.frame)
 
                     self.step_conditionally()
+
+                # 取得した変数を宣言済リストに登録する
+                self.vars_tracker.set_variable_declared(var)
+
+                # 全ての宣言が完了した/完了していないに関わらずこの4つは共通しているので先に取得しておく
+                send_event = Debugger2GameEvent(
+                    message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!",
+                    status = "ok",
+                    item = DeclaredVariableInfo(
+                        value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
+                        line = var[1]
+                    ),
+                    skipped_function_list = dynamic_variable_info["skipped_function_list"]
+                )
+
+                # まだ全ての宣言が完了していない場合
+                if len(declared_vars):
+                    self.event_sender(send_event, False)
+                    continue
+
+                # 全ての宣言が完了している場合
+                # vars_changedとvarsTrackerの共通項とdeclared_varsの差項を、値が変化した変数として検知する
+                # vars_changedにもkeysを使って宣言済みかつ値が変わった変数を取得できる
+                send_event["vars_w_value_changed"] = self.get_vars_w_value_changed(
+                    [
+                        varname
+                        for varname in self.vars_tracker.vars_changed.keys()
+                        if varname in self.vars_tracker.vars_declared[-1] and varname not in declared_vars
+                    ]
+                )
+                send_event["vars_w_value_unchanged"] = self.get_vars_w_value_unchanged()
+
+                # 変数宣言が全て完了した時の処理
+                if not is_skipped_var_check:
+                    self.set_next_line(send_event, self.line_number)
+
+                self.event_sender(send_event)
 
         # 変数宣言以外の計算式の解析
         def analyze_non_var_expr_comments(self, is_end: bool = False):

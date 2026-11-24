@@ -1,3 +1,6 @@
-start,104_array_struct,42, 73
-itemget, ,39, 72,students
-end, 104_array_struct,33, 62
+start,105_pointer,95, 62
+itemget, 105_pointer,94, 57,data
+itemget, 105_pointer,106, 54,p
+itemget, 105_pointer,101, 49,sum
+itemget, 105_pointer,88, 44,max
+end, 105_pointer,88, 44

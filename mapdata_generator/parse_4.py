@@ -802,18 +802,16 @@ class AST2Flowchart:
                 type = self.get_type_spelling(type),
                 children = self.get_var_type(original_type),
             )
-
         # ポインタ
         elif type.kind == ci.TypeKind.POINTER:
             # 本ポインタのアドレスが表す値を取得する
             pointee = type.get_pointee()
-            
+
             return PointerTypeInfo(
                 kind = "pointer",
                 type = self.get_type_spelling(type),
                 children = self.get_var_type(pointee),
             )
-
         # 配列
         elif type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
             # 現在のシステムでは定数長配列だけを扱う (配列長などに関してプログラムが複雑になるため)
@@ -829,7 +827,6 @@ class AST2Flowchart:
                 size=type.element_count,
                 children=self.get_var_type(elem_type),
             )
-
         # 構造体・共用体
         elif type.kind == ci.TypeKind.RECORD:
             # どちらの型であるかを判別するためのカーソル
@@ -852,7 +849,6 @@ class AST2Flowchart:
                     type = self.get_type_spelling(type),
                     children = children,
                 )
-
             elif decl_cursor.kind == ci.CursorKind.UNION_DECL:
                 field_cursor_list = self.get_child_cursor_list(decl_cursor)
 
@@ -867,11 +863,9 @@ class AST2Flowchart:
                     type = self.get_type_spelling(type),
                     children = children,
                 )
-
             else:
                 # 構造体・共用体以外のRECORD型について、本ゲームは受け付けない
                 raise NotImplementedError(f"Unsupported RECORD declaration: {self.get_type_spelling(type)}")
-
         # enum
         elif type.kind == ci.TypeKind.ENUM:
             decl_cursor: ci.Cursor = type.get_declaration()
@@ -898,7 +892,6 @@ class AST2Flowchart:
                 type = self.get_type_spelling(type),
                 children = values,
             )
-
         # 基本型
         elif type.kind in (
             # void型
@@ -934,7 +927,6 @@ class AST2Flowchart:
                 type = self.get_type_spelling(type),
                 children = children,
             )
-
         # 関数型 (ここを使うかは未定。現在、関数宣言・定義は個別の解析を行なっている。)
         elif type.kind in (ci.TypeKind.FUNCTIONPROTO, ci.TypeKind.FUNCTIONNOPROTO,):
             children: dict[str, TypeInfo] = {}
@@ -969,6 +961,73 @@ class AST2Flowchart:
         else:
             sys.exit(f"{self.get_type_spelling(type)} is not allowed in this game")
 
+    def create_var_node(self, name: str, type_info: TypeInfo) -> VarNode:
+        """
+        type_infoから、変数の構造を再帰的に生成する。
+
+        例:
+            int a[2][2]
+
+        ↓
+
+            a
+            ├── a[0]
+            │   ├── a[0][0]
+            │   └── a[0][1]
+            └── a[1]
+                ├── a[1][0]
+                └── a[1][1]
+        """
+
+        var_node = VarNode(
+            name = name,
+            type = type_info["type"],
+            children = [],
+            comments = [],
+            vars = [],
+            funcs = [],
+            initialized = False,
+        )
+
+        # 配列
+        if type_info["kind"] == "array":
+            child_type_info = type_info["children"]
+            var_node["children"] = [
+                self.create_var_node(
+                    f"[{i}]",
+                    child_type_info,
+                )
+                for i in range(type_info["size"])
+            ]
+        # struct
+        elif type_info["kind"] == "struct":
+            var_node["children"] = [
+                self.create_var_node(
+                    field_name, 
+                    field_type_info
+                )
+                for field_name, field_type_info in type_info["children"].items()
+            ]
+        # union
+        elif type_info["kind"] == "union":
+            var_node["children"] = [
+                self.create_var_node(
+                    field_name, 
+                    field_type_info
+                )
+                for field_name, field_type_info in type_info["children"].items()
+            ]
+        # pointer
+        elif type_info["kind"] == "pointer":
+            var_node["children"] = [
+                self.create_var_node(
+                    "*",
+                    type_info["children"]
+                )
+            ]
+        # それ以外の型 builtin, enum, typedef展開後の型etc. はそのまま返す
+        return var_node
+
     def parse_var_decl(self, cursor: ci.Cursor, nodeID: str | None, edgeName: str = ""):
         #変数名を取得
         var_nodeID = self.create_node(self.get_cursor_spelling(cursor), 'signature')
@@ -980,7 +1039,7 @@ class AST2Flowchart:
         # 変数の型情報は、変数宣言のsignatureノードごとに取得する
         type_info = self.get_var_type(self.get_cursor_type(cursor))
 
-        varNode = self.create_var_node(self.get_cursor_spelling(cursor), type_info)
+        var_node = self.create_var_node(self.get_cursor_spelling(cursor), type_info)
         
         # 配列の場合
         if self.get_cursor_type(cursor).kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
@@ -1056,15 +1115,15 @@ class AST2Flowchart:
             if len(content_cursors) >= 2:
                 sys.exit("error in number of children cursors of array")
 
-            varNode["comments"] = index_expr_info.expr_descriptions
+            var_node["comments"] = index_expr_info.expr_descriptions
             # 初期化子がある場合
             if len(content_cursors) == 1:
-                self.apply_initializer(content_cursors[0], varNode)
+                self.apply_initializer(content_cursors[0], var_node)
             # 初期化子がない場合
             else:
-                varNode["comments"].append(
+                var_node["comments"].append(
                     Comment(
-                        id = len(varNode["comments"])+1,
+                        id = len(var_node["comments"])+1,
                         comment = ExprDescription(
                             description = [
                                 TextPart(
@@ -1076,7 +1135,6 @@ class AST2Flowchart:
                         execution_condition = {}
                     )
                 )
-
         # 構造体や共用体
         elif self.get_cursor_type(cursor).get_canonical().kind == ci.TypeKind.RECORD:
             record_kind = self.get_cursor_type(cursor).get_declaration().kind
@@ -1093,7 +1151,7 @@ class AST2Flowchart:
 
                 if struct_cursors[0].kind == ci.CursorKind.TYPE_REF and len(struct_cursors) == 1:
                     # 未初期化の構造体宣言の場合 (struct_cursorsがTYPE_REFのカーソルのみを持つ)
-                    varNode["comments"] = [
+                    var_node["comments"] = [
                         Comment(
                             id = 1,
                             comment = ExprDescription(
@@ -1115,23 +1173,20 @@ class AST2Flowchart:
                     '''
                     # 初期化子
                     if struct_cursors[-1].kind == ci.CursorKind.INIT_LIST_EXPR:
-                        self.apply_initializer(struct_cursors[-1], varNode)
+                        self.apply_initializer(struct_cursors[-1], var_node)
                     # 代入の場合
                     else:
                         struct_expr_info = ExprInfo(self.is_english)
                         self.parse_expr(struct_cursors[-1], struct_expr_info, {}, required_expr_description_type={"expr_id"})
                         if struct_expr_info.has_standard_func_reference:
                             sys.exit("this game does not allow that a struct part expression includes standarad functions")
-                        varNode["comments"] = struct_expr_info.expr_descriptions
-            
+                        var_node["comments"] = struct_expr_info.expr_descriptions
             elif record_kind == ci.CursorKind.UNION_DECL:
                 # 共用体 (まだ未実装)
                 sys.exit("our game cannot analyze union type variable yet")
-            
             else:
                 # struct, union以外typekindでRECORDを持つことはないが、念のため
                 sys.exit("error in AST cursor of RECORD")
-
         # スカラー変数
         else:
             children = self.get_child_cursor_list(cursor) 
@@ -1143,10 +1198,10 @@ class AST2Flowchart:
                 elif len(children) >= 3:
                     sys.exit("error in number of cursors in a scalar variable")
 
-                self.apply_initializer(children[0], varNode)
+                self.apply_initializer(children[0], var_node)
             # 変数の初期値が無い場合
             else:
-                varNode["comments"] = [
+                var_node["comments"] = [
                     Comment(
                         id = 1,
                         comment = ExprDescription(
@@ -1172,83 +1227,13 @@ class AST2Flowchart:
         self.func_info_dict[self.scanning_func].set_start(start_line)
 
         self.var_info[f'"{var_nodeID}"'] = VarInfo(
-            var_node = varNode, 
+            var_node = var_node, 
             start = start_line, 
             end = end_line
         )
 
         return var_nodeID
 
-    def create_var_node(self, name: str, type_info: TypeInfo) -> VarNode:
-        """
-        type_infoから、変数の構造を再帰的に生成する。
-
-        例:
-            int a[2][2]
-
-        ↓
-
-            a
-            ├── a[0]
-            │   ├── a[0][0]
-            │   └── a[0][1]
-            └── a[1]
-                ├── a[1][0]
-                └── a[1][1]
-        """
-
-        kind = type_info["kind"]
-        node = VarNode(
-            name = name,
-            type = type_info["type"],
-            children = [],
-            comments = [],
-            vars = [],
-            funcs = [],
-            initialized = False,
-        )
-
-        # 配列
-        if kind == "array":
-            size = type_info["size"]
-            child_type_info = type_info["children"]
-
-            for i in range(size):
-                child_name = f"{name}[{i}]"
-
-                child_node = self.create_var_node(
-                    child_name,
-                    child_type_info,
-                )
-
-                node["children"].append(child_node)
-
-            return node
-        # struct
-        elif kind == "struct":
-            for field_name, field_type_info in type_info["children"].items():
-                child_name = f"{name}.{field_name}"
-
-                child_node = self.create_var_node(child_name, field_type_info)
-
-                node["children"].append(child_node)
-
-            return node
-        # union
-        elif kind == "union":
-            for field_name, field_type_info in type_info["children"].items():
-                child_name = f"{name}.{field_name}"
-
-                child_node = self.create_var_node(child_name, field_type_info)
-
-                node["children"].append(child_node)
-
-            return node
-        # それ以外の型
-        # builtin, pointer, enum, typedef展開後の型 etc.
-        else:
-            return node
-        
     # 変数の初期化の入り口
     def apply_initializer(self, initializer_cursor: ci.Cursor, node: VarNode) -> None:
         if initializer_cursor.kind == ci.CursorKind.INIT_LIST_EXPR:
@@ -1567,13 +1552,14 @@ class AST2Flowchart:
             operator_spell = self.get_token_spelling(operator_token)
 
             is_front = operator_token.location.offset < operand_start
-            is_inc_or_dec = operator_spell in ("++", "--")
 
+            # operator in ("*", "&") ならself.get_type_spelling(self.get_cursor_type(cursor))をresult_typeとして取得する
+            # print(operator_spell, self.get_type_spelling(self.get_cursor_type(cursor)), self.get_type_spelling(self.get_cursor_type(operand_cursor)))
             operand_expr = self.parse_expr(
                 operand_cursor,
                 expr_info,
                 execution_condition,
-                required_expr_description_type={"expr_id"} if is_inc_or_dec else None
+                required_expr_description_type={"expr_id"}
             )
 
             if expr_info.has_standard_func_reference:
@@ -1581,17 +1567,18 @@ class AST2Flowchart:
 
             expr = (
                 [
+                    AddressOperandPart(
+                        addr_operator=operator_spell,
+                        operand_id=operand_expr["expr_id"],
+                        result_type=self.get_type_spelling(self.get_cursor_type(cursor))
+                    )
+                    if operator_spell in ("*", "&") else
                     UnaryExprPart(
                         operator=operator_spell,
                         operand_id=operand_expr["expr_id"],
                         is_front_operator=is_front
                     )
                 ]
-                if is_inc_or_dec else (
-                    [TextPart(text=operator_spell), operand_expr]
-                    if is_front else
-                    [operand_expr, TextPart(text=operator_spell)]
-                )
             )
 
             description = expr_info.get_unary_operator_description(operator_spell, operand_expr, is_front)
