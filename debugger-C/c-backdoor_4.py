@@ -1982,6 +1982,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             if (next_state := self.get_next_state()):
                 self.state, self.frame, self.file_name, self.next_line_number, self.func_crnt_name, self.next_frame_num = next_state
+
+                with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_variables.json", 'r') as f:
+                    variables_info: dict[str, dict] = json.load(f)
+                    self.vars_tracker.declared_variables_by_line = variables_info["declaration"]
+                    self.exprs_by_line = variables_info["expr"]
+
                 with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_line.json", 'r') as f:
                     self.line_data: dict[str, LineInfoDataByFunc] = json.load(f)
                     self.func_name = self.func_crnt_name
@@ -1999,11 +2005,18 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         False
                     )
 
-                    self.line_number: int = self.line_data[self.func_name]["start"] - 1
-                with open(f"{DATA_DIR}/{self.file_name[:-2]}/{self.file_name[:-2]}_variables.json", 'r') as f:
-                    variables_info: dict[str, dict] = json.load(f)
-                    self.vars_tracker.declared_variables_by_line = variables_info["declaration"]
-                    self.exprs_by_line = variables_info["expr"]
+                    line_number = self.line_data[self.func_name]["start"]
+                    self.vars_tracker.start_tracking(self.frame)
+                    if line_number != self.next_line_number:
+                        while line_number != self.next_line_number:
+                            self.skipped_var_declaration_lines.append(str(line_number))
+                            line_number = self.get_next_line(line_number, False)
+                            if line_number > self.next_line_number:
+                                sys.exit(f"the final line after initial variable skip has to be self.next_line_number {self.next_line_number}")
+
+                        self.check_skipped_var_declarations()
+
+                    self.line_number = line_number - 1
             else:
                 self.event_sender(
                     Debugger2GameEvent(
@@ -2014,8 +2027,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     False
                 )
                 self.is_end = True
+                self.vars_tracker.start_tracking(self.frame)
 
-            self.vars_tracker.start_tracking(self.frame)
             self.vars_checker(self.line_number)
 
         # scanf フォーマット → Python 正規表現パターンの対応表
@@ -2088,6 +2101,13 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             return state, results, remaining_text, errors
 
 
+        # 初期化されない変数や静的変数はスキップされるので、その変数を後追いで見る
+        def check_skipped_var_declarations(self):
+            while len(self.skipped_var_declaration_lines):
+                line = self.skipped_var_declaration_lines.pop(0)
+                self.vars_tracker.analyze_var_nodes(line, self.frame)
+                self.vars_checker(int(line), is_skipped_var_check = True)
+
         # 次の処理を取得するためのメソッド
         def step_conditionally(self):
             # プロセスの状態を更新
@@ -2116,11 +2136,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             self.thread = get_thread(self.frame)
             self.process = get_process(self.thread)
 
-            # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
-            while len(self.skipped_var_declaration_lines):
-                line = self.skipped_var_declaration_lines.pop(0)
-                self.vars_tracker.analyze_var_nodes(line, self.frame)
-                self.vars_checker(int(line), is_skipped_var_check = True)
+            self.check_skipped_var_declarations()
                 
             if str(self.next_line_number) in self.line_data[self.func_crnt_name]["input"] and (self.next_frame_num, self.next_line_number) not in self.input_check_num:
                 self.input_check_num[(self.next_frame_num, self.next_line_number)] = (self.line_data[self.func_crnt_name]["input"][str(self.next_line_number)], -1)
@@ -3427,7 +3443,11 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print(f"[サーバ起動] {host}:{port} で待機中...")
 
     conn, addr = s.accept()
-    server_thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
+    server_thread = threading.Thread(
+        target=handle_client, 
+        args=(conn, addr), 
+        daemon=True
+    )
     server_thread.start()
 
     server_thread.join() 
