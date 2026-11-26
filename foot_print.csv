@@ -1,6 +1,8 @@
-start,105_pointer,95, 62
-itemget, 105_pointer,94, 57,data
-itemget, 105_pointer,106, 54,p
-itemget, 105_pointer,101, 49,sum
-itemget, 105_pointer,88, 44,max
-end, 105_pointer,88, 44
+start,105_pointer,49, 75
+itemget, 105_pointer,49, 74,data
+itemget, 105_pointer,47, 70,p
+itemget, 105_pointer,33, 65,sum
+itemget, 105_pointer,31, 59,max
+itemget, 105_pointer,20, 53,index
+itemget, 105_pointer,23, 42,i
+end, 105_pointer,30, 26

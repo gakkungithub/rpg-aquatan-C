@@ -193,7 +193,7 @@ class ExprInfo:
         self.var_references.add((var_path, line))
 
     # 自作関数
-    def append_custom_func_reference(self, func_name: str, custom_func_count_in_args: int, comment: FunctionComment, execution_condition: dict[int, bool]):
+    def append_custom_func_reference(self, func_name: str, custom_func_count_in_args: int, comment: FunctionComment, execution_condition: dict[int, bool], return_type: str):
         if self.has_standard_func_reference:
             sys.exit("standard functions and custom functions cannot be mixed up in our game system")
 
@@ -205,10 +205,14 @@ class ExprInfo:
         )
         # 自作関数のカウントを1追加する
         self.custom_func_count += 1
-        return self.append_function_comment(comment, execution_condition)
+        return self.append_function_comment(
+            comment, 
+            execution_condition, 
+            return_type
+        )
     
     # 標準ライブラリ関数
-    def set_standard_func_reference(self, func_name: str, comment: FunctionComment, execution_condition: dict[int, bool], **kwargs):
+    def set_standard_func_reference(self, func_name: str, comment: FunctionComment, execution_condition: dict[int, bool], return_type: str, **kwargs):
         if self.has_standard_func_reference:
             sys.exit("an expression process cannot contain two or more standard functions")
 
@@ -222,15 +226,19 @@ class ExprInfo:
             )
         )
         self.has_standard_func_reference = True
-        return self.append_function_comment(comment, execution_condition)
+        return self.append_function_comment(
+            comment, 
+            execution_condition, 
+            return_type
+        )
 
-    def append_expr_description(self, description: list[ExprDescriptionPart], expr: list[ExprDescriptionPart], execution_condition: dict[int, bool]):
+    def append_expr_description(self, description: list[ExprDescriptionPart], expr: list[ExprDescriptionPart], execution_condition: dict[int, bool], expr_type: str):
         '''
         descriptionは計算式の説明の文字列
         exprは計算式の文字列を構成する辞書
-        この辞書のキーは、"text"、"expr_id"、(variable)"type"-"name" or "parent"、"func"-"args"がある
+        この辞書のキーは、"text"、"expr_id"、(variable)"category"-"name" or "parent"、"func"-"args"がある
         "text"は埋め込み文字列、"expr_id"はlldbによる動的解析中に値が決まる途中式のid、
-        "type"-"name" or "parent" は変数の参照である("name"は変数名、"parent"は構造体や配列の親の型の種類。"type"によっては"indexes"や"members"キーも存在する)
+        "category"-"name" or "parent" は変数の参照である("name"は変数名、"parent"は構造体や配列の親の型の種類。"category"によっては"indexes"や"members"キーも存在する)
         "macro"はマクロの参照である("macro"はマクロ名、"replacement"はそのマクロの値)
         '''
 
@@ -242,18 +250,20 @@ class ExprInfo:
                     description = description,
                     expr = expr
                 ),
-                execution_condition = execution_condition
+                execution_condition = execution_condition,
+                expr_type = expr_type
             )
         )
         return ExprIdPart(expr_id = self.id)
 
-    def append_function_comment(self, comment: FunctionComment, execution_condition: dict[int, bool]):
+    def append_function_comment(self, comment: FunctionComment, execution_condition: dict[int, bool], return_type):
         self.id += 1
         self.expr_descriptions.append(
             Comment(
                 id = self.id,
                 comment = comment,
-                execution_condition = execution_condition
+                execution_condition = execution_condition,
+                expr_type = return_type
             )
         )
         return ExprIdPart(expr_id = self.id)
@@ -1080,7 +1090,8 @@ class AST2Flowchart:
                             )
                         ], 
                         expr=[TextPart(text = "")],
-                        execution_condition = {}
+                        execution_condition = {},
+                        expr_type = "int"
                     )
                     
                     # ここは必ずTypeInfoになるので型を固定する
@@ -1095,18 +1106,17 @@ class AST2Flowchart:
                 expr_description = self.parse_expr(content_cursors.pop(0), index_expr_info, {})
                 index_expr_info.append_expr_description(
                     description=[
-                        {
-                            "text": f"#{index_num+1} index was automatically set {type_info_for_array["size"]} (a result of the previous expression)"
-                        }
-                    ] 
-                    if self.is_english else 
-                    [
-                        {
-                            "text": f"{index_num+1}つ目の添字は {type_info_for_array["size"]} (前の計算式の結果) に自動的に設定されます"
-                        }
-                    ], 
+                        TextPart(
+                            text = (
+                                f"#{index_num+1} index was automatically set {type_info_for_array["size"]} (a result of the previous expression)"
+                                if self.is_english else
+                                f"{index_num+1}つ目の添字は {type_info_for_array["size"]} (前の計算式の結果) に自動的に設定されます"
+                            )
+                        )
+                    ],
                     expr=[expr_description],
-                    execution_condition = {}
+                    execution_condition = {},
+                    expr_type = "int"
                 )
                 type_info_for_array = type_info_for_array["children"]
                 index_num += 1
@@ -1132,7 +1142,8 @@ class AST2Flowchart:
                             ],
                             expr = [TextPart(text = "")]
                         ),
-                        execution_condition = {}
+                        execution_condition = {},
+                        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
                     )
                 )
         # 構造体や共用体
@@ -1162,7 +1173,8 @@ class AST2Flowchart:
                                 ], 
                                 expr = [TextPart(text = "")]
                             ),
-                            execution_condition = {}
+                            execution_condition = {},
+                            expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
                         )
                     ]
                 else:
@@ -1177,7 +1189,11 @@ class AST2Flowchart:
                     # 代入の場合
                     else:
                         struct_expr_info = ExprInfo(self.is_english)
-                        self.parse_expr(struct_cursors[-1], struct_expr_info, {}, required_expr_description_type={"expr_id"})
+                        self.parse_expr_to_id(
+                            struct_cursors[-1], 
+                            struct_expr_info, 
+                            {},
+                        )
                         if struct_expr_info.has_standard_func_reference:
                             sys.exit("this game does not allow that a struct part expression includes standarad functions")
                         var_node["comments"] = struct_expr_info.expr_descriptions
@@ -1197,7 +1213,6 @@ class AST2Flowchart:
                     children.pop(0)
                 elif len(children) >= 3:
                     sys.exit("error in number of cursors in a scalar variable")
-
                 self.apply_initializer(children[0], var_node)
             # 変数の初期値が無い場合
             else:
@@ -1212,7 +1227,8 @@ class AST2Flowchart:
                             ], 
                             expr = [TextPart(text = "")]
                         ),
-                        execution_condition = {}
+                        execution_condition = {},
+                        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
                     )
                 ]
                 
@@ -1249,8 +1265,7 @@ class AST2Flowchart:
         for initializer in initializers:
             if current_index >= len(node["children"]):
                 raise RuntimeError(
-                    f"too many initializers for "
-                    f"{node['name']}"
+                    f"too many initializers for {node['name']}"
                 )
 
             current_node = node["children"][current_index]
@@ -1270,7 +1285,8 @@ class AST2Flowchart:
     # 通常の初期化子
     def _apply_single_initializer(self, cursor: ci.Cursor, node: VarNode) -> bool:
         # スカラーの場合は、通常の初期化子としてそのまま当てはめられる
-        if len(node["children"]) == 0:
+        # ただし、ポインタ
+        if len(node["children"]) == 0 or node["children"][0]["name"] == "*":
             expr_info = ExprInfo(self.is_english)
 
             # malloc, realloc, fopenの確認 (メソッド化するべきか?)
@@ -1295,7 +1311,12 @@ class AST2Flowchart:
                 elif func_name == "fopen":
                     var_info_for_func["varname"] = node["name"]
 
-            self.parse_expr(cursor, expr_info, {}, var_info_for_func = var_info_for_func, required_expr_description_type = {"expr_id"})
+            self.parse_expr_to_id(
+                cursor, 
+                expr_info, 
+                {}, 
+                var_info_for_func = var_info_for_func
+            )
             if expr_info.has_standard_func_reference and self.get_cursor_extent_start(cursor).line != self.get_cursor_extent_end(cursor).line:
                 sys.exit("expression includes standarad functions has to be in a line")
 
@@ -1322,15 +1343,19 @@ class AST2Flowchart:
                 child["comments"] = [
                     Comment(
                         id = 1,
-                        comment = ExprDescription(
-                            description = [TextPart(text=f"letter '{str_literals[i]}' was set" if self.is_english else f"文字 '{str_literals[i]}' を設定しました")],
-                            expr = [TextPart(text=f"'{str_literals[i]}'")]
-                        ) if i < len(str_literals) else
-                        ExprDescription(
-                            description = [TextPart(text="letter '\0' (null) was set" if self.is_english else f"文字 '\0' (ヌル文字) を設定しました")],
-                            expr = [TextPart(text="'\0'")]
+                        comment = (
+                            ExprDescription(
+                                description = [TextPart(text=f"letter '{str_literals[i]}' was set" if self.is_english else f"文字 '{str_literals[i]}' を設定しました")],
+                                expr = [TextPart(text=f"'{str_literals[i]}'")]
+                            ) 
+                            if i < len(str_literals) else
+                            ExprDescription(
+                                description = [TextPart(text="letter '\0' (null) was set" if self.is_english else f"文字 '\0' (ヌル文字) を設定しました")],
+                                expr = [TextPart(text="'\0'")]
+                            )
                         ),
-                        execution_condition = {} # ここは空辞書で良いのか?
+                        execution_condition = {}, # ここは空辞書で良いのか?
+                        expr_type = "char"
                     )
                 ]
                 child["initialized"] = True
@@ -1373,12 +1398,11 @@ class AST2Flowchart:
         expr_nodeID = self.create_node(label, shape)
         expr_info = ExprInfo(self.is_english)
 
-        self.parse_expr(
+        self.parse_expr_to_id(
             cursor, 
             expr_info, 
             {}, 
-            var_info_for_func = {}, 
-            required_expr_description_type={"expr_id"}
+            var_info_for_func = {}
         )
         if expr_info.has_standard_func_reference and self.get_cursor_extent_start(cursor).line != self.get_cursor_extent_end(cursor).line:
             sys.exit("expression includes standarad functions has to be in a line")
@@ -1399,10 +1423,36 @@ class AST2Flowchart:
             cursor = children[0]
         return cursor
 
+    def parse_expr_to_id(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None):
+        expr_description = self.parse_expr(cursor, expr_info, execution_condition, var_info_for_func)
+        if "expr_id" in expr_description:
+            return expr_description
+
+        return expr_info.append_expr_description(
+            [expr_description], 
+            [expr_description], 
+            execution_condition,
+            self.get_type_spelling(self.get_cursor_type(cursor))
+        )
+
+    def parse_expr_to_text_or_id(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None):
+        expr_description = self.parse_expr(cursor, expr_info, execution_condition, var_info_for_func)
+        if "expr_id" in expr_description or "text" in expr_description:
+            return expr_description
+
+        return expr_info.append_expr_description(
+            [expr_description], 
+            [expr_description], 
+            execution_condition,
+            self.get_type_spelling(self.get_cursor_type(cursor))
+        )
+
     # 式の項を一つずつ解析
     # malloc, realloc, fopenが計算式に含まれる場合は特別な条件の下で解析を行う
-    def parse_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] = {}, required_expr_description_type: set[Literal["expr_id", "text"]] | None = None) -> ExprDescriptionPart:
+    def parse_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None) -> ExprDescriptionPart:
         cursor = self.unwrap_unexposed(cursor)
+
+        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
 
         # 現在の計算式がマクロならその情報を取得する
         if (file := self.get_cursor_file(cursor)) is not None and (macro := self.macro_pos.get((file.name, self.get_cursor_line(cursor), self.get_cursor_column(cursor)))) is not None:
@@ -1431,7 +1481,8 @@ class AST2Flowchart:
             expr_description = expr_info.append_expr_description(
                 description=[TextPart(text= "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します")], 
                 expr=[TextPart(text = "(" ), inside_expr_description, TextPart(text = ")")],
-                execution_condition=execution_condition
+                execution_condition=execution_condition,
+                expr_type = expr_type
             )
         # 定数(関数の引数が変数であるかを確かめるために定数ノードの形は変える)
         elif cursor.kind in (ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.FLOATING_LITERAL, ci.CursorKind.STRING_LITERAL, ci.CursorKind.CHARACTER_LITERAL):
@@ -1456,7 +1507,8 @@ class AST2Flowchart:
             if len(ref_expr_tokens):
                 expr_description = ScalarVariablePart(
                     name = self.get_token_spelling(ref_expr_tokens[0]), 
-                    type = "scalar"
+                    category = "scalar",
+                    value_type = expr_type
                 )
                 # グローバル変数ならグローバル変数のリファレンスを登録する
                 if (gvar_cursor := self.gvar_candidate_crs.pop(expr_description["name"], None)):
@@ -1464,34 +1516,46 @@ class AST2Flowchart:
             else:
                 expr_description =  ScalarVariablePart(
                     name = self.get_cursor_spelling(cursor),
-                    type = "scalar"
+                    category = "scalar",
+                    value_type = expr_type
                 )
-
             expr_info.add_var_reference(expr_description["name"], self.get_cursor_line(cursor.referenced))
         # 配列
         elif cursor.kind == ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
             index_list: list[ExprIdPart | TextPart] = []
+            
             # 配列の参照は、添字→添字→・・・→配列名の順で取得する
             while True:
                 array_children_cursors = [self.unwrap_unexposed(cr) for cr in self.get_child_cursor_list(cursor, 2)]
-                index_expr_description = self.parse_expr(array_children_cursors[1], expr_info, execution_condition, required_expr_description_type={"expr_id", "text"})
-                index_list.append(index_expr_description)
+                index_list.append(
+                    self.parse_expr_to_text_or_id(
+                        array_children_cursors[1], 
+                        expr_info, 
+                        execution_condition
+                    )
+                )
                 if array_children_cursors[0].kind != ci.CursorKind.ARRAY_SUBSCRIPT_EXPR:
                     break
 
                 cursor = array_children_cursors[0]
 
-            parent_expr = self.parse_expr(array_children_cursors[0], expr_info, execution_condition)
+            parent_cursor = array_children_cursors[0]
+            parent_expr = self.parse_expr(
+                parent_cursor, 
+                expr_info, 
+                execution_condition
+            )
             if expr_info.has_standard_func_reference:
                 sys.exit("this game does not allow standard function in part of array variables")
 
-            if "type" not in parent_expr or parent_expr["type"] == "array":
+            if "category" not in parent_expr or parent_expr["category"] == "array":
                 sys.exit("error in array parent")
-            
+
             expr_description = ArrayVariablePart(
                 parent = parent_expr,
                 indexes = list(reversed(index_list)), 
-                type = "array"
+                category = "array",
+                value_type = expr_type
             )
         # 構造体のメンバ
         elif cursor.kind == ci.CursorKind.MEMBER_REF_EXPR:
@@ -1507,7 +1571,7 @@ class AST2Flowchart:
             member_cursor = self.unwrap_unexposed(member_cursor)
             # referenceはstudents[i].scores[0]のstudents[i]のようにカーソルのspellingだけでは取得できないものがある。それにも対応できるようにparse_exprメソッドを呼び出す。
             parent_expr = self.parse_expr(member_cursor, expr_info, execution_condition)
-            if "type" not in parent_expr or parent_expr["type"] == "struct":
+            if "category" not in parent_expr or parent_expr["category"] == "struct":
                 sys.exit("error in struct reference")
 
             if expr_info.has_standard_func_reference:
@@ -1516,7 +1580,8 @@ class AST2Flowchart:
             expr_description = StructVariablePart(
                 parent = parent_expr, 
                 members = list(reversed(member_chain)), 
-                type = "struct"
+                category = "struct",
+                value_type = expr_type
             )
         # 関数
         elif cursor.kind == ci.CursorKind.CALL_EXPR:
@@ -1553,13 +1618,12 @@ class AST2Flowchart:
 
             is_front = operator_token.location.offset < operand_start
 
-            # operator in ("*", "&") ならself.get_type_spelling(self.get_cursor_type(cursor))をresult_typeとして取得する
-            # print(operator_spell, self.get_type_spelling(self.get_cursor_type(cursor)), self.get_type_spelling(self.get_cursor_type(operand_cursor)))
-            operand_expr = self.parse_expr(
+            # operator in ("*", "&") ならexpr_typeをresult_typeとして取得する
+            # print(operator_spell, expr_type, self.get_type_spelling(self.get_cursor_type(operand_cursor)))
+            operand_expr = self.parse_expr_to_id(
                 operand_cursor,
                 expr_info,
-                execution_condition,
-                required_expr_description_type={"expr_id"}
+                execution_condition
             )
 
             if expr_info.has_standard_func_reference:
@@ -1570,7 +1634,7 @@ class AST2Flowchart:
                     AddressOperandPart(
                         addr_operator=operator_spell,
                         operand_id=operand_expr["expr_id"],
-                        result_type=self.get_type_spelling(self.get_cursor_type(cursor))
+                        result_type=expr_type
                     )
                     if operator_spell in ("*", "&") else
                     UnaryExprPart(
@@ -1581,8 +1645,17 @@ class AST2Flowchart:
                 ]
             )
 
-            description = expr_info.get_unary_operator_description(operator_spell, operand_expr, is_front)
-            expr_description = expr_info.append_expr_description(description, expr, execution_condition)
+            description = expr_info.get_unary_operator_description(
+                operator_spell, 
+                operand_expr, 
+                is_front
+            )
+            expr_description = expr_info.append_expr_description(
+                description, 
+                expr, 
+                execution_condition,
+                expr_type
+            )
         # c言語特有の一項条件式 (現在はsizeofのみに対応)
         elif cursor.kind == ci.CursorKind.CXX_UNARY_EXPR:
             expr_spell = ' '.join([self.get_token_spelling(t) for t in list(cursor.get_tokens())])
@@ -1592,7 +1665,8 @@ class AST2Flowchart:
                 expr_description = expr_info.append_expr_description(
                     description = [expr_info.get_sizeof_operator_description(type_str)], 
                     expr = [TextPart(text = expr_spell)],
-                    execution_condition = execution_condition
+                    execution_condition = execution_condition,
+                    expr_type = expr_type
                 )
             else:
                 sys.exit("C unique unary expr operators other than sizeof are not accepted by our game")
@@ -1610,13 +1684,6 @@ class AST2Flowchart:
 
             if operator_spell == "":
                 sys.exit("binary operator is not found")
-
-            left_expr = self.parse_expr(
-                expr_crs[0], 
-                expr_info, 
-                execution_condition, 
-                required_expr_description_type = {"expr_id"} if operator_spell in ("&&", "||", "=") else None
-            )
 
             if expr_info.has_standard_func_reference:
                 sys.exit("this game does not allow that a standard function is mixed with binary operator expression")
@@ -1653,19 +1720,19 @@ class AST2Flowchart:
                           var_name = self.get_token_spelling(decl_ref_tokens[0])
                           var_info_for_func["varname"] = var_name
 
-            # 演算子が && または || の場合、左項 (left_expr) の結果によって右項 (right_expr) が計算されるか決まるので、left_expr を expr_id型に変換して、その id を right_expr を作る際に渡す
-            # && の場合、左項が True なら右項は計算される
-            # || の場合、左項が False なら右項は計算される
-            right_expr = self.parse_expr(
-                expr_crs[1], 
-                expr_info, 
-                {**execution_condition, left_expr["expr_id"]: operator_spell == "&&"} if operator_spell in ("&&", "||") else execution_condition, 
-                var_info_for_func,
-                required_expr_description_type = {"expr_id"} if operator_spell == "=" else None
-            )
-
             # operator_spellが = のときはexprはTextPartとの組み合わせではなく、副作用演算子ExprDescriptionPartに登録する
             if operator_spell == "=":
+                left_expr = self.parse_expr_to_id(
+                    expr_crs[0], 
+                    expr_info, 
+                    execution_condition
+                ) 
+                right_expr = self.parse_expr_to_id(
+                    expr_crs[1], 
+                    expr_info, 
+                    execution_condition, 
+                    var_info_for_func
+                )
                 expr: list[ExprDescriptionPart] = [
                     AssignmentExprPart(
                         operator = operator_spell,
@@ -1674,10 +1741,46 @@ class AST2Flowchart:
                     )
                 ]
             else:
-                expr: list[ExprDescriptionPart] = [left_expr, TextPart(text = operator_spell), right_expr]
+                # 演算子が && または || の場合、左項 (left_expr) の結果によって右項 (right_expr) が計算されるか決まるので、left_expr を expr_id型に変換して、その id を right_expr を作る際に渡す
+                # && の場合、左項が True なら右項は計算される
+                # || の場合、左項が False なら右項は計算される
+                if operator_spell in ("&&", "||"):
+                    left_expr = self.parse_expr_to_id(
+                        expr_crs[0], 
+                        expr_info, 
+                        execution_condition
+                    ) 
+                    execution_condition = {**execution_condition, left_expr["expr_id"]: operator_spell == "&&"}
+                else:
+                    left_expr = self.parse_expr(
+                        expr_crs[0], 
+                        expr_info, 
+                        execution_condition
+                    )
+                
+                right_expr = self.parse_expr(
+                    expr_crs[1], 
+                    expr_info, 
+                    execution_condition, 
+                    var_info_for_func
+                )
+                expr: list[ExprDescriptionPart] = [
+                    left_expr, 
+                    TextPart(text = operator_spell), 
+                    right_expr
+                ]
 
-            description = expr_info.get_binary_operator_description(operator_spell, left_expr, right_expr)
-            expr_description = expr_info.append_expr_description(description, expr, execution_condition)
+            description = expr_info.get_binary_operator_description(
+                operator_spell, 
+                left_expr, 
+                right_expr
+            )
+            expr_description = expr_info.append_expr_description(
+                description, 
+                expr, 
+                execution_condition,
+                expr_type
+            )
         # 複合代入演算子 (a += b など)
         elif cursor.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
             expr_crs = self.get_child_cursor_list(cursor, 2)
@@ -1691,18 +1794,16 @@ class AST2Flowchart:
             if operator_spell == "":
                 sys.exit("compound assignment operator is not found")
 
-            left_expr = self.parse_expr(
+            left_expr = self.parse_expr_to_id(
                 expr_crs[0], 
                 expr_info, 
-                execution_condition,
-                required_expr_description_type = {"expr_id"}
+                execution_condition
             )
 
-            right_expr =  self.parse_expr(
+            right_expr =  self.parse_expr_to_id(
                 expr_crs[1], 
                 expr_info, 
-                execution_condition,
-                required_expr_description_type = {"expr_id"}
+                execution_condition
             )
 
             # 複合代入演算子の場合、このままのexprをEvaluateExpressionにかけると左項の値がlldbのメモリ上で変わってしまうので、lldbの動的解析の際には代入しない (例 left_expr += right_expr の場合、left_expr + right_epxr の結果を使う)
@@ -1715,8 +1816,17 @@ class AST2Flowchart:
                 ) 
             ]
 
-            description = expr_info.get_compound_assignment_operator_description(operator_spell, left_expr, right_expr)
-            expr_description = expr_info.append_expr_description(description, expr, execution_condition)
+            description = expr_info.get_compound_assignment_operator_description(
+                operator_spell, 
+                left_expr, 
+                right_expr
+            )
+            expr_description = expr_info.append_expr_description(
+                description, 
+                expr, 
+                execution_condition,
+                expr_type
+            )
 
             if expr_info.has_standard_func_reference:
                 sys.exit("this game does not allow standard function in compound assignment expression")
@@ -1725,26 +1835,23 @@ class AST2Flowchart:
             expr_crs = self.get_child_cursor_list(cursor, 3) 
             # まず、条件文を解析し、a : b の aかbを解析する
             # 三項条件式 (c ? a : b) について、c (condition_expr) の結果によって a (true_expr), b (false_expr) のどちらが計算されるか決まるので、binary operator と同じくをexpr_id型に変換して、その id を true_expr, false_expr を作る際に渡す
-            condition_expr = self.parse_expr(
+            condition_expr = self.parse_expr_to_id(
                 expr_crs[0], 
                 expr_info, 
-                execution_condition, 
-                required_expr_description_type = {"expr_id"}
+                execution_condition
             )
             
             # condition_expr が True なら true_expr を計算する
             # condition_expr が False なら false_expr を計算する
-            true_expr = self.parse_expr(
+            true_expr = self.parse_expr_to_id(
                 expr_crs[1], 
                 expr_info, 
-                {**execution_condition, condition_expr["expr_id"]: True}, 
-                required_expr_description_type = {"expr_id"}
+                {**execution_condition, condition_expr["expr_id"]: True}
             )
-            false_expr = self.parse_expr(
+            false_expr = self.parse_expr_to_id(
                 expr_crs[2], 
                 expr_info, 
-                {**execution_condition, condition_expr["expr_id"]: False}, 
-                required_expr_description_type = {"expr_id"}
+                {**execution_condition, condition_expr["expr_id"]: False}
             )
             
             expr = [condition_expr, TextPart(text="?"), true_expr, TextPart(text=":"), false_expr]
@@ -1753,7 +1860,12 @@ class AST2Flowchart:
                 if self.is_english else 
                 [condition_expr, TextPart(text = "が真なら"), true_expr, TextPart(text = "、偽なら"), false_expr, TextPart(text = "の値を使います")]
             )
-            expr_description = expr_info.append_expr_description(description, expr, execution_condition)
+            expr_description = expr_info.append_expr_description(
+                description, 
+                expr, 
+                execution_condition,
+                expr_type
+            )
             if expr_info.has_standard_func_reference:
                 sys.exit("this game does not allow standard function in conditional operator expression")
         # キャスト型
@@ -1765,22 +1877,23 @@ class AST2Flowchart:
 
             cr = children[0]
             casted_expr = self.parse_expr(cr, expr_info, execution_condition, var_info_for_func = var_info_for_func)
-            expr = [TextPart(text = f"({self.get_type_spelling(self.get_cursor_type(cursor))})"), casted_expr]
+            expr = [TextPart(text = f"({expr_type})"), casted_expr]
             casted_expr_type: str = self.get_type_spelling(self.get_cursor_type(self.unwrap_unexposed(cr)))
             description = (
-                [TextPart(text = "cast type of"), casted_expr, TextPart(text = f"from {casted_expr_type}"), TextPart(text = f"to {self.get_type_spelling(self.get_cursor_type(cursor))}")]
+                [TextPart(text = "cast type of"), casted_expr, TextPart(text = f"from {casted_expr_type}"), TextPart(text = f"to {expr_type}")]
                 if self.is_english else
-                [casted_expr, TextPart(text = "の型を"), TextPart(text = f"{casted_expr_type}から{self.get_type_spelling(self.get_cursor_type(cursor))}"), TextPart(text = f"{self.get_type_spelling(self.get_cursor_type(cursor))} に変換します")]
+                [casted_expr, TextPart(text = "の型を"), TextPart(text = f"{casted_expr_type}から{expr_type}"), TextPart(text = f"{expr_type} に変換します")]
             )
-            expr_description = expr_info.append_expr_description(description, expr, execution_condition)
+            expr_description = expr_info.append_expr_description(
+                description, 
+                expr, 
+                execution_condition,
+                expr_type
+            )
         # その他 → 対応していない計算式ということでエラー
         else:
             print(cursor.kind, cursor.referenced.kind, cursor.type.kind, self.get_cursor_line(cursor))
             sys.exit("error in expression type")
-
-        if required_expr_description_type is not None:
-            if not any(t in expr_description for t in required_expr_description_type):
-                expr_description = expr_info.append_expr_description([expr_description], [expr_description], execution_condition)
 
         return expr_description
     
@@ -1788,7 +1901,7 @@ class AST2Flowchart:
     # 現在、関数を表すノードを生成しているが、他の計算項と同じように、作らないようにする方向でリファクタリングする(その方が楽)
     # 関数の呼び出しの計算コメントは{"name": name, "comment": comment, "args": [arg1, arg2,...]}のように辞書型にする
     # ここのexprやdescriptionのキーをどのように"func"にするかを考える
-    def parse_call_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] = {}) -> ExprIdPart:
+    def parse_call_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None) -> ExprIdPart:
         children = self.get_child_cursor_list(cursor) 
 
         # --- 関数名ノードの処理 ---
@@ -1801,11 +1914,17 @@ class AST2Flowchart:
 
         custom_func_count_in_args: int = 0
 
+        return_type = self.get_type_spelling(self.get_cursor_type(cursor))
+
         # --- 引数ノードとのエッジ作成 ---
         for arg_cursor in children[1:]:
             arg_expr_info = ExprInfo(self.is_english)
             arg_expr_info.id = expr_info.id
-            arg_expr_description: TextPart | ExprIdPart = self.parse_expr(arg_cursor, arg_expr_info, execution_condition, required_expr_description_type={"expr_id", "text"})
+            arg_expr_description = self.parse_expr_to_text_or_id(
+                arg_cursor, 
+                arg_expr_info, 
+                execution_condition
+            )
             if arg_expr_info.has_standard_func_reference:
                 sys.exit("any functions cannot contain standard functions in our game system")
             
@@ -1829,13 +1948,22 @@ class AST2Flowchart:
                 expr=arg_expr_description_list
             )
             # 参照リストへの関数の追加は深さ優先+先がけになるようにここで行う
-            return expr_info.append_custom_func_reference(func_name, custom_func_count_in_args, comment, execution_condition)
+            return expr_info.append_custom_func_reference(
+                func_name, 
+                custom_func_count_in_args, 
+                comment, 
+                execution_condition,
+                return_type
+            )
         else:
             # # 標準関数の引数に自作関数が含まれている場合はそのカウントを追加する(この標準関数が特定の自作関数の引数に含まれている場合に自作関数カウントを使えるようにするために登録する)
             # expr_info.custom_func_count += custom_func_count_in_args
             # しかし、今は本プログラムの複雑性より、標準関数内に自作関数が含まれている場合はエラーを出して終了する
             if custom_func_count_in_args:
                 sys.exit("any standard functions cannot contain custom functions in our game system")
+
+            if var_info_for_func is None:
+                var_info_for_func = {}
 
             # 標準関数は特別な形でfunc_referencesに登録する
             if func_name == "strcpy":
@@ -2011,7 +2139,13 @@ class AST2Flowchart:
             else:
                 sys.exit(f"standard function \"{func_name}\" cannot be analyzed by our system")
 
-            return expr_info.set_standard_func_reference(func_name, comment, execution_condition, **var_info_for_func)
+            return expr_info.set_standard_func_reference(
+                func_name, 
+                comment, 
+                execution_condition,
+                return_type,
+                **var_info_for_func
+            )
 
     def is_custom_function(self, cursor: ci.Cursor):
         callee: ci.Cursor | None = cursor.referenced

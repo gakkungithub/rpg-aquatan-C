@@ -439,7 +439,7 @@ def main():
                 Item(
                     gvar_info["name"], 
                     gvar_info["line"], 
-                    gvar_info["value"],
+                    gvar_info["variable_value"],
                 )
             )
 
@@ -705,7 +705,8 @@ def main():
                             PLAYER.remove_itemvalue()
                             for stdin_variable_info in stdin_result["items"]:
                                 if (item := PLAYER.find_item_belong_to_player(stdin_variable_info["name"], stdin_variable_info["line"])) is not None:
-                                    item.update_value(stdin_variable_info["value"])
+                                    item.update_value(stdin_variable_info["variable_value"])
+                        
                         MSGWND.set(stdin_result['message'])
                     except (IndexError, ValueError):
                         MSGWND.set("ERROR...")
@@ -776,7 +777,7 @@ def main():
                     if itemWindow_expand_mouse_pos:
                         pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
                     elif itemWindow_scroll_mouse_pos:
-                        ITEMWND.is_inAction = True
+                        ITEMWND.is_in_action = True
                     end_timer()
 
                     if cmd == "pause" == BTNWND.is_clicked(event.pos):
@@ -2587,7 +2588,7 @@ class Player(Character):
                     
                     for variable_info in received_event["items"]:
                         if (item := self.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
-                            item.update_value(variable_info["value"])
+                            item.update_value(variable_info["variable_value"])
                     
                     self.append_analyzed_func_state(received_event["return_value"])
 
@@ -3456,44 +3457,48 @@ class MessageWindow(Window):
                         line = skip_result["line"]
                         is_not_event_found = True
                         for event in fieldmap.events:
-                            if isinstance(event, MoveEvent) and (execution_info := event.execution_info) and execution_info["line"] == line and execution_info.get("condition") is False:
-                                fieldmap.warp_player(fieldmap.name, *event.pos())
-                                skip_result['message'] += (
-                                    f'\fmoved to end of the {execution_info["type"]} statement line {line} !!' 
-                                    if ISENGLISH else 
-                                    f'\f{line}行の{execution_info["type"]}文の終了直前まで遷移しました!!'
-                                )
-                                is_not_event_found = False
-                                break
+                            if not (isinstance(event, MoveEvent) and (execution_info := event.execution_info) and execution_info["line"] == line and execution_info.get("condition") is False):
+                                continue
+
+                            fieldmap.warp_player(fieldmap.name, *event.pos())
+                            skip_result['message'] += (
+                                f'\fmoved to end of the {execution_info["type"]} statement line {line} !!' 
+                                if ISENGLISH else 
+                                f'\f{line}行の{execution_info["type"]}文の終了直前まで遷移しました!!'
+                            )
+                            is_not_event_found = False
+                            break
 
                         if is_not_event_found:
                             for chara in fieldmap.charas:
-                                if isinstance(chara, CharaCheckCondition) and chara.execution_info["line"] == line and chara.execution_info.get("condition") is False:
-                                    x, y = chara.pos()
+                                if not (isinstance(chara, CharaCheckCondition) and chara.execution_info["line"] == line and chara.execution_info.get("condition") is False):
+                                    continue
 
-                                    if chara.direction == DOWN:
-                                        y += 1
-                                    elif chara.direction == LEFT:
-                                        x -= 1
-                                    elif chara.direction == RIGHT:
-                                        x += 1
-                                    else:
-                                        y -= 1
+                                x, y = chara.pos()
 
-                                    fieldmap.warp_player(fieldmap.name, x, y)
-                                    skip_result['message'] += (
-                                        f'\fmoved to end of the {chara.execution_info["type"]} statement line {line} !!' 
-                                        if ISENGLISH else 
-                                        f'\f{line}行の{chara.execution_info["type"]}文の終了直前まで遷移しました!!'
-                                    )
-                                    is_not_event_found = False
-                                    break
+                                if chara.direction == DOWN:
+                                    y += 1
+                                elif chara.direction == LEFT:
+                                    x -= 1
+                                elif chara.direction == RIGHT:
+                                    x += 1
+                                else:
+                                    y -= 1
+
+                                fieldmap.warp_player(fieldmap.name, x, y)
+                                skip_result['message'] += (
+                                    f'\fmoved to end of the {chara.execution_info["type"]} statement line {line} !!' 
+                                    if ISENGLISH else 
+                                    f'\f{line}行の{chara.execution_info["type"]}文の終了直前まで遷移しました!!'
+                                )
+                                is_not_event_found = False
+                                break
 
                     self.set(skip_result['message'])
                     PLAYER.remove_itemvalue()
                     for variable_info in skip_result["items"]:
                         if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
-                            item.update_value(variable_info["value"])
+                            item.update_value(variable_info["variable_value"])
                 else:
                     self.sender.send_event(
                         Game2DebuggerEvent(
@@ -3535,7 +3540,7 @@ class MessageWindow(Window):
 
                     for variable_info in skip_result["items"]:
                         if (item := PLAYER.find_item_belong_to_player(variable_info["name"], variable_info["line"])) is not None:
-                            item.update_value(variable_info["value"])
+                            item.update_value(variable_info["variable_value"])
 
                     PLAYER.append_analyzed_func_state(skip_result["return_value"])
                 else:
@@ -3649,7 +3654,7 @@ class MessageWindow(Window):
                             Item(
                                 gvar_info["name"], 
                                 gvar_info["line"], 
-                                gvar_info["value"],
+                                gvar_info["variable_value"],
                             )
                         )
 
@@ -3663,7 +3668,7 @@ class MessageWindow(Window):
                                 Item(
                                     variable_info["name"], 
                                     variable_info["line"], 
-                                    variable_info["value"]
+                                    variable_info["variable_value"]
                                 )
                                 for variable_info in variable_info_list
                             ]
@@ -3933,7 +3938,7 @@ class ItemWindow(ScrollableWindow):
         self.check_comments_line: tuple[int, bool] = (-1, False)
         self.file_buttons: dict[str, pygame.Rect] = {}
         self.file_window = FileWindow()
-        self.is_inAction = True
+        self.is_in_action = True
         self.action_trigger_line_dict: dict[int, tuple[ItemValue, int]] = {}
 
     def draw_changed_itemvalue_rect(self, comments: str, local_y: int):
@@ -3987,7 +3992,7 @@ class ItemWindow(ScrollableWindow):
             icon_x = x
             if item.itemvalue.children:
                 self.draw_string(icon_x, y, '▼' if item.itemvalue.is_open else '▶', self.GREEN)
-                if self.is_inAction:
+                if self.is_in_action:
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
@@ -4040,7 +4045,7 @@ class ItemWindow(ScrollableWindow):
             icon_x = x
             if item.itemvalue.children and item.itemvalue.type != "FILE *":
                 self.draw_string(icon_x, y, '▼' if item.itemvalue.is_open else '▶', self.BLACK if is_item_changed else self.WHITE)
-                if self.is_inAction:
+                if self.is_in_action:
                     self.action_trigger_line_dict[y // 24] = (item.itemvalue, icon_x)
                 icon_x += 15
 
@@ -4091,8 +4096,8 @@ class ItemWindow(ScrollableWindow):
                     True
                 )
 
-        if self.is_inAction:
-            self.is_inAction = False
+        if self.is_in_action:
+            self.is_in_action = False
 
         # ウィンドウ名表示
         self.draw_base("ITEM" if ISENGLISH else "アイテム")
@@ -4125,7 +4130,7 @@ class ItemWindow(ScrollableWindow):
             icon_x = x
             if itemvalue.children:
                 self.draw_string(icon_x, y, '▼' if itemvalue.is_open else '▶', color)
-                if self.is_inAction:
+                if self.is_in_action:
                     self.action_trigger_line_dict[y // 24] = (itemvalue, icon_x)
                 icon_x += 15
 
@@ -4190,7 +4195,7 @@ class ItemWindow(ScrollableWindow):
         return y
 
     def is_cursor_in_window(self, pos: tuple[int, int]):
-        if self.is_inAction:
+        if self.is_in_action:
             return None
         
         local_pos = (pos[0] - self.x, pos[1] - self.y)
@@ -4208,7 +4213,7 @@ class ItemWindow(ScrollableWindow):
                 self.local_right_edge_x = 0
                 self.local_bottom_edge_y = 0
             self.action_trigger_line_dict[y_line][0].is_open = not self.action_trigger_line_dict[y_line][0].is_open
-            self.is_inAction = True
+            self.is_in_action = True
             self.action_trigger_line_dict = {}
             self.item_changed_lines = set()
             return None
@@ -4611,9 +4616,9 @@ class CodeElementWindow(Window):
         return y
 
     def get_reference_hover_comment(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_str_to_show_by_id: dict[int, str]):
-        if expr_part["type"] == "scalar":
+        if expr_part["category"] == "scalar":
             reference = expr_part["name"]
-        elif expr_part["type"] == "struct":
+        elif expr_part["category"] == "struct":
             reference = ".".join([*self.get_reference_hover_comment(expr_part["parent"], expr_str_to_show_by_id), *expr_part["members"]])
         else:
             # 計算結果を含めていない、計算式の文字列
@@ -4650,10 +4655,10 @@ class CodeElementWindow(Window):
     #     expr: list[ExprDescriptionPart]
     # endregion
     def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_description_str_to_show: list[HoverComment]):
-        if expr_part["type"] == "scalar":
+        if expr_part["category"] == "scalar":
             # scalar variableの結果自体は取得する必要がない
             reference = expr_part["name"]
-        elif expr_part["type"] == "struct":
+        elif expr_part["category"] == "struct":
             # struct variableの結果自体は取得する必要がない。
             struct_base = self.get_reference_expr_comments(expr_part["parent"], expr_description_str_to_show)
             reference = '.'.join([struct_base, *expr_part["members"]])
@@ -4722,8 +4727,8 @@ class CodeElementWindow(Window):
                 else:
                     str_to_show_list: list[str] = []
 
-                    for expr_part in expr_description["expr"]: # you need to check here
-                        if "type" in expr_part:
+                    for expr_part in expr_description["expr"]:
+                        if "category" in expr_part:
                             str_to_show_list.append(self.get_reference_expr_comments(expr_part, expr_description_str_to_show))
                         elif "text" in expr_part:
                             str_to_show_list.append(expr_part["text"])
@@ -4753,7 +4758,7 @@ class CodeElementWindow(Window):
                     '''
                     description_to_show_list: list[str] = []
                     for expr_part in expr_description["description"]:
-                        if "type" in expr_part:
+                        if "category" in expr_part:
                             # 後々ここで値を取得できるようにする(send_eventによって明らかになっていく感じ)
                             # description_to_show_list.append(f"{self.get_reference_expr_comments(expr_part, expr_description_str_to_show)}(={frame.EvaluateExpression(reference_description_base).GetValue()})")
                             # description_to_show_list.append(f"{self.get_reference_expr_comments(expr_part, expr_description_str_to_show)}")
@@ -5307,7 +5312,7 @@ class Item:
         self.name = name
         self.line = line
         # アイテムの追加なのでitemwindowの属性の初期化は必要ない
-        ITEMWND.is_inAction = True
+        ITEMWND.is_in_action = True
         self.itemvalue = ItemValue.from_dict(data)
 
     def get_value(self):
@@ -5329,10 +5334,10 @@ class Item:
             temp_itemvalue = temp_itemvalue.children[path.pop(0)]
         temp_itemvalue.changed_comments = comments
 
-    def update_value(self, data: dict):
+    def update_value(self, data: VariableValue):
         # 値を更新するだけなのでitemwindowの属性の初期化は必要ない
-        ITEMWND.is_inAction = True
-        self.itemvalue = ItemValue.from_dict(data)
+        ITEMWND.is_in_action = True
+        self.itemvalue.update_itemvalue(data)
 
     def remove_itemvalue_comments(self):
         self.itemvalue.remove_comments()
@@ -5356,13 +5361,25 @@ class ItemValue:
         self.children = children
 
     @classmethod
-    def from_dict(cls, data: VariableValueWComment | VariableValue) -> ItemValue:
+    def from_dict(cls, data: VariableValueWComment) -> ItemValue:
         value: str | None = data["value"]
-        type = data.get("type", None)
-        itemvalue_comments = data["comment"] if "comment" in data else None
+        type = data["type"]
+        itemvalue_comments = data["comment"]
         children = {name: cls.from_dict(value) for name, value in data["children"].items()}
         return cls(value, type, itemvalue_comments, children)
-    
+
+    # Debugger2GameEventの"items"キーの値による一括更新
+    # typeは更新しない (Unionなどの場合はどうするかは後で考える)
+    def update_itemvalue(self, data: VariableValue):
+        self.value = data["value"]
+        self.is_open = True
+        self.declared_comments = None
+        self.changed_comments = None
+        for name, value in data["children"].items():
+            if name not in self.children:
+                sys.exit(f"itemvalue of {name} is not found")
+            self.children[name].update_itemvalue(value)
+
     def remove_comments(self):
         self.declared_comments = None
         self.changed_comments = None

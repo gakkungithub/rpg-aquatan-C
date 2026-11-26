@@ -26,23 +26,26 @@ class TextPart(TypedDict):
 
 class ScalarVariablePart(TypedDict):
     name: str
-    type: Literal["scalar"]
+    category: Literal["scalar"]
+    value_type: str
 
 class StructVariablePart(TypedDict):
     parent: ScalarVariablePart | ArrayVariablePart
-    type: Literal["struct"]
+    category: Literal["struct"]
     members: list[str]
+    value_type: str
 
 class ArrayVariablePart(TypedDict):
     parent: ScalarVariablePart | StructVariablePart
-    type: Literal["array"]
+    category: Literal["array"]
     indexes: list[ExprIdPart | TextPart]
+    value_type: str
 
 class MacroPart(TypedDict):
     macro: str
 
 class UnaryExprPart(TypedDict):
-    operator: Literal["+", "-", "!", "~", "&", "*", "++", "--"]
+    operator: Literal["+", "-", "!", "~", "++", "--"]
     operand_id: int
     is_front_operator: bool
 
@@ -76,6 +79,7 @@ class Comment(TypedDict):
     id: int
     comment: ExprDescription | FunctionComment
     execution_condition: dict[int | str, bool]
+    expr_type: str
 
 class ExprDescription(TypedDict):
     description: list[ExprDescriptionPart]

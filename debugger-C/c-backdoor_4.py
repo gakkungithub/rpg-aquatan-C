@@ -43,6 +43,12 @@ def evaluate_expression_wrapper(frame: lldb.SBFrame, expression: str):
 def evaluate_expression(frame: lldb.SBFrame, expression: str) -> str | None:
     return evaluate_expression_wrapper(frame, expression).GetValue()
 
+def evaluate_expression_address(frame: lldb.SBFrame, expression: str) -> str:
+    result = evaluate_expression_wrapper(frame, expression).GetValueAsUnsigned()
+    if not isinstance(result, int):
+        return ""
+    return str(hex(result))
+
 def get_thread(frame: lldb.SBFrame):
     sb_thread = frame.GetThread()
     if not isinstance(sb_thread, lldb.SBThread):
@@ -67,12 +73,24 @@ def get_target(process: lldb.SBProcess):
         sys.exit("invalid SBTarget is found")
     return sb_target
 
+def get_sb_value_type(value: lldb.SBValue):
+    sb_type = value.GetType()
+    if not (isinstance(sb_type, lldb.SBType) and sb_type.IsValid()):
+        sys.exit("invalid SBType is found")
+    return sb_type
+
+def dereference_sb_value(value: lldb.SBValue):
+    dereferenced_value = value.Dereference()
+    if not isinstance(dereferenced_value, lldb.SBValue):
+        sys.exit("invalid dereferenced SBValue is found")
+    return dereferenced_value
+
 # 計算式解析ハンドラクラス
 class DynamicCommentHandler:
     def __init__(self, comments: list[Comment], side_effect_values: dict[str, SideEffectValue] | None = None):
         # a (=5) + b (=4) のような、変数(計算式)とその値を表示する文字列を、途中式のidごとに記録する
         # 計算式の評価がどうなろうと、このリストの内容は一定(計算式の生文字列)なので初期化時に全て取得しておく
-        self.expr_str_to_show_by_id: list[str] = self.get_str_base(comments)
+        self.expr_str_to_show_by_id = self.get_str_base(comments)
         # 分析初期化メソッドでリセットする
         self.initialize_analysis(comments)
         # 演算子による副作用後の値を登録する (計算中に使われる値と、計算後の値)
@@ -113,7 +131,7 @@ class DynamicCommentHandler:
                 expr_str_base_list_by_part: list[str] = []
 
                 for expr_part in expr_description["expr"]:
-                    if "type" in expr_part:
+                    if "category" in expr_part:
                         expr_str_base_list_by_part.append(self.get_reference_str_base(expr_part, expr_str_base_list))
                     elif "text" in expr_part:
                         expr_str_base_list_by_part.append(expr_part["text"])
@@ -140,10 +158,10 @@ class DynamicCommentHandler:
 
     # 変数そのものの文字列を取得する
     def get_reference_str_base(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_str_to_show_by_id: list[str]):
-        if expr_part["type"] == "scalar":
+        if expr_part["category"] == "scalar":
             # scalar variableの結果自体は取得する必要がない
             reference = expr_part["name"]
-        elif expr_part["type"] == "struct":
+        elif expr_part["category"] == "struct":
             # struct variableの結果自体は取得する必要がない。
             struct_base = self.get_reference_str_base(expr_part["parent"], expr_str_to_show_by_id)
             reference = '.'.join([struct_base, *expr_part["members"]])
@@ -220,10 +238,11 @@ class DynamicCommentHandler:
                 special_operator: Literal["||", "&&", "?"] | None = None
 
                 for expr_part in expr_description["expr"]:
-                    if "type" in expr_part:
+                    if "category" in expr_part:
                         reference_str_base, reference_str_to_show = self.get_reference_expr_comments(expr_part, frame)
-                        str_for_evaluation_list.append(reference_str_base)
-                        str_to_show_list.append(f"<{reference_str_to_show}>(={evaluate_expression(frame, reference_str_base)})")
+                        result_str_to_show = self.get_variable_value(frame, reference_str_base, expr_part["value_type"])
+                        str_for_evaluation_list.append(result_str_to_show)
+                        str_to_show_list.append(f"<{reference_str_to_show}>(={result_str_to_show})")
                     elif "text" in expr_part:
                         if expr_part["text"] in ("||", "&&", "?"):
                             if special_operator is not None:
@@ -296,15 +315,15 @@ class DynamicCommentHandler:
                                     current_value_str = current_value_str,
                                     result_value_str = current_value_str
                                 )
-                        
                         str_for_evaluation_list.append(current_value_str)
                         str_to_show_list.append(f"<{str_to_show_base}>(={current_value_str})")
                     elif "addr_operator" in expr_part:
                         str_to_show_base = self.get_expr_to_show(expr_part["operand_id"] + 1)
-                        if expr_part["addr_operator"] == "*":
-                            value = self.get_value_at_address(frame, expr_part)
-                        else:
-                            value = evaluate_expression(frame, f"{expr_part["addr_operator"]}{self.get_str_for_evaluation(expr_part["operand_id"])}")
+                        value = (
+                            self.get_value_at_address(frame, expr_part)
+                            if expr_part["addr_operator"] == "*" else
+                            evaluate_expression(frame, f"{expr_part["addr_operator"]}{self.get_str_for_evaluation(expr_part["operand_id"])}")
+                        )
                         str_for_evaluation_list.append(value)
                         str_to_show_list.append(f"<{str_to_show_base}>(={value})")
                     else: # expr_id
@@ -324,7 +343,7 @@ class DynamicCommentHandler:
                 '''
                 description_to_show_list = []
                 for expr_part in expr_description["description"]:
-                    if "type" in expr_part:
+                    if "category" in expr_part:
                         reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, frame)
                         value = evaluate_expression(frame, reference_description_base)
                         description_to_show_list.append(
@@ -367,8 +386,13 @@ class DynamicCommentHandler:
                         sys.exit("all expression parts have to be calculated")
                     str_for_evaluation: str = " ".join(str_for_evaluation_list)
 
-            self.expr_result_by_id[self.index_scanned_currently] = evaluate_expression(frame, str_for_evaluation)
-            self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{self.get_expr_to_show(self.index_scanned_currently)}: {description_to_show}'
+            if comment["expr_type"].count('*') + comment["expr_type"].count('['):
+                print(comment["expr_type"])
+                self.expr_result_by_id[self.index_scanned_currently] = evaluate_expression_address(frame, str_for_evaluation)
+            else:
+                self.expr_result_by_id[self.index_scanned_currently] = evaluate_expression(frame, str_for_evaluation)
+            expr_to_show = self.get_expr_to_show(self.index_scanned_currently)
+            self.expr_description_to_show_by_id[self.index_scanned_currently] = f'{expr_to_show}: {description_to_show}' if len(description_to_show) else expr_to_show
             self.str_for_evaluation_by_id[self.index_scanned_currently] = str_for_evaluation
 
             self.index_scanned_currently += 1
@@ -392,11 +416,11 @@ class DynamicCommentHandler:
         return evaluate_expression_wrapper(frame, f"(int)!!({value})").GetValueAsSigned() != 0
 
     def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, frame: lldb.SBFrame):
-        if expr_part["type"] == "scalar":
+        if expr_part["category"] == "scalar":
             # scalar variableの結果自体は取得する必要がない
             reference = expr_part["name"]
             reference_w_result = reference
-        elif expr_part["type"] == "struct":
+        elif expr_part["category"] == "struct":
             # struct variableの結果自体は取得する必要がない。
             struct_base, struct_base_w_result = self.get_reference_expr_comments(expr_part["parent"], frame)
             reference = '.'.join([struct_base, *expr_part["members"]])
@@ -420,6 +444,37 @@ class DynamicCommentHandler:
             reference_w_result = ''.join([reference_top_w_result, *reference_index_to_show_list])
         return reference, reference_w_result
 
+    def get_variable_value(self, frame: lldb.SBFrame, reference_str_base: str, value_type: str) -> str | None:
+        data_value = frame.FindVariable(reference_str_base)
+
+        if not (isinstance(data_value, lldb.SBValue) and data_value.IsValid()):
+            data_value = evaluate_expression_wrapper(frame, reference_str_base)
+
+        if not (isinstance(data_value, lldb.SBValue) and data_value.IsValid()):
+            sys.exit(f"data value is not found for variable {reference_str_base}")
+
+        pointer_count = 0
+        pointer_count += value_type.count('*')
+        pointer_count += value_type.count('[')
+
+        result_value = data_value.GetValue()
+        if pointer_count == 0 or result_value is not None:
+            return result_value
+
+        pointee = data_value
+        for _ in range(pointer_count):
+            if get_sb_value_type(pointee).IsPointerType():
+                pointee = dereference_sb_value(pointee)
+            else:
+                pointee = pointee.AddressOf()
+                if not isinstance(pointee, lldb.SBValue):
+                    sys.exit("invalid dereferenced SBValue is found")
+
+            if not pointee.IsValid():
+                sys.exit("invalid dereferenced SBValue is found")
+
+        return str(hex(pointee.GetValueAsUnsigned()))
+    
     def get_expr_result(self, index: int = -1):
         if index >= len(self.expr_result_by_id):
             sys.exit("error in id number for getting expression result")
@@ -454,7 +509,7 @@ class DynamicCommentHandler:
 
         sb_type = target.FindFirstType(base_type_name)
 
-        if not (isinstance(sb_type, lldb.SBType) and not sb_type.IsValid()):
+        if not (isinstance(sb_type, lldb.SBType) and sb_type.IsValid()):
             sys.exit(f"invalid type: {base_type_name}")
 
         for i in range(pointer_count):
@@ -465,11 +520,11 @@ class DynamicCommentHandler:
         if (operand_address_str := self.get_expr_result(addr_operand_part["operand_id"])) is None:
             sys.exit("result of operand of unary expression is not found")
         operand_address = lldb.SBAddress(int(operand_address_str, 16), target)
-        
+
         sb_value = target.CreateValueFromAddress(
             "value",
             operand_address,
-            result_type
+            sb_type
         )
 
         if not (isinstance(sb_value, lldb.SBValue) and sb_value.IsValid()):
@@ -1259,12 +1314,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         print("Disconnected from the client" if args.english else "クライアントとの接続が切れました")
 
     class VarPreviousValue:
-        def __init__(self, value=None, address=None):
-            self.value: str | None = value
+        def __init__(self, value: str | None = None, address: int | None = None):
+            self.value = value
             self.address = address
             self.children: dict[str, VarPreviousValue] = {}  # 配列の添字や構造体のメンバ
 
-        def update_value(self, value, address):
+        def update_value(self, value: str | None, address: str | None):
             """LLDBのSBValueから最新値を更新"""
             self.value = value
             self.address = address
@@ -1360,9 +1415,11 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             for dynamic_variable_info in dynamic_variable_info_list:
                 dynamic_variable_info["current_comment_w_index"] = None
                 dynamic_variable_info["skipped_function_list"] = []
-                if (dynamic_comment_handler_w_index := self.analyze_var_expr_comments(dynamic_variable_info["dynamic_var_node"], dynamic_variable_info["skipped_function_list"], frame)):
-                    dynamic_variable_info["current_comment_w_index"] = dynamic_comment_handler_w_index
-                    break
+
+                if (dynamic_comment_handler_w_index := self.analyze_var_expr_comments(dynamic_variable_info["dynamic_var_node"], dynamic_variable_info["skipped_function_list"], frame)) is None:
+                    continue
+                dynamic_variable_info["current_comment_w_index"] = dynamic_comment_handler_w_index
+                break
 
             self.dynamic_variable_info_by_line[line_number] = dynamic_variable_info_list
   
@@ -1383,6 +1440,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             )
         
         def analyze_var_expr_comments(self, var_node: DynamicVarNode, skipped_function_list_by_part: list[list[str]], frame: lldb.SBFrame) -> tuple[DynamicCommentHandler, int] | None:
+            # コメントの解析が終了している階層はset_expr_commentsすることなく次の階層に遷移する
             if var_node["is_analysis_completed"]:
                 skipped_function_list_by_part.append([])
             else:
@@ -1402,19 +1460,44 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     var_node["is_analysis_completed"] = True
             
             for child_var_node in var_node["children"]:
+                if child_var_node["name"] == "*" and child_var_node["comments"] is None:
+                    address_str = var_node["comments"].get_expr_result()
+                    print("address:", address_str, "type:", child_var_node["type"])
+                    # child_var_node["comments"] = DynamicCommentHandler(
+                    #     comments = [
+                    #         Comment(
+                    #             id = 0,
+                    #             comment = ExprDescription(
+                    #                 description = [
+                    #                     TextPart(
+                    #                         text = ""
+                    #                     )
+                    #                 ],
+                    #                 expr = [
+
+                    #                 ]
+                    #             )
+                    #         )
+                    #     ]
+                    # )
                 if (dynamic_comment_handler_w_index := self.analyze_var_expr_comments(child_var_node, skipped_function_list_by_part, frame)):
                     return dynamic_comment_handler_w_index
             
             return None
           
         def get_reference_expr_comments(self, expr_part: ScalarVariablePart | StructVariablePart | ArrayVariablePart, expr_result_by_id: dict[int, any], expr_str_to_show_by_id: dict[int, str], frame: lldb.SBFrame):
-            if expr_part["type"] == "scalar":
+            if expr_part["category"] == "scalar":
                 # scalar variableの結果自体は取得する必要がない
                 reference = expr_part["name"]
                 reference_w_result = reference
-            elif expr_part["type"] == "struct":
+            elif expr_part["category"] == "struct":
                 # struct variableの結果自体は取得する必要がない。
-                struct_base, struct_base_w_result = self.get_reference_expr_comments(expr_part["parent"], expr_result_by_id, expr_str_to_show_by_id, frame)
+                struct_base, struct_base_w_result = self.get_reference_expr_comments(
+                    expr_part["parent"], 
+                    expr_result_by_id, 
+                    expr_str_to_show_by_id, 
+                    frame
+                )
                 reference = '.'.join([struct_base, *expr_part["members"]])
                 reference_w_result = '.'.join([struct_base_w_result, *expr_part["members"]])
             else: # array
@@ -1431,7 +1514,12 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         # text
                         reference_index_to_show_list.append(f"[{index_part["text"]}]")
                         reference_index_base_list.append(f"[{index_part["text"]}]")
-                reference_top, reference_top_w_result = self.get_reference_expr_comments(expr_part["parent"], expr_result_by_id, expr_str_to_show_by_id, frame)
+                reference_top, reference_top_w_result = self.get_reference_expr_comments(
+                    expr_part["parent"], 
+                    expr_result_by_id, 
+                    expr_str_to_show_by_id, 
+                    frame
+                )
                 reference = ''.join([reference_top, *reference_index_base_list])
                 reference_w_result = ''.join([reference_top_w_result, *reference_index_to_show_list])
             return reference, reference_w_result
@@ -1479,9 +1567,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     var_previous_values[(name, line)] = VarPreviousValue(value, address)
 
                 num_children = var.GetNumChildren()
-                
-                if var.GetType().IsPointerType():
-                    pointee_type = var.GetType().GetPointeeType()
+
+                var_type = get_sb_value_type(var)
+                if var_type.IsPointerType():
+                    pointee_type = var_type.GetPointeeType()
                     type_name = pointee_type.GetName()
 
                     try:
@@ -1547,7 +1636,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     print(f"→ {full_name} points to unreadable double*")
                             else:
                                 # 構造体などの場合
-                                deref = var.Dereference()
+                                deref = dereference_sb_value(var)
                                 if deref.IsValid() and deref.GetNumChildren() > 0:
                                     print(f"→ Deref {full_name}")
                                     self.track([deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())], var_previous_values[(name, line)].children, [name], line, full_name)
@@ -1576,7 +1665,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             indent = "    " * depth
 
             for var in vars:
-                name = '*' if var.GetType().IsPointerType() else var.GetName() 
+                name = '*' if get_sb_value_type(var).IsPointerType() else var.GetName() 
                 full_name = f"{prefix}.{name}"
                 value = var.GetValue()
                 address = var.GetLoadAddress()
@@ -1610,9 +1699,10 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     var_previous_values[name] = VarPreviousValue(value, address)
 
                 num_children = var.GetNumChildren()
-                
-                if var.GetType().IsPointerType():
-                    pointee_type = var.GetType().GetPointeeType()
+
+                var_type = get_sb_value_type(var)
+                if var_type.IsPointerType():
+                    pointee_type = var_type.GetPointeeType()
                     type_name = pointee_type.GetName()
 
                     try:
@@ -1702,7 +1792,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     print(f"{indent}→ {full_name} points to unreadable double*")
                             else:
                                 # 構造体などの場合
-                                deref = var.Dereference()
+                                deref = dereference_sb_value(var)
                                 if deref.IsValid() and deref.GetNumChildren() > 0:
                                     print(f"{indent}→ Deref {full_name}")
                                     children = [deref.GetChildAtIndex(i) for i in range(deref.GetNumChildren())]
@@ -1721,23 +1811,23 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 VariableInfo(
                     name = var_key[0],
                     line = var_key[1],
-                    value = VariableValue(
+                    variable_value = VariableValue(
                         value = self.previous_values[-1][var_key].value,
-                        children = self.get_value_dict(self.previous_values[-1][var_key].children)
+                        children = self.get_value_by_part(self.previous_values[-1][var_key].children)
                     )
                 )
                 for var_key in self.vars_declared[-1] if var_key in self.previous_values[-1]
             ]
         
-        def get_value_each_frame(self):
+        def get_value_by_frame(self):
             return [
                 [
                     VariableInfo(
                         name = var_key[0],
                         line = var_key[1],
-                        value = VariableValue(
+                        variable_value = VariableValue(
                             value = self.previous_values[i][var_key].value,
-                            children = self.get_value_dict(self.previous_values[i][var_key].children)
+                            children = self.get_value_by_part(self.previous_values[i][var_key].children)
                         )
                     )
                     for var_key in self.vars_declared[i] if var_key in self.previous_values[i]
@@ -1750,21 +1840,21 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 VariableInfo(
                     name = var_key[0],
                     line = var_key[1],
-                    value = VariableValue(
+                    variable_value = VariableValue(
                         value = global_previous_value.value, 
-                        children = self.get_value_dict(global_previous_value.children)
+                        children = self.get_value_by_part(global_previous_value.children)
                     )
                 )
                 for var_key, global_previous_value in self.global_previous_values.items()
             ]
 
-        def get_value_dict(self, previous_values: dict[str, VarPreviousValue]):
+        def get_value_by_part(self, previous_values: dict[str, VarPreviousValue]):
             return {
-                var_name: VariableValue(
+                var_part: VariableValue(
                     value = previous_value.value, 
-                    children = self.get_value_dict(previous_value.children)
+                    children = self.get_value_by_part(previous_value.children)
                 )
-                for var_name, previous_value in previous_values.items()
+                for var_part, previous_value in previous_values.items()
             }
         
         def get_value_partly(self, var_name: tuple[str, int], value_path: list[str]):
@@ -1774,18 +1864,41 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 temp_previous_value = temp_previous_value.children[children_name]
             return temp_previous_value.value
 
-        def get_declared_var_value_w_comment(self, var_node: DynamicVarNode):
+        def get_declared_var_value_w_comment(self, var: tuple[str, int], var_node: DynamicVarNode):
+            var_previous_value = self.previous_values[-1].get(var)
+            return self.get_declared_var_value_w_comment_by_part(var_node, var_previous_value)
+
+        def get_declared_var_value_w_comment_by_part(self, var_node: DynamicVarNode, previous_value: VarPreviousValue | None,):
+            print(previous_value.value if previous_value else previous_value)
             dynamic_comment_handler = var_node["comments"]
-            print(var_node["name"], [child["name"] for child in var_node["children"]], dynamic_comment_handler.get_expr_result() if dynamic_comment_handler else None)
+
+            if dynamic_comment_handler:
+                value = dynamic_comment_handler.get_expr_result() or (previous_value.value if previous_value else None)
+            else:
+                value = previous_value.value if previous_value else None
+
+            comment = (
+                dynamic_comment_handler.get_str_after_analysis_completed()
+                if dynamic_comment_handler
+                else None
+            )
+
+            previous_value_children = previous_value.children if previous_value is not None else {}
+
+            children = {
+                child["name"]: self.get_declared_var_value_w_comment_by_part(
+                    child,
+                    previous_value_children.get(child["name"])
+                )
+                for child in var_node["children"]
+            }
+
             return VariableValueWComment(
-                value = dynamic_comment_handler.get_expr_result() if dynamic_comment_handler else None, # previous_valueで取得するかは後で考える
-                type = var_node["type"],
-                comment = dynamic_comment_handler.get_str_after_analysis_completed() if dynamic_comment_handler else None,
-                children = {
-                    child["name"] : self.get_declared_var_value_w_comment(child)
-                    for child in var_node["children"]
-                },
-                initialized = var_node["initialized"]
+                value=value,
+                type=var_node["type"],
+                comment=comment,
+                children=children,
+                initialized=var_node["initialized"],
             )
 
         def get_arg_value(self, var_info: VarInfo, comment: str | None):
@@ -2001,7 +2114,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         self.switch_expr_status_handler = None
                                 
             self.thread = get_thread(self.frame)
-            self.process = self.thread.GetProcess()
+            self.process = get_process(self.thread)
 
             # 初期化されない変数や静的変数はスキップされるので、そのステップを後追いで見る
             while len(self.skipped_var_declaration_lines):
@@ -2395,8 +2508,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             if self.is_end:
                 return
 
-            # これだとスコープ外の変数を拾ってしまうことがある
-            # for文の条件文内の宣言だとfalseの時にself.vars_tracker.declared_variables_by_line.get(str(self.line_number), [])でスコープ外の変数を取得してしまうことがある
+            # これだとスコープ外の変数を拾ってしまうことがある (for文から出た時など)
             if is_for_false:
                 declared_vars = []
             else:
@@ -2499,7 +2611,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     message = f"You got item {var[0]} !!" if self.is_english else f"アイテム {var[0]} を正確に取得できました!!",
                     status = "ok",
                     item = DeclaredVariableInfo(
-                        value = self.vars_tracker.get_declared_var_value_w_comment(dynamic_variable_info["dynamic_var_node"]),
+                        value = self.vars_tracker.get_declared_var_value_w_comment(var, dynamic_variable_info["dynamic_var_node"]),
                         line = var[1]
                     ),
                     skipped_function_list = dynamic_variable_info["skipped_function_list"]
@@ -2972,7 +3084,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                     message = "",
                     status = "rollback_success", 
                     gvars = self.vars_tracker.get_global_value(), 
-                    vars = self.vars_tracker.get_value_each_frame()
+                    vars = self.vars_tracker.get_value_by_frame()
                 )
 
                 # ゲーム側で行番は取得済みなのでget_lineフラグはFalseにする

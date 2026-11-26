@@ -170,7 +170,7 @@ class VariableValueWComment(TypedDict):
 class VariableInfo(TypedDict):
     name: str
     line: int
-    value: VariableValue
+    variable_value: VariableValue
 
 class VariableValue(TypedDict):
     value: str | None
