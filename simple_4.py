@@ -1443,7 +1443,7 @@ class Map:
 
     def load_map_data(self, name: str):
         """json形式のマップ・イベントを読み込む"""
-        # ここのファイル名は後々変える -----------------------------------------------------------
+        ### ここのファイル名は後々変える
         file = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 
             "mapdata_for_test", 
@@ -2935,14 +2935,16 @@ class MessageEngine:
 
     def draw_character(self, screen, pos, ch):
         """1文字だけ描画する"""
-        if ch not in [" ", "　"]:
-            x, y = pos
-            try:
-                surf, rect = self.myfont.render(ch, self.color)
-                screen.blit(surf, (x, y+(self.FONT_HEIGHT//2) - rect[3]//2))
+        if ch in [" ", "　"]:
+            return
+        
+        x, y = pos
+        try:
+            surf, rect = self.myfont.render(ch, self.color)
+            screen.blit(surf, (x, y+(self.FONT_HEIGHT//2) - rect[3]//2))
 #                screen.blit(self.myfont.render(ch,self.color)[0],(x,y))
-            except KeyError:
-                print(f"描画できない文字があります:{ch}")
+        except KeyError:
+            print(f"描画できない文字があります:{ch}")
 
     def draw_string(self, screen, pos, string):
         """文字列を描画"""
@@ -3059,9 +3061,12 @@ class ScrollableWindow(Window):
             surf, _ = self.font.render('◀', self.STRING_COLOR)
             self.surface.blit(surf, (10, self.height-16))
         if self.rect[2] - self.local_right_edge_x < self.offset_x < 10:
-            pygame.draw.circle(self.surface, self.STRING_COLOR,
-                            (self.font_size*2 + (self.width-self.font_size*6) * (10 - self.offset_x) / -(self.width - (maxWidth or self.local_right_edge_x)), self.height-self.font_size), 
-                                self.KNOB_SIZE)
+            pygame.draw.circle(
+                self.surface, 
+                self.STRING_COLOR,
+                (self.font_size*2 + (self.width-self.font_size*6) * (10 - self.offset_x) / -(self.width - (maxWidth or self.local_right_edge_x)), self.height-self.font_size), 
+                self.KNOB_SIZE
+            )
 
         if self.offset_y + self.local_bottom_edge_y > self.rect[3]:
             surf, _ = self.font.render('▼', self.STRING_COLOR)
@@ -3070,9 +3075,12 @@ class ScrollableWindow(Window):
             surf, _ = self.font.render('▲', self.STRING_COLOR)
             self.surface.blit(surf, (self.width-16, 10))
         if self.rect[3] - self.local_bottom_edge_y < self.offset_y < 10:
-            pygame.draw.circle(self.surface, self.STRING_COLOR,
-                            (self.width-self.font_size, self.font_size*2 + (self.height-self.font_size*6) * (10 - self.offset_y) / -(self.height - (maxHeight or self.local_bottom_edge_y))), 
-                                self.KNOB_SIZE)
+            pygame.draw.circle(
+                self.surface, 
+                self.STRING_COLOR,
+                (self.width-self.font_size, self.font_size*2 + (self.height-self.font_size*6) * (10 - self.offset_y) / -(self.height - (maxHeight or self.local_bottom_edge_y))), 
+                self.KNOB_SIZE
+            )
 
 #                                                                                                                      
 # 88888888ba,   88                  I8,        8        ,8I 88                      88                                 
@@ -3308,10 +3316,11 @@ class MessageWindow(Window):
                 var_path, self.var_quiz_answer = self.var_quiz_list.pop(0)
                 varname = var_path[0]
                 for var_path_element in var_path[1:]:
-                    if var_path_element[0] in ('[', '*'):
-                        varname += var_path_element
-                    else:
-                        varname += '.' + var_path_element
+                    varname += (
+                        var_path_element
+                        if var_path_element[0] in ('[', '*') else
+                        '.' + var_path_element
+                    )
                 message_list.append(f"value of \"{varname}\" has changed ?" if ISENGLISH else f"「{varname}」 は 値が変わりましたか?")
 
         if len(message_list) or choice_messages:
@@ -3872,12 +3881,12 @@ class FileWindow(Window):
 
     def __init__(self):
         Window.__init__(self, pygame.Rect(SBW_WIDTH // 3, 10, SBW_WIDTH // 3 , SBW_HEIGHT // 2))
-        self.is_visible = False  # ウィンドウを表示中か？
+        self.is_visible: bool = False  # ウィンドウを表示中か？
         self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
-        self.filename = None
+        self.filename: str | None = None
         self.filelines = []
 
-    def toggle_is_visible(self, filename):
+    def toggle_is_visible(self, filename: str):
         if filename == self.filename:
             self.is_visible = False
             self.filename = None
@@ -3887,10 +3896,12 @@ class FileWindow(Window):
             self.read_filelines()
 
     def read_filelines(self):
-        if self.filename:
-            time.sleep(0.1)
-            with open(f"debugger-C/{self.filename[1:-1]}", "r", encoding="utf-8") as f:
-                self.filelines = f.read().splitlines()
+        if self.filename is None:
+            return
+        
+        time.sleep(0.1)
+        with open(f"debugger-C/{self.filename[1:-1]}", "r", encoding="utf-8") as f:
+            self.filelines = f.read().splitlines()
 
     def draw_string(self, x, y, string):
         """文字列出力"""
@@ -3898,13 +3909,15 @@ class FileWindow(Window):
         self.surface.blit(surf, (x, y+(self.FONT_SIZE+2)-rect[3]))
 
     def draw(self, screen):
-        if self.is_visible:
-            Window.draw(self)
-            offset_y = 10
-            for fileline in self.filelines:
-                self.draw_string(10, offset_y, fileline)
-                offset_y += 24
-            Window.blit(self, screen)
+        if not self.is_visible:
+            return
+        
+        Window.draw(self)
+        offset_y = 10
+        for fileline in self.filelines:
+            self.draw_string(10, offset_y, fileline)
+            offset_y += 24
+        Window.blit(self, screen)
 
 #                                                                                                                          
 # 88                                    I8,        8        ,8I 88                      88                                 
@@ -4312,11 +4325,13 @@ class CharaReturn(Character):
         
     def draw(self, screen, offset):
         super().draw(screen, offset)
-        if self.execution_info["line"] == PLAYER.sender.programCodeWindow.linenum:
-            offset_x, offset_y = offset
-            px = self.rect.topright[0] - 14
-            py = self.rect.topright[1] - 22
-            screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
+        if self.execution_info["line"] != PLAYER.sender.programCodeWindow.linenum:
+            return
+        
+        offset_x, offset_y = offset
+        px = self.rect.topright[0] - 14
+        py = self.rect.topright[1] - 22
+        screen.blit(pygame.image.load(resource_path("comment.png")).convert_alpha(), (px-offset_x, py-offset_y))
                                                                                                                                                                                                    
 #   ,ad8888ba,  88                                             ,ad8888ba,  88                                88         ,ad8888ba,                                   88 88         88                          
 #  d8"'    `"8b 88                                            d8"'    `"8b 88                                88        d8"'    `"8b                                  88 ""   ,d    ""                          
@@ -5337,7 +5352,7 @@ class Item:
     def update_value(self, data: VariableValue):
         # 値を更新するだけなのでitemwindowの属性の初期化は必要ない
         ITEMWND.is_in_action = True
-        self.itemvalue.update_itemvalue(data)
+        self.itemvalue.update(data)
 
     def remove_itemvalue_comments(self):
         self.itemvalue.remove_comments()
@@ -5370,7 +5385,7 @@ class ItemValue:
 
     # Debugger2GameEventの"items"キーの値による一括更新
     # typeは更新しない (Unionなどの場合はどうするかは後で考える)
-    def update_itemvalue(self, data: VariableValue):
+    def update(self, data: VariableValue):
         self.value = data["value"]
         self.is_open = True
         self.declared_comments = None
@@ -5378,7 +5393,7 @@ class ItemValue:
         for name, value in data["children"].items():
             if name not in self.children:
                 sys.exit(f"itemvalue of {name} is not found")
-            self.children[name].update_itemvalue(value)
+            self.children[name].update(value)
 
     def remove_comments(self):
         self.declared_comments = None

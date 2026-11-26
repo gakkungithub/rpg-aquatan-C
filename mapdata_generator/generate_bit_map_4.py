@@ -1189,7 +1189,6 @@ class BitMapGenerator:
             self.func_name = func_name
             self.track_function_entry(next_func_info)
 
-    # 条件文や繰り返し文の終わりだけは色々なノードから辿り着けるので、pop_next_node_infoメソッドではなくnext_node_info.get(nodeID, [])で取得する
     def track_function_body(self, crnt_room_nodeID: str, nodeID: str, condition_comment_window_info: TempCommentWindowInfo | None = None, previous_line: int | tuple[int, int] | None = None):
         # if文とdo_while文とswitch文
         if self.get_node_shape(nodeID) == 'diamond':
@@ -1763,10 +1762,16 @@ class BitMapGenerator:
                 )
         # while文とfor文のワープ元である部屋のIDを取得する
         elif self.get_node_shape(nodeID) == 'parallelogram':
-            loopBack_nodeID_info = self.nextNodeInfo.get(nodeID)
+            loop_back_line = int(self.get_node_label(nodeID))
 
-            if loopBack_nodeID_info is None:
-                sys.exit("there is a loopBackID at a parallelogram node")
+            ### ここで、previous_lineとloop_back_lineをくっつける
+            self.set_next_line(previous_line, loop_back_line)
+
+            loopBack_nodeID_info = self.pop_next_node_info(nodeID)
+
+            if len(loopBack_nodeID_info) == 0:
+                return
+            
             if len(loopBack_nodeID_info) != 1:
                 sys.exit("number of nodes connected from a parallelogram node has to be 1")
             
@@ -1776,7 +1781,7 @@ class BitMapGenerator:
                 sys.exit("shape of loopBack node has to be pentagon")
             if (loopBack_expr_node_info := self.get_expr_node_info(loopBackID)) is None:
                 sys.exit(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
-            if int(self.get_node_label(nodeID)) != loopBack_expr_node_info["line"]:
+            if int(self.get_node_label(nodeID)) != loop_back_line:
                 sys.exit("line of execution looped back is incorrect")
 
             # for(A; B; C) について、Cがある場合　と　それ以外 (forでCがない場合と、whileの場合)で区別する
@@ -1784,13 +1789,13 @@ class BitMapGenerator:
                 comment_window_info = self.create_comment_window_info(
                     "cond-in-change",
                     detail = [
-                        [f"if next is check of {self.get_node_label(loopBackID)}", f"in line {loopBack_expr_node_info["line"]}"], 
-                        ["execute", f"of line {loopBack_expr_node_info["line"]}"]
+                        [f"if next is check of {self.get_node_label(loopBackID)}", f"in line {loop_back_line}"], 
+                        ["execute", f"of line {loop_back_line}"]
                     ]
                     if self.is_english else 
                     [
-                        [f"次が{loopBack_expr_node_info["line"]}行目の{self.get_node_label(loopBackID)}文の", "の真偽の確認処理なら"], 
-                        [f"{loopBack_expr_node_info["line"]}行目の", "を実行して"]
+                        [f"次が{loop_back_line}行目の{self.get_node_label(loopBackID)}文の", "の真偽の確認処理なら"], 
+                        [f"{loop_back_line}行目の", "を実行して"]
                     ], 
                     hover = [
                         loopBack_expr_node_info["comments"], 
@@ -1816,9 +1821,6 @@ class BitMapGenerator:
                 self.func_name,
                 nodeID if change_expr_node_info is not None else None
             )
-
-            ### ここで、previous_lineとloopBack_expr_node_info["line"]をくっつける
-            self.set_next_line(previous_line, loopBack_expr_node_info["line"])
         # 話しかけると関数の遷移元に戻るようにする
         elif self.get_node_shape(nodeID) == 'lpromoter':
             if (expr_node_info := self.get_expr_node_info(nodeID)) is None:

@@ -467,12 +467,12 @@ class AST2Flowchart:
 
         return children
 
-    def createErrorInfo(self, diagnostics: Iterable[ci.Diagnostic]):
-        for diag in diagnostics:
-            self.diag_list.append(diag)
-            print(f"{diag.spelling}, {diag.location.offset}")
-            if any(x in diag.spelling for x in ["expected '}'", "expected ';'"]):
-                sys.exit("error in a given C program")
+    def unwrap_unexposed(self, cursor: ci.Cursor) -> ci.Cursor:
+        self.check_cursor_error(cursor)
+        while cursor.kind == ci.CursorKind.UNEXPOSED_EXPR:
+            children = self.get_child_cursor_list(cursor, 1) 
+            cursor = children[0]
+        return cursor
 
     def check_cursor_error(self, cursor: ci.Cursor):
         # カーソルがファイルに属していないならスキップ
@@ -494,7 +494,12 @@ class AST2Flowchart:
         self.execution_info[key] = execution_info
         
     def write_ast(self, tu: ci.TranslationUnit):
-        self.createErrorInfo(tu.diagnostics)
+        for diag in tu.diagnostics:
+            self.diag_list.append(diag)
+            print(f"{diag.spelling}, {diag.location.offset}")
+            if any(x in diag.spelling for x in ["expected '}'", "expected ';'"]):
+                sys.exit("error in a given C program")
+
         for cr in tu.cursor.get_children():
             if cr.kind == ci.CursorKind.MACRO_INSTANTIATION:
                 if self.get_cursor_file(cr):
@@ -568,7 +573,7 @@ class AST2Flowchart:
                 
                 self.func_info_dict[self.scanning_func].args = [
                     VarInfo(
-                        var_node = self.create_var_node(arg_name, self.get_var_type(arg_type)), 
+                        var_node = self.create_var_node(arg_name, self.get_var_type_info(arg_type)), 
                         start = arg_lines[0], 
                         end = arg_lines[1]
                     )
@@ -791,9 +796,12 @@ class AST2Flowchart:
 
     def get_type_spelling(self, type: ci.Type) -> str:
         return type.spelling
-    
+
+    def get_expr_type_spelling(self, cursor: ci.Cursor):
+        return self.get_type_spelling(self.get_cursor_type(self.unwrap_unexposed(cursor)))
+
     # 変数の型情報を取得する
-    def get_var_type(self, type: ci.Type) -> TypeInfo:
+    def get_var_type_info(self, var_type: ci.Type) -> TypeInfo:
         """
         ci.Type を再帰的に解析し、
         typedef を含めて最終的な実体型まで全て展開した
@@ -803,44 +811,44 @@ class AST2Flowchart:
         """
 
         # typedef 
-        if type.kind == ci.TypeKind.TYPEDEF:
+        if var_type.kind == ci.TypeKind.TYPEDEF:
             # typedefを取り除いた実体型 (例: typedef int INT;なら、"int")
-            original_type = type.get_canonical()
+            original_type = var_type.get_canonical()
 
             return TypedefTypeInfo(
                 kind = "typedef",
-                type = self.get_type_spelling(type),
-                children = self.get_var_type(original_type),
+                type = self.get_type_spelling(var_type),
+                children = self.get_var_type_info(original_type),
             )
         # ポインタ
-        elif type.kind == ci.TypeKind.POINTER:
+        elif var_type.kind == ci.TypeKind.POINTER:
             # 本ポインタのアドレスが表す値を取得する
-            pointee = type.get_pointee()
+            pointee = var_type.get_pointee()
 
             return PointerTypeInfo(
                 kind = "pointer",
-                type = self.get_type_spelling(type),
-                children = self.get_var_type(pointee),
+                type = self.get_type_spelling(var_type),
+                children = self.get_var_type_info(pointee),
             )
         # 配列
-        elif type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
+        elif var_type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
             # 現在のシステムでは定数長配列だけを扱う (配列長などに関してプログラムが複雑になるため)
-            if type.kind != ci.TypeKind.CONSTANTARRAY:
+            if var_type.kind != ci.TypeKind.CONSTANTARRAY:
                 sys.exit("our game system only receives constant array (e.g. a[3])")
 
             # 次の階層の型を取得する
-            elem_type = type.get_array_element_type()
+            elem_type = var_type.get_array_element_type()
 
             return ArrayTypeInfo(
                 kind="array",
-                type=self.get_type_spelling(type),
-                size=type.element_count,
-                children=self.get_var_type(elem_type),
+                type=self.get_type_spelling(var_type),
+                size=var_type.element_count,
+                children=self.get_var_type_info(elem_type),
             )
         # 構造体・共用体
-        elif type.kind == ci.TypeKind.RECORD:
+        elif var_type.kind == ci.TypeKind.RECORD:
             # どちらの型であるかを判別するためのカーソル
-            decl_cursor: ci.Cursor = type.get_declaration()
+            decl_cursor: ci.Cursor = var_type.get_declaration()
 
             self.check_cursor_error(decl_cursor)
 
@@ -849,36 +857,38 @@ class AST2Flowchart:
                 field_cursor_list = self.get_child_cursor_list(decl_cursor, (1, None))
 
                 children = {
-                    self.get_cursor_spelling(field_cursor) : self.get_var_type(self.get_cursor_type(field_cursor))
+                    self.get_cursor_spelling(field_cursor) : 
+                    self.get_var_type_info(self.get_cursor_type(field_cursor))
                     for field_cursor in field_cursor_list
                     if field_cursor.kind == ci.CursorKind.FIELD_DECL
                 }
 
                 return StructTypeInfo(
                     kind = "struct",
-                    type = self.get_type_spelling(type),
+                    type = self.get_type_spelling(var_type),
                     children = children,
                 )
             elif decl_cursor.kind == ci.CursorKind.UNION_DECL:
                 field_cursor_list = self.get_child_cursor_list(decl_cursor)
 
                 children = {
-                    self.get_cursor_spelling(field_cursor) : self.get_var_type(self.get_cursor_type(field_cursor))
+                    self.get_cursor_spelling(field_cursor) : 
+                    self.get_var_type_info(self.get_cursor_type(field_cursor))
                     for field_cursor in field_cursor_list
                     if field_cursor.kind == ci.CursorKind.FIELD_DECL
                 }
 
                 return UnionTypeInfo(
                     kind = "union",
-                    type = self.get_type_spelling(type),
+                    type = self.get_type_spelling(var_type),
                     children = children,
                 )
             else:
                 # 構造体・共用体以外のRECORD型について、本ゲームは受け付けない
-                raise NotImplementedError(f"Unsupported RECORD declaration: {self.get_type_spelling(type)}")
+                raise NotImplementedError(f"Unsupported RECORD declaration: {self.get_type_spelling(var_type)}")
         # enum
-        elif type.kind == ci.TypeKind.ENUM:
-            decl_cursor: ci.Cursor = type.get_declaration()
+        elif var_type.kind == ci.TypeKind.ENUM:
+            decl_cursor: ci.Cursor = var_type.get_declaration()
 
             if not isinstance(decl_cursor, ci.Cursor):
                 sys.exit("error in getting declaration cursor of enum")
@@ -899,11 +909,11 @@ class AST2Flowchart:
 
             return EnumTypeInfo(
                 kind = "enum",
-                type = self.get_type_spelling(type),
+                type = self.get_type_spelling(var_type),
                 children = values,
             )
         # 基本型
-        elif type.kind in (
+        elif var_type.kind in (
             # void型
             ci.TypeKind.VOID,
 
@@ -931,45 +941,44 @@ class AST2Flowchart:
             # 浮動小数型
             ci.TypeKind.FLOAT, ci.TypeKind.DOUBLE, ci.TypeKind.LONGDOUBLE, ci.TypeKind.FLOAT128,
         ):
-            children: dict[str, TypeInfo] = {}
             return BuiltinTypeInfo(
                 kind = "builtin",
-                type = self.get_type_spelling(type),
-                children = children,
+                type = self.get_type_spelling(var_type),
+                children = {},
             )
         # 関数型 (ここを使うかは未定。現在、関数宣言・定義は個別の解析を行なっている。)
-        elif type.kind in (ci.TypeKind.FUNCTIONPROTO, ci.TypeKind.FUNCTIONNOPROTO,):
+        elif var_type.kind in (ci.TypeKind.FUNCTIONPROTO, ci.TypeKind.FUNCTIONNOPROTO,):
             children: dict[str, TypeInfo] = {}
 
             # 戻り値
-            return_type: ci.Type = type.get_result()
+            return_type: ci.Type = var_type.get_result()
 
             if not isinstance(return_type, ci.Type):
                 sys.exit("error in getting return type")
 
-            children["return"] = self.get_var_type(return_type)
+            children["return"] = self.get_var_type_info(return_type)
 
             # 引数
-            for i in range(type.get_num_arg_types()):
-                arg_type: ci.Type = type.get_arg_type(i)
-                children[f"arg{i}"] = self.get_var_type(arg_type)
+            for i in range(var_type.get_num_arg_types()):
+                arg_type: ci.Type = var_type.get_arg_type(i)
+                children[f"arg{i}"] = self.get_var_type_info(arg_type)
 
             return FunctionTypeInfo(
                 kind = "function",
-                type = self.get_type_spelling(type),
+                type = self.get_type_spelling(var_type),
                 children = children,
             )
         # elaborated type (ラッパー型で、内部に実体型を持つ)
-        elif type.kind == ci.TypeKind.ELABORATED:
-            named_type = type.get_named_type()
+        elif var_type.kind == ci.TypeKind.ELABORATED:
+            named_type = var_type.get_named_type()
 
             if not isinstance(named_type, ci.Type):
                 sys.exit("error in getting named type of elaborated type")
 
-            return self.get_var_type(named_type)
+            return self.get_var_type_info(named_type)
         # その他
         else:
-            sys.exit(f"{self.get_type_spelling(type)} is not allowed in this game")
+            sys.exit(f"{self.get_type_spelling(var_type)} is not allowed in this game")
 
     def create_var_node(self, name: str, type_info: TypeInfo) -> VarNode:
         """
@@ -1042,18 +1051,20 @@ class AST2Flowchart:
         #変数名を取得
         var_nodeID = self.create_node(self.get_cursor_spelling(cursor), 'signature')
         # もしstatic変数であれば、self.line_infoやself.func_info_dictの最初の行番が0である場合でも変えない
-        isStatic = cursor.storage_class == ci.StorageClass.STATIC
+        is_static = cursor.storage_class == ci.StorageClass.STATIC
 
         self.create_edge(nodeID, var_nodeID, edgeName)
 
+        var_type = self.get_cursor_type(cursor)
+
         # 変数の型情報は、変数宣言のsignatureノードごとに取得する
-        type_info = self.get_var_type(self.get_cursor_type(cursor))
+        type_info = self.get_var_type_info(var_type)
 
         var_node = self.create_var_node(self.get_cursor_spelling(cursor), type_info)
         
         # 配列の場合
-        if self.get_cursor_type(cursor).kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
-            if self.get_cursor_type(cursor).kind != ci.TypeKind.CONSTANTARRAY:
+        if var_type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
+            if var_type.kind != ci.TypeKind.CONSTANTARRAY:
                 sys.exit("our system cannot receive variable-size array")
 
             tokens = list(cursor.get_tokens())
@@ -1143,12 +1154,12 @@ class AST2Flowchart:
                             expr = [TextPart(text = "")]
                         ),
                         execution_condition = {},
-                        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
+                        expr_type = self.get_type_spelling(var_type)
                     )
                 )
         # 構造体や共用体
-        elif self.get_cursor_type(cursor).get_canonical().kind == ci.TypeKind.RECORD:
-            record_kind = self.get_cursor_type(cursor).get_declaration().kind
+        elif var_type.get_canonical().kind == ci.TypeKind.RECORD:
+            record_kind = var_type.get_declaration().kind
             if record_kind == ci.CursorKind.STRUCT_DECL:
                 # 構造体
                 struct_cursors = self.get_child_cursor_list(cursor, (1, 2))
@@ -1174,7 +1185,7 @@ class AST2Flowchart:
                                 expr = [TextPart(text = "")]
                             ),
                             execution_condition = {},
-                            expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
+                            expr_type = self.get_type_spelling(var_type)
                         )
                     ]
                 else:
@@ -1228,7 +1239,7 @@ class AST2Flowchart:
                             expr = [TextPart(text = "")]
                         ),
                         execution_condition = {},
-                        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
+                        expr_type = self.get_type_spelling(var_type)
                     )
                 ]
                 
@@ -1239,7 +1250,7 @@ class AST2Flowchart:
         今までは複数行にまたがる処理にて、特定の行で止まる場合はその行をcondition_move (現: self.execution_info)
         にそれぞれ含めていたが、これからは処理の最初の行〜最後の行の範囲で確かめる方針にすると良いかも?
         '''
-        self.line_info_dict[self.scanning_func].set_start(start_line, isStatic)
+        self.line_info_dict[self.scanning_func].set_start(start_line, is_static)
         self.func_info_dict[self.scanning_func].set_start(start_line)
 
         self.var_info[f'"{var_nodeID}"'] = VarInfo(
@@ -1416,13 +1427,6 @@ class AST2Flowchart:
 
         return expr_nodeID
 
-    def unwrap_unexposed(self, cursor: ci.Cursor) -> ci.Cursor:
-        self.check_cursor_error(cursor)
-        while cursor.kind == ci.CursorKind.UNEXPOSED_EXPR:
-            children = self.get_child_cursor_list(cursor, 1) 
-            cursor = children[0]
-        return cursor
-
     def parse_expr_to_id(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None):
         expr_description = self.parse_expr(cursor, expr_info, execution_condition, var_info_for_func)
         if "expr_id" in expr_description:
@@ -1432,7 +1436,7 @@ class AST2Flowchart:
             [expr_description], 
             [expr_description], 
             execution_condition,
-            self.get_type_spelling(self.get_cursor_type(cursor))
+            self.get_expr_type_spelling(cursor)
         )
 
     def parse_expr_to_text_or_id(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None):
@@ -1444,7 +1448,7 @@ class AST2Flowchart:
             [expr_description], 
             [expr_description], 
             execution_condition,
-            self.get_type_spelling(self.get_cursor_type(cursor))
+            self.get_expr_type_spelling(cursor)
         )
 
     # 式の項を一つずつ解析
@@ -1452,7 +1456,7 @@ class AST2Flowchart:
     def parse_expr(self, cursor: ci.Cursor, expr_info: ExprInfo, execution_condition: dict[int, bool], var_info_for_func: dict[str, any] | None = None) -> ExprDescriptionPart:
         cursor = self.unwrap_unexposed(cursor)
 
-        expr_type = self.get_type_spelling(self.get_cursor_type(cursor))
+        expr_type = self.get_expr_type_spelling(cursor)
 
         # 現在の計算式がマクロならその情報を取得する
         if (file := self.get_cursor_file(cursor)) is not None and (macro := self.macro_pos.get((file.name, self.get_cursor_line(cursor), self.get_cursor_column(cursor)))) is not None:
@@ -1618,8 +1622,6 @@ class AST2Flowchart:
 
             is_front = operator_token.location.offset < operand_start
 
-            # operator in ("*", "&") ならexpr_typeをresult_typeとして取得する
-            # print(operator_spell, expr_type, self.get_type_spelling(self.get_cursor_type(operand_cursor)))
             operand_expr = self.parse_expr_to_id(
                 operand_cursor,
                 expr_info,
@@ -1650,6 +1652,8 @@ class AST2Flowchart:
                 operand_expr, 
                 is_front
             )
+
+            # operator in ("*", "&") ならexpr_typeをresult_typeとして取得する
             expr_description = expr_info.append_expr_description(
                 description, 
                 expr, 
@@ -1661,7 +1665,11 @@ class AST2Flowchart:
             expr_spell = ' '.join([self.get_token_spelling(t) for t in list(cursor.get_tokens())])
             if 'sizeof' in expr_spell:
                 child_cursor_list = self.get_child_cursor_list(cursor, (0, 1)) 
-                type_str = self.get_type_spelling(self.get_cursor_type(self.unwrap_unexposed(child_cursor_list[0]))) if child_cursor_list else expr_spell.removeprefix("sizeof(").removesuffix(")")
+                type_str = (
+                    self.get_expr_type_spelling(child_cursor_list[0])
+                    if child_cursor_list else 
+                    expr_spell.removeprefix("sizeof(").removesuffix(")")
+                )
                 expr_description = expr_info.append_expr_description(
                     description = [expr_info.get_sizeof_operator_description(type_str)], 
                     expr = [TextPart(text = expr_spell)],
@@ -1702,14 +1710,14 @@ class AST2Flowchart:
                         children = self.get_child_cursor_list(casted_cursor, (1, None))
                         func_name = self.get_cursor_spelling(self.unwrap_unexposed(children[0]))
                         if func_name in ("malloc", "realloc"):
-                            var_info_for_func["vartype"] = self.get_type_spelling(self.get_cursor_type(left_cursor))[:-1]
+                            var_info_for_func["vartype"] = self.get_expr_type_spelling(left_cursor)[:-1]
                 elif cursor.kind == ci.CursorKind.CALL_EXPR:
                     casted_cursor = self.unwrap_unexposed(right_cursor)
                     children: list[ci.Cursor] = self.get_child_cursor_list(cursor, (1, None)) 
 
                     func_name = self.get_cursor_spelling(self.unwrap_unexposed(children[0]))
                     if func_name in ("malloc", "realloc"):
-                        var_info_for_func["vartype"] = self.get_type_spelling(self.get_cursor_type(right_cursor))[:-1]
+                        var_info_for_func["vartype"] = self.get_expr_type_spelling(right_cursor)[:-1]
                     elif func_name == "fopen" and left_cursor.kind == ci.CursorKind.DECL_REF_EXPR:
                         if (var_name := self.get_cursor_spelling(left_cursor)):
                           var_info_for_func["varname"] = var_name
@@ -1878,7 +1886,7 @@ class AST2Flowchart:
             cr = children[0]
             casted_expr = self.parse_expr(cr, expr_info, execution_condition, var_info_for_func = var_info_for_func)
             expr = [TextPart(text = f"({expr_type})"), casted_expr]
-            casted_expr_type: str = self.get_type_spelling(self.get_cursor_type(self.unwrap_unexposed(cr)))
+            casted_expr_type = self.get_expr_type_spelling(cr)
             description = (
                 [TextPart(text = "cast type of"), casted_expr, TextPart(text = f"from {casted_expr_type}"), TextPart(text = f"to {expr_type}")]
                 if self.is_english else
@@ -1914,7 +1922,7 @@ class AST2Flowchart:
 
         custom_func_count_in_args: int = 0
 
-        return_type = self.get_type_spelling(self.get_cursor_type(cursor))
+        return_type = self.get_expr_type_spelling(cursor)
 
         # --- 引数ノードとのエッジ作成 ---
         for arg_cursor in children[1:]:
@@ -2170,7 +2178,7 @@ class AST2Flowchart:
         print(f"struct {self.get_cursor_spelling(cursor)}")
         self.struct_info[f"struct {self.get_cursor_spelling(cursor)}"] = []
         for cr in self.get_child_cursor_list(cursor) :
-            print(f"    {self.get_type_spelling(self.get_cursor_type(cr))} {self.get_cursor_spelling(cr)}")
+            print(f"    {self.get_expr_type_spelling(cr)} {self.get_cursor_spelling(cr)}")
             # type = self.get_cursor_type(cr)
             # if type.kind in (ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY):
             #     sys.exit("our system cannot receive variable array member of a struct variable")
@@ -2194,7 +2202,7 @@ class AST2Flowchart:
     def parse_union(self, cursor):
         print(f"union {self.get_cursor_spelling(cursor)}")
         for cr in self.get_child_cursor_list(cursor) :
-            print(f"    {self.get_type_spelling(self.get_cursor_type(cr))} {self.get_cursor_spelling(cr)}")
+            print(f"    {self.get_expr_type_spelling(cr)} {self.get_cursor_spelling(cr)}")
     
     # 列挙型の解析(フローチャートには含めないが、アイテムには必要なので解析)
     def parse_enum(self, cursor):
@@ -2205,7 +2213,7 @@ class AST2Flowchart:
             if len(children):
                 int_cursor = children[0]
                 value = int(self.get_token_spelling(next(int_cursor.get_tokens())))
-            print(f"    {self.get_type_spelling(self.get_cursor_type(cr))} {self.get_cursor_spelling(cr)} = {value}")
+            print(f"    {self.get_expr_type_spelling(cr)} {self.get_cursor_spelling(cr)} = {value}")
             value += 1
 
     # 分岐で新たな部屋情報を登録する
@@ -2603,7 +2611,10 @@ class AST2Flowchart:
             sys.exit("condition expression has to be in one line")
 
         # switchもbreakで脱出する枠組みの対象となるのでその情報を登録しておく
-        self.line_info_dict[self.scanning_func].set_loop_start_and_goal(self.get_cursor_line(cond_cursor), self.get_cursor_extent_end(cursor).line)
+        self.line_info_dict[self.scanning_func].set_loop_start_and_goal(
+            self.get_cursor_line(cond_cursor), 
+            self.get_cursor_extent_end(cursor).line
+        )
 
         if self.room_size_estimate is None:
             sys.exit("room size estimate is not found")

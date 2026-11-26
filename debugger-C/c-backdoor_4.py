@@ -2133,7 +2133,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
             # inputが入れられるまで次のstepには行かない
             if input_check:
-                errorCnt = 0
+                error_count = 0
                 while True:
                     if (event := self.event_receiver()) is None:
                         continue
@@ -2147,7 +2147,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         )
                         
                         if state == "incomplete":
-                            errorCnt += 1
+                            error_count += 1
                             self.event_sender(
                                 Debugger2GameEvent(
                                     message = 
@@ -2156,7 +2156,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                             if self.is_english else 
                                             f"ヒント: 入力({', '.join(errors['incomplete'])})が足りていません!! もう一度入力してください!!"
                                         )
-                                        if errorCnt >= 3 else
+                                        if error_count >= 3 else
                                         (
                                             "Missing input !! input again !!" 
                                             if self.is_english else 
@@ -2180,7 +2180,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                         else:
                             break
                     else:
-                        errorCnt += 1
+                        error_count += 1
                         self.event_sender(
                             Debugger2GameEvent(
                                 message = 
@@ -2189,7 +2189,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                         if self.is_english else
                                         f"値をフォーマット({self.input_check_num[(self.next_frame_num, self.next_line_number)][0][input_check][0]})\nに沿って入力してください!!"
                                     ) 
-                                    if errorCnt >= 3 else
+                                    if error_count >= 3 else
                                     (
                                         "input values for scanf" 
                                         if self.is_english else 
@@ -2522,14 +2522,14 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             while len(declared_vars):
                 dynamic_variable_info = declared_vars.pop(0)
                 var = (dynamic_variable_info["dynamic_var_node"]["name"], line_number)
-                errorCnt = 0
+                error_count = 0
                 while True:
                     # 異なる変数の取得、または関数のスキップの後はメッセージを受信する
                     if (event := self.event_receiver()) is None:
                         continue
 
                     if (item := event.get("item", None)) is None:
-                        errorCnt += 1
+                        error_count += 1
                         self.event_sender(
                             Debugger2GameEvent(
                                 message = (
@@ -2537,7 +2537,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     if self.is_english else 
                                     "アイテムを取得してください !!"
                                 ) 
-                                if errorCnt >= 3 else 
+                                if error_count >= 3 else 
                                 (
                                     "You did a different action !!" 
                                     if self.is_english else 
@@ -2550,7 +2550,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     var_to_get = (item["name"], item["line"])
                     if var_to_get != var:
-                        errorCnt += 1
+                        error_count += 1
                         # 複数回入力を間違えたらヒントをあげる
                         self.event_sender(
                             Debugger2GameEvent(
@@ -2559,7 +2559,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     if self.is_english else 
                                     f"ヒント: アイテム {var[0]} を取得してください!!"
                                 ) 
-                                if errorCnt >= 3 else 
+                                if error_count >= 3 else 
                                 (
                                     f"You are trying to get a different item {var_to_get[0]} !!" 
                                     if self.is_english else 
@@ -2572,7 +2572,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
 
                     # 変数宣言の処理の行番は完全一致ではなくbetweenで確認する(条件分岐は引き続き完全一致で?)
                     if line_number < event["start"] or event["end"] < line_number:
-                        errorCnt += 1
+                        error_count += 1
                         self.event_sender(
                             Debugger2GameEvent(
                                 message = (
@@ -2580,7 +2580,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                                     if self.is_english else 
                                     f"ヒント: アイテム {var[0]} を取得してください!!"
                                 )
-                                if errorCnt >= 3 else
+                                if error_count >= 3 else
                                 (
                                     f"You are trying to get a different item {var_to_get[0]} !!" 
                                     if self.is_english else 
