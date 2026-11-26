@@ -2426,6 +2426,8 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             return state, frame, file_name, line_number, func_name, frame_num
 
         def get_std_outputs(self):
+            evaluate_expression_wrapper(self.frame, "(int)fflush(0)")
+
             # 新しい出力だけ読む
             out_chunk = stdout_r.read()
             err_chunk = stderr_r.read()
