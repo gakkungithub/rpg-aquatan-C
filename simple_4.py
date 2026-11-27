@@ -133,6 +133,7 @@ def main():
 
     SMANAGER = SoundManager()
 
+    error_message_list: list[str] = []
     while True:
         if os.uname()[0] != 'Darwin':
             drivers = ['fbcon', 'directfb', 'svgalib']
@@ -160,7 +161,7 @@ def main():
             screen = pygame.display.set_mode(SBW_RECT.size, scropt)
 
         ISENGLISH = False
-        SBWND = StageButtonWindow()
+        SBWND = StageButtonWindow(error_message_list)
         SBWND.show()
         SBWND.draw(screen)
         pygame.display.update()
@@ -308,12 +309,30 @@ def main():
                 if ISENGLISH:
                     cfcode.append("-e")
 
-                subprocess.run(cfcode, cwd=resource_path("mapdata_generator"), check=True)
+                subprocess.run(
+                    cfcode, 
+                    cwd=resource_path("mapdata_generator"), 
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
             subprocess.run(["gcc", "-g", "-o", programpath, " ".join(cfiles)])
         except subprocess.CalledProcessError as e:
-            print(f"subprocess failed with exit code {e.returncode}")
-            sys.exit(1)   # 呼び出し元プログラムを終了
+            # ゲーム側が対応できないコードはステージ画面上に出力する
+            if len(e.stderr) and e.stderr[-1] == '\n':
+                error_message = e.stderr[:-1]
+            else:
+                error_message = e.stderr
 
+            if len(error_message):
+                error_message_list = error_message.split('\n')
+            else:
+                error_message_list = []
+                
+            error_message = e.stderr[:-1] if len(e.stderr) and e.stderr[-1] == '\n' else e.stderr
+            continue
+
+        error_message_list = []
         SMANAGER.stop_bgm()
         SMANAGER.play_se("stage_entry")
         # サーバを立てる
@@ -392,18 +411,14 @@ def main():
         atxt = ""
         # endregion
 
-        print("1")
         ## set mouse visible for debug
         ## pygame.mouse.set_visible(0)
-        print("2")
         # pygame.display.set_caption("あくあたんクエスト")
         # キャラクターチップをロード
         load_charachips("data", "charachip.dat")
-        print("3")
         # マップチップをロード
         load_mapchips()
         # マップとプレイヤー作成
-        print("4")
 
         # region キャラクターの初期設定
         init_player_chara = str(config.get("game", "player"))
@@ -735,7 +750,7 @@ def main():
 
             for event in pygame.event.get():
                 if event.type == QUIT:
-                    PLAYER.fp.write( "end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
+                    PLAYER.fp.write("end, " + mapname + "," + str(PLAYER.x)+", " + str(PLAYER.y) + "\n")
                     PLAYER.fp.close()
                     server.terminate()
                     sys.exit()
@@ -2988,12 +3003,17 @@ class Window:
             return
         if bg:
             self.surface.fill(Color(0, 0, 0, 150))
-            pygame.draw.lines(self.surface, Color(255, 255, 255, 255), True,
-                            [[0, 0],
-                             [0, self.height-(self.EDGE_WIDTH/2)],
-                             [self.width-(self.EDGE_WIDTH/2), self.height-(self.EDGE_WIDTH/2)],
-                             [self.width-(self.EDGE_WIDTH/2), 0] ],
-                             self.EDGE_WIDTH)
+            pygame.draw.lines(
+                self.surface, Color(255, 255, 255, 255), 
+                True,
+                [
+                    [0, 0],
+                    [0, self.height-(self.EDGE_WIDTH/2)],
+                    [self.width-(self.EDGE_WIDTH/2), self.height-(self.EDGE_WIDTH/2)],
+                    [self.width-(self.EDGE_WIDTH/2), 0]
+                ],
+                self.EDGE_WIDTH
+            )
         else:
             self.surface.fill(Color(0, 0, 0, 0))
 
@@ -5473,10 +5493,11 @@ class StageButtonWindow:
     SB_WIDTH = (SBW_WIDTH - 60) // 5
     SB_HEIGHT = SBW_HEIGHT // 2
     FONT_SIZE = 32
+    ERROR_MSG_FONT_SIZE = 16
     MINI_BUTTON_FONT_SIZE = 12
     FONT_COLOR = (255, 255, 255)
 
-    def __init__(self):
+    def __init__(self, error_message_list: list[str]):
         self.rect = pygame.Rect(0, 0, SBW_WIDTH , SBW_HEIGHT)
         self.surface = pygame.Surface((self.rect[2], self.rect[3]))
         self.surface.fill((185, 148, 39))
@@ -5489,6 +5510,7 @@ class StageButtonWindow:
         self.bg_image = load_image("data", "c_background.png", -1)
         self.scrollX = 0
         self.maxScrollX = (len(self.code_names) - 5) * (self.SB_WIDTH + 10)
+        self.error_message_list = error_message_list
 
         try:
             with open(f"{BASE_DIR}/score.json", 'r') as f:
@@ -5499,6 +5521,7 @@ class StageButtonWindow:
 
         self.load_sb()
         self.font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.FONT_SIZE)
+        self.error_message_font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.ERROR_MSG_FONT_SIZE)
         self.mini_button_font = pygame.freetype.Font(resource_path(FONT_DIR + FONT_NAME), self.MINI_BUTTON_FONT_SIZE)
         self.is_stage_selecting = True
         self.color_support = False
@@ -5536,9 +5559,27 @@ class StageButtonWindow:
         self.blit(screen)
 
         screen.blit(self.bg_image, (0, 0))
-        self.font.render_to(screen, (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), ("Stage Select" if ISENGLISH else "ステージ選択") if self.is_stage_selecting else ("LLDB check" if ISENGLISH else "LLDB　処理チェック"), self.FONT_COLOR)
+
+        self.font.render_to(
+            surf = screen, 
+            dest = (SBW_WIDTH // 2 - self.FONT_SIZE * 3, SBW_HEIGHT // 8), 
+            text = (
+                ("Stage Select" if ISENGLISH else "ステージ選択") 
+                if self.is_stage_selecting else 
+                ("LLDB check" if ISENGLISH else "LLDB　処理チェック")
+            ), 
+            fgcolor = self.FONT_COLOR
+        )
         for button in self.button_stages:
             button.draw(screen)
+
+        for i, error_message in enumerate(self.error_message_list):
+            self.error_message_font.render_to(
+                surf = screen, 
+                dest = (self.ERROR_MSG_FONT_SIZE * 2, SBW_HEIGHT * 7 // 8 + self.ERROR_MSG_FONT_SIZE * i), 
+                text = error_message, 
+                fgcolor = self.FONT_COLOR
+            )
 
         # チュートリアルボタン
         pygame.draw.rect(screen, (0, 255, 0), self.tutorial_button_rect)
@@ -5548,7 +5589,18 @@ class StageButtonWindow:
 
         # 色覚サポートのあり/なしボタン
         pygame.draw.rect(screen, (255, 255, 255) if self.color_support else (0, 0, 0), self.color_support_button_rect)
-        color_support_label_surf, _ = self.mini_button_font.render(("Color Support ON" if ISENGLISH else "色覚サポートあり") if self.color_support else ("Color Support OFF" if ISENGLISH else "色覚サポートなし"), (0, 0, 0) if self.color_support else (255, 255, 255))
+        color_support_label_surf, _ = (
+            self.mini_button_font.render(
+                text = (
+                    ("Color Support ON" if ISENGLISH else "色覚サポートあり") 
+                    if self.color_support else 
+                    ("Color Support OFF" if ISENGLISH else "色覚サポートなし")
+                ), 
+                fgcolor = (
+                    (0, 0, 0) if self.color_support else (255, 255, 255)
+                )
+            )
+        )
         color_support_label_rect = color_support_label_surf.get_rect(center=self.color_support_button_rect.center)
         screen.blit(color_support_label_surf, color_support_label_rect)
 

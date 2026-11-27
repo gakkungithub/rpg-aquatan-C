@@ -23,6 +23,30 @@ from rpg_aquatan_utils.types.map_data_generator import *
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = ROOT_DIR + '/mapdata_for_test'
 
+def set_sys_exit_error_msg(msg: str):
+    result = []
+    max_chars = 100
+
+    while len(msg) > max_chars:
+        # 指定文字数以内で最後に出現する空白文字を探す
+        split_index = -1
+
+        for i in range(max_chars - 1, -1, -1):
+            if msg[i].isspace():
+                split_index = i
+                break
+
+        # 空白がなければ指定文字数で区切る
+        if split_index == -1:
+            split_index = max_chars
+
+        result.append(msg[:split_index].rstrip())
+        msg = msg[split_index:].lstrip()
+
+    result.append(msg)
+
+    sys.exit("\n".join(result))
+
 class BreakerPos(TypedDict):
     nodeID: str
     line: int
@@ -195,7 +219,7 @@ class ExprInfo:
     # 自作関数
     def append_custom_func_reference(self, func_name: str, custom_func_count_in_args: int, comment: FunctionComment, execution_condition: dict[int, bool], return_type: str):
         if self.has_standard_func_reference:
-            sys.exit("standard functions and custom functions cannot be mixed up in our game system")
+            set_sys_exit_error_msg("standard functions and custom functions cannot be mixed up in our game system")
 
         self.func_references.append(
             FuncReference(
@@ -214,7 +238,7 @@ class ExprInfo:
     # 標準ライブラリ関数
     def set_standard_func_reference(self, func_name: str, comment: FunctionComment, execution_condition: dict[int, bool], return_type: str, **kwargs):
         if self.has_standard_func_reference:
-            sys.exit("an expression process cannot contain two or more standard functions")
+            set_sys_exit_error_msg("an expression process cannot contain two or more standard functions")
 
         '''
         関数の結果はfunc_referencesに記録されている情報から取得でき、その結果をexpr_descriptionに反映する必要
@@ -271,11 +295,11 @@ class ExprInfo:
     def get_unary_operator_description(self, operator_spell: str, operand_expr: ExprDescriptionPart, is_front: bool) -> list[ExprDescriptionPart]:
         if is_front:
             if operator_spell not in unary_front_operator_descriptions:
-                sys.exit(f"unary front operator {operator_spell} is not accepted by our game")
+                set_sys_exit_error_msg(f"unary front operator {operator_spell} is not accepted by our game")
             return unary_front_operator_descriptions_en[operator_spell](operand_expr) if self.is_english else unary_front_operator_descriptions[operator_spell](operand_expr)
         else:
             if operator_spell not in unary_back_operator_descriptions:
-                sys.exit(f"unary back operator {operator_spell} is not accepted by our game")
+                set_sys_exit_error_msg(f"unary back operator {operator_spell} is not accepted by our game")
             return unary_back_operator_descriptions_en[operator_spell](operand_expr) if self.is_english else unary_back_operator_descriptions[operator_spell](operand_expr)
 
     def get_sizeof_operator_description(self, type_name: str) -> ExprDescriptionPart:
@@ -305,12 +329,12 @@ class ExprInfo:
 
     def get_binary_operator_description(self, operator_spell: str, left_expr: ExprDescriptionPart, right_expr: ExprDescriptionPart) -> list[ExprDescriptionPart]:
         if operator_spell not in binary_operator_descriptions:
-            sys.exit(f"binary operator {operator_spell} is not accepted by our game")
+            set_sys_exit_error_msg(f"binary operator {operator_spell} is not accepted by our game")
         return binary_operator_descriptions_en[operator_spell](left_expr,right_expr) if self.is_english else binary_operator_descriptions[operator_spell](left_expr,right_expr)
 
     def get_compound_assignment_operator_description(self, operator_spell: str, left_expr: ExprDescriptionPart, right_expr: ExprDescriptionPart) -> list[ExprDescriptionPart]:
         if operator_spell not in compound_assignment_operator_descriptions:
-            sys.exit(f"compound assignment operator {operator_spell} is not accepted by our game")
+            set_sys_exit_error_msg(f"compound assignment operator {operator_spell} is not accepted by our game")
         return compound_assignment_operator_descriptions_en[operator_spell](left_expr,right_expr) if self.is_english else compound_assignment_operator_descriptions[operator_spell](left_expr,right_expr)
 
                                                                                                                                                
@@ -327,7 +351,7 @@ class AST2Flowchart:
     def __init__(self, program_name: str, c_files: list[str], is_english: bool):
         # 後でcファイルを複数設定できるようにするが、今は簡易的にするために、ファイルは一つだけ許可する
         if len(c_files) != 1:
-            sys.exit("number of c files has to be 1")
+            set_sys_exit_error_msg("number of c files has to be 1")
 
         self.c_files = c_files
         self.is_english = is_english
@@ -359,7 +383,7 @@ class AST2Flowchart:
 
         for c_file in c_files:
             if c_file == "":
-                sys.exit("empty c file name is not allowed")
+                set_sys_exit_error_msg("empty c file name is not allowed")
 
             tu = index.parse(
                 c_file,
@@ -417,34 +441,34 @@ class AST2Flowchart:
 
     def get_cursor_spelling(self, cursor: ci.Cursor) -> str:
         if not isinstance(cursor.spelling, str):
-            sys.exit("error in type of cursor spell")
+            set_sys_exit_error_msg("error in type of cursor spell")
         return cursor.spelling
     
     def get_token_spelling(self, token: ci.Token) -> str:
         if not isinstance(token.spelling, str):
-            sys.exit("error in type of token spell")
+            set_sys_exit_error_msg("error in type of token spell")
         return token.spelling
     
     def get_cursor_type(self, cursor: ci.Cursor) -> ci.Type:
         if not isinstance(cursor.type, ci.Type):
-            sys.exit("error in type of cursor")
+            set_sys_exit_error_msg("error in type of cursor")
         return cursor.type
 
     def get_cursor_extent(self, cursor: ci.Cursor) -> ci.SourceRange:
         if not isinstance(cursor.extent, ci.SourceRange):
-            sys.exit("type of cursor extent has to be ci.SourceRange")
+            set_sys_exit_error_msg("type of cursor extent has to be ci.SourceRange")
         return cursor.extent
     
     def get_cursor_extent_start(self, cursor: ci.Cursor) -> ci.SourceLocation:
         extent = self.get_cursor_extent(cursor)
         if not isinstance(extent.start, ci.SourceLocation):
-            sys.exit("type of cursor extent start has to be ci.SourceLocation")
+            set_sys_exit_error_msg("type of cursor extent start has to be ci.SourceLocation")
         return extent.start
     
     def get_cursor_extent_end(self, cursor: ci.Cursor) -> ci.SourceLocation:
         extent = self.get_cursor_extent(cursor)
         if not isinstance(extent.end, ci.SourceLocation):
-            sys.exit("type of cursor extent end has to be ci.SourceLocation")
+            set_sys_exit_error_msg("type of cursor extent end has to be ci.SourceLocation")
         return extent.end
 
     def get_child_cursor_list(self, cursor: ci.Cursor, count: int | tuple[int, int | None] | None = None) -> list[ci.Cursor]:
@@ -454,14 +478,14 @@ class AST2Flowchart:
         if isinstance(count, int):
             # 指定した個数と一致する必要がある
             if actual_count != count:
-                sys.exit(
+                set_sys_exit_error_msg(
                     f"Expected {count} child cursors for {cursor.kind.name} cursor, but got {actual_count}."
                 )
         elif isinstance(count, tuple):
             # 指定した範囲内である必要がある
             min_count, max_count = count
             if actual_count < min_count or (max_count is not None and actual_count > max_count):
-                sys.exit(
+                set_sys_exit_error_msg(
                     f"Expected {min_count} to {max_count if max_count is not None else 'more'} child cursors for {cursor.kind.name} cursor, but got {actual_count}."
                 )
 
@@ -485,12 +509,12 @@ class AST2Flowchart:
                 file.name == diag.location.file.name and
                 self.get_cursor_offset(cursor) >= diag.location.offset - 1): 
                 print(f"{diag.spelling}")
-                sys.exit("error in a given C program")
+                set_sys_exit_error_msg("error in a given C program")
         return True
 
     def register_execution_info(self, nodeID: str, execution_info: ExecutionInfo):
         if (key := f'"{nodeID}"') in self.execution_info:
-            sys.exit(f"this nodeID {nodeID} is already registered")
+            set_sys_exit_error_msg(f"this nodeID {nodeID} is already registered")
         self.execution_info[key] = execution_info
         
     def write_ast(self, tu: ci.TranslationUnit):
@@ -498,14 +522,14 @@ class AST2Flowchart:
             self.diag_list.append(diag)
             print(f"{diag.spelling}, {diag.location.offset}")
             if any(x in diag.spelling for x in ["expected '}'", "expected ';'"]):
-                sys.exit("error in a given C program")
+                set_sys_exit_error_msg("error in a given C program")
 
         for cr in tu.cursor.get_children():
             if cr.kind == ci.CursorKind.MACRO_INSTANTIATION:
                 if self.get_cursor_file(cr):
                     self.macro_pos[(self.get_cursor_file(cr).name, self.get_cursor_line(cr), self.get_cursor_column(cr))] = self.get_cursor_spelling(cr)
                 else:
-                    sys.exit("error in finding location of macro instantation")
+                    set_sys_exit_error_msg("error in finding location of macro instantation")
                 
         for cursor in tu.cursor.get_children():
             self.check_cursor_error(cursor)
@@ -631,7 +655,7 @@ class AST2Flowchart:
         if len(self.break_in_switch_list) and type == "break":
             if self.break_in_switch_list[-1]["level"]:
                 if len(self.loop_breaker_list) == 0:
-                    sys.exit("length of loop_breaker_list has to be 1 or more")
+                    set_sys_exit_error_msg("length of loop_breaker_list has to be 1 or more")
 
                 self.loop_breaker_list[-1][type].append(
                     BreakerPos(
@@ -648,7 +672,7 @@ class AST2Flowchart:
                 )
         else:
             if len(self.loop_breaker_list) == 0:
-                sys.exit("length of loop_breaker_list has to be 1 or more")
+                set_sys_exit_error_msg("length of loop_breaker_list has to be 1 or more")
 
             self.loop_breaker_list[-1][type].append(
                 BreakerPos(
@@ -713,7 +737,7 @@ class AST2Flowchart:
             return None
         elif cr.kind == ci.CursorKind.GOTO_STMT:
             # goto文は優先度が低い上に本システムでの分析が難しいので今は許可しない
-            sys.exit("our game does not accept goto statement now")
+            set_sys_exit_error_msg("our game does not accept goto statement now")
 
             # 最初行番を変更
             self.line_info_dict[self.scanning_func].set_start(self.get_cursor_line(cr))
@@ -734,7 +758,7 @@ class AST2Flowchart:
             return None
         elif cr.kind == ci.CursorKind.LABEL_STMT:
             # goto文は優先度が低い上に本システムでの分析が難しいので今は許可しない
-            sys.exit("our game does not accept goto label now")
+            set_sys_exit_error_msg("our game does not accept goto label now")
 
             # 最初行番を変更?
             self.line_info_dict[self.scanning_func].set_start(self.get_cursor_line(cr))
@@ -759,7 +783,7 @@ class AST2Flowchart:
             # 最初行番を変更
             # 今は複数行を許さないようにする
             if self.get_cursor_extent_start(cr).line != self.get_cursor_extent_end(cr).line:
-                sys.exit("return statement has to be in one line")
+                set_sys_exit_error_msg("return statement has to be in one line")
 
             self.line_info_dict[self.scanning_func].set_start(self.get_cursor_line(cr))
             self.func_info_dict[self.scanning_func].set_start(self.get_cursor_line(cr))
@@ -769,7 +793,7 @@ class AST2Flowchart:
             return_nodeID = self.get_expr(value_cursor, shape='lpromoter', label=f"{self.get_cursor_line(cr)}")
 
             if len(self.expr_node_info[f'"{return_nodeID}"']["funcs"]) and "children" not in self.expr_node_info[f'"{return_nodeID}"']["funcs"][0]:
-                sys.exit("this game does not allow that return statement includes standard functions")
+                set_sys_exit_error_msg("this game does not allow that return statement includes standard functions")
 
             self.line_info_dict[self.scanning_func].set_return(self.get_cursor_line(cr))
             self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_line(cr))
@@ -834,7 +858,7 @@ class AST2Flowchart:
         elif var_type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
             # 現在のシステムでは定数長配列だけを扱う (配列長などに関してプログラムが複雑になるため)
             if var_type.kind != ci.TypeKind.CONSTANTARRAY:
-                sys.exit("our game system only receives constant array (e.g. a[3])")
+                set_sys_exit_error_msg("our game system only receives constant array (e.g. a[3])")
 
             # 次の階層の型を取得する
             elem_type = var_type.get_array_element_type()
@@ -891,7 +915,7 @@ class AST2Flowchart:
             decl_cursor: ci.Cursor = var_type.get_declaration()
 
             if not isinstance(decl_cursor, ci.Cursor):
-                sys.exit("error in getting declaration cursor of enum")
+                set_sys_exit_error_msg("error in getting declaration cursor of enum")
 
             # enumの一つ一つの値を格納する辞書
             values: dict[str, int] = {}
@@ -900,10 +924,10 @@ class AST2Flowchart:
 
             for value_cursor in value_cursor_list:
                 if value_cursor.kind != ci.CursorKind.ENUM_CONSTANT_DECL:
-                    sys.exit("Unexpected child cursor of enum declaration (other than ENUM_CONSTANT_DECL)")
+                    set_sys_exit_error_msg("Unexpected child cursor of enum declaration (other than ENUM_CONSTANT_DECL)")
                 
                 if not isinstance(value_cursor.enum_value, int):
-                    sys.exit("enum value has to be integer")
+                    set_sys_exit_error_msg("enum value has to be integer")
 
                 values[self.get_cursor_spelling(value_cursor)] = value_cursor.enum_value
 
@@ -954,7 +978,7 @@ class AST2Flowchart:
             return_type: ci.Type = var_type.get_result()
 
             if not isinstance(return_type, ci.Type):
-                sys.exit("error in getting return type")
+                set_sys_exit_error_msg("error in getting return type")
 
             children["return"] = self.get_var_type_info(return_type)
 
@@ -973,12 +997,12 @@ class AST2Flowchart:
             named_type = var_type.get_named_type()
 
             if not isinstance(named_type, ci.Type):
-                sys.exit("error in getting named type of elaborated type")
+                set_sys_exit_error_msg("error in getting named type of elaborated type")
 
             return self.get_var_type_info(named_type)
         # その他
         else:
-            sys.exit(f"{self.get_type_spelling(var_type)} is not allowed in this game")
+            set_sys_exit_error_msg(f"{self.get_type_spelling(var_type)} is not allowed in this game")
 
     def create_var_node(self, name: str, type_info: TypeInfo) -> VarNode:
         """
@@ -1065,20 +1089,20 @@ class AST2Flowchart:
         # 配列の場合
         if var_type.kind in (ci.TypeKind.CONSTANTARRAY, ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY, ci.TypeKind.DEPENDENTSIZEDARRAY):
             if var_type.kind != ci.TypeKind.CONSTANTARRAY:
-                sys.exit("our system cannot receive variable-size array")
+                set_sys_exit_error_msg("our system cannot receive variable-size array")
 
             tokens = list(cursor.get_tokens())
             type_info_for_array = type_info
 
             if "size" not in type_info_for_array:
-                sys.exit("error in type_info")
+                set_sys_exit_error_msg("error in type_info")
             
             index_num: int = 0
 
             content_cursors = self.get_child_cursor_list(cursor, (1, None)) 
 
             if len(content_cursors) == 0:
-                sys.exit("there is no content cursor in array variable")
+                set_sys_exit_error_msg("there is no content cursor in array variable")
 
             if content_cursors[0].kind == ci.CursorKind.TYPE_REF:
                 content_cursors.pop(0)
@@ -1112,7 +1136,7 @@ class AST2Flowchart:
 
             while "size" in type_info_for_array:
                 if len(content_cursors) == 0:
-                    sys.exit("error in number of children cursors of array")
+                    set_sys_exit_error_msg("error in number of children cursors of array")
 
                 expr_description = self.parse_expr(content_cursors.pop(0), index_expr_info, {})
                 index_expr_info.append_expr_description(
@@ -1134,7 +1158,7 @@ class AST2Flowchart:
 
             # 子カーソルの数がおかしい場合
             if len(content_cursors) >= 2:
-                sys.exit("error in number of children cursors of array")
+                set_sys_exit_error_msg("error in number of children cursors of array")
 
             var_node["comments"] = index_expr_info.expr_descriptions
             # 初期化子がある場合
@@ -1165,7 +1189,7 @@ class AST2Flowchart:
                 struct_cursors = self.get_child_cursor_list(cursor, (1, 2))
 
                 if struct_cursors[0].kind != ci.CursorKind.TYPE_REF:
-                    sys.exit("the first children cursor of struct variable has to be a TYPE_REF cursor")
+                    set_sys_exit_error_msg("the first children cursor of struct variable has to be a TYPE_REF cursor")
 
                 # 構造体の宣言の初期化が初期化子によるものなのか、他の構造体の代入によるものなのかでTYPE_REFを削るかどうかを決める
                 if len(struct_cursors) == 2 and struct_cursors[1].kind != ci.CursorKind.INIT_LIST_EXPR:
@@ -1206,24 +1230,24 @@ class AST2Flowchart:
                             {},
                         )
                         if struct_expr_info.has_standard_func_reference:
-                            sys.exit("this game does not allow that a struct part expression includes standarad functions")
+                            set_sys_exit_error_msg("this game does not allow that a struct part expression includes standarad functions")
                         var_node["comments"] = struct_expr_info.expr_descriptions
             elif record_kind == ci.CursorKind.UNION_DECL:
                 # 共用体 (まだ未実装)
-                sys.exit("our game cannot analyze union type variable yet")
+                set_sys_exit_error_msg("our game cannot analyze union type variable yet")
             else:
                 # struct, union以外typekindでRECORDを持つことはないが、念のため
-                sys.exit("error in AST cursor of RECORD")
+                set_sys_exit_error_msg("error in AST cursor of RECORD")
         # スカラー変数
         else:
             children = self.get_child_cursor_list(cursor) 
             if len(children):
                 if len(children) == 2:
                     if children[0].kind != ci.CursorKind.TYPE_REF:
-                        sys.exit("error in AST of a scalar variable")
+                        set_sys_exit_error_msg("error in AST of a scalar variable")
                     children.pop(0)
                 elif len(children) >= 3:
-                    sys.exit("error in number of cursors in a scalar variable")
+                    set_sys_exit_error_msg("error in number of cursors in a scalar variable")
                 self.apply_initializer(children[0], var_node)
             # 変数の初期値が無い場合
             else:
@@ -1329,7 +1353,7 @@ class AST2Flowchart:
                 var_info_for_func = var_info_for_func
             )
             if expr_info.has_standard_func_reference and self.get_cursor_extent_start(cursor).line != self.get_cursor_extent_end(cursor).line:
-                sys.exit("expression includes standarad functions has to be in a line")
+                set_sys_exit_error_msg("expression includes standarad functions has to be in a line")
 
             node["comments"] = expr_info.expr_descriptions
             node["initialized"] = True
@@ -1345,11 +1369,11 @@ class AST2Flowchart:
         elif cursor.kind == ci.CursorKind.STRING_LITERAL:
             str_literals = self.get_cursor_spelling(cursor)[1:-1]
             if len(node["children"]) < len(str_literals):
-                sys.exit("error in number of string")
+                set_sys_exit_error_msg("error in number of string")
 
             for i, child in enumerate(node["children"]):
                 if len(child["children"]) != 0 or child["type"] != "char":
-                    sys.exit("error in string literal initialization")
+                    set_sys_exit_error_msg("error in string literal initialization")
 
                 child["comments"] = [
                     Comment(
@@ -1416,7 +1440,7 @@ class AST2Flowchart:
             var_info_for_func = {}
         )
         if expr_info.has_standard_func_reference and self.get_cursor_extent_start(cursor).line != self.get_cursor_extent_end(cursor).line:
-            sys.exit("expression includes standarad functions has to be in a line")
+            set_sys_exit_error_msg("expression includes standarad functions has to be in a line")
 
         self.expr_node_info[f'"{expr_nodeID}"'] = ExprNodeInfo(
             vars = expr_info.var_references,
@@ -1480,7 +1504,7 @@ class AST2Flowchart:
             inside_paren_cursor = children[0]
             inside_expr_description = self.parse_expr(inside_paren_cursor, expr_info, execution_condition)
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in paren expression")
+                set_sys_exit_error_msg("this game does not allow standard function in paren expression")
 
             expr_description = expr_info.append_expr_description(
                 description=[TextPart(text= "primarily calculate part closed with parens ( and )" if self.is_english else "( ) で囲まれている部分は先に計算します")], 
@@ -1493,7 +1517,7 @@ class AST2Flowchart:
             tokens = list(cursor.get_tokens())
             # if macro is None:
             #     if len(tokens) != 1:
-            #         sys.exit("number of child tokens of const value (not macro) has to be 1")
+            #         set_sys_exit_error_msg("number of child tokens of const value (not macro) has to be 1")
             #     expr_description = TextPart(text = self.get_token_spelling(tokens[0]))
             # else:
             #     expr_description = MacroPart(
@@ -1502,7 +1526,7 @@ class AST2Flowchart:
             #     )
             #     macro = None
             if len(tokens) != 1:
-                sys.exit("number of child tokens of const value has to be 1")
+                set_sys_exit_error_msg("number of child tokens of const value has to be 1")
             expr_description = TextPart(text = self.get_token_spelling(tokens[0]))
         # スカラー変数の呼び出し
         elif cursor.kind == ci.CursorKind.DECL_REF_EXPR:
@@ -1550,10 +1574,10 @@ class AST2Flowchart:
                 execution_condition
             )
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in part of array variables")
+                set_sys_exit_error_msg("this game does not allow standard function in part of array variables")
 
             if "category" not in parent_expr or parent_expr["category"] == "array":
-                sys.exit("error in array parent")
+                set_sys_exit_error_msg("error in array parent")
 
             expr_description = ArrayVariablePart(
                 parent = parent_expr,
@@ -1576,10 +1600,10 @@ class AST2Flowchart:
             # referenceはstudents[i].scores[0]のstudents[i]のようにカーソルのspellingだけでは取得できないものがある。それにも対応できるようにparse_exprメソッドを呼び出す。
             parent_expr = self.parse_expr(member_cursor, expr_info, execution_condition)
             if "category" not in parent_expr or parent_expr["category"] == "struct":
-                sys.exit("error in struct reference")
+                set_sys_exit_error_msg("error in struct reference")
 
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in part of struct variable")
+                set_sys_exit_error_msg("this game does not allow standard function in part of struct variable")
 
             expr_description = StructVariablePart(
                 parent = parent_expr, 
@@ -1615,7 +1639,7 @@ class AST2Flowchart:
             ]
 
             if len(operator_tokens) != 1:
-                sys.exit("invalid number of unary operator tokens")
+                set_sys_exit_error_msg("invalid number of unary operator tokens")
 
             operator_token = operator_tokens[0]
             operator_spell = self.get_token_spelling(operator_token)
@@ -1629,7 +1653,7 @@ class AST2Flowchart:
             )
 
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in unary operator expression")
+                set_sys_exit_error_msg("this game does not allow standard function in unary operator expression")
 
             expr = (
                 [
@@ -1677,7 +1701,7 @@ class AST2Flowchart:
                     expr_type = expr_type
                 )
             else:
-                sys.exit("C unique unary expr operators other than sizeof are not accepted by our game")
+                set_sys_exit_error_msg("C unique unary expr operators other than sizeof are not accepted by our game")
         # 二項条件式 (a + b など)
         elif cursor.kind == ci.CursorKind.BINARY_OPERATOR:
             expr_crs: list[ci.Cursor] = self.get_child_cursor_list(cursor, 2)
@@ -1691,10 +1715,10 @@ class AST2Flowchart:
                     break
 
             if operator_spell == "":
-                sys.exit("binary operator is not found")
+                set_sys_exit_error_msg("binary operator is not found")
 
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow that a standard function is mixed with binary operator expression")
+                set_sys_exit_error_msg("this game does not allow that a standard function is mixed with binary operator expression")
 
             var_info_for_func = {}
 
@@ -1724,7 +1748,7 @@ class AST2Flowchart:
                         else:
                           decl_ref_tokens = list(left_cursor.get_tokens())
                           if len(decl_ref_tokens) == 0:
-                              sys.exit("number of declaration reference tokens has to be 1 or more")
+                              set_sys_exit_error_msg("number of declaration reference tokens has to be 1 or more")
                           var_name = self.get_token_spelling(decl_ref_tokens[0])
                           var_info_for_func["varname"] = var_name
 
@@ -1800,7 +1824,7 @@ class AST2Flowchart:
                     break
             
             if operator_spell == "":
-                sys.exit("compound assignment operator is not found")
+                set_sys_exit_error_msg("compound assignment operator is not found")
 
             left_expr = self.parse_expr_to_id(
                 expr_crs[0], 
@@ -1837,7 +1861,7 @@ class AST2Flowchart:
             )
 
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in compound assignment expression")
+                set_sys_exit_error_msg("this game does not allow standard function in compound assignment expression")
         # 三項条件式(c ? a : b) (ここはmallocやrealloc、fopenを許さない)
         elif cursor.kind == ci.CursorKind.CONDITIONAL_OPERATOR:
             expr_crs = self.get_child_cursor_list(cursor, 3) 
@@ -1875,13 +1899,13 @@ class AST2Flowchart:
                 expr_type
             )
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow standard function in conditional operator expression")
+                set_sys_exit_error_msg("this game does not allow standard function in conditional operator expression")
         # キャスト型
         elif cursor.kind == ci.CursorKind.CSTYLE_CAST_EXPR:
             children = self.get_child_cursor_list(cursor, 1)
 
             if expr_info.has_standard_func_reference:
-                sys.exit("this game does not allow that standard function is mixed with cast expression")
+                set_sys_exit_error_msg("this game does not allow that standard function is mixed with cast expression")
 
             cr = children[0]
             casted_expr = self.parse_expr(cr, expr_info, execution_condition, var_info_for_func = var_info_for_func)
@@ -1901,7 +1925,7 @@ class AST2Flowchart:
         # その他 → 対応していない計算式ということでエラー
         else:
             print(cursor.kind, cursor.referenced.kind, cursor.type.kind, self.get_cursor_line(cursor))
-            sys.exit("error in expression type")
+            set_sys_exit_error_msg("error in expression type")
 
         return expr_description
     
@@ -1934,7 +1958,7 @@ class AST2Flowchart:
                 execution_condition
             )
             if arg_expr_info.has_standard_func_reference:
-                sys.exit("any functions cannot contain standard functions in our game system")
+                set_sys_exit_error_msg("any functions cannot contain standard functions in our game system")
             
             arg_expr_description_list.append(arg_expr_description)
             
@@ -1968,7 +1992,7 @@ class AST2Flowchart:
             # expr_info.custom_func_count += custom_func_count_in_args
             # しかし、今は本プログラムの複雑性より、標準関数内に自作関数が含まれている場合はエラーを出して終了する
             if custom_func_count_in_args:
-                sys.exit("any standard functions cannot contain custom functions in our game system")
+                set_sys_exit_error_msg("any standard functions cannot contain custom functions in our game system")
 
             if var_info_for_func is None:
                 var_info_for_func = {}
@@ -1976,10 +2000,10 @@ class AST2Flowchart:
             # 標準関数は特別な形でfunc_referencesに登録する
             if func_name == "strcpy":
                 if len(arg_expr_description_list) != 2:
-                    sys.exit("number of arguments in strcpy has to be 2")
+                    set_sys_exit_error_msg("number of arguments in strcpy has to be 2")
 
                 if var_info_for_func:
-                    sys.exit(f"strcpy cannot have {var_info_for_func.keys()} for args")
+                    set_sys_exit_error_msg(f"strcpy cannot have {var_info_for_func.keys()} for args")
 
                 var_info_for_func = {
                     "destination": arg_expr_description_list[0], 
@@ -2001,7 +2025,7 @@ class AST2Flowchart:
                 )
             elif func_name == "scanf":
                 if var_info_for_func:
-                    sys.exit(f"scanf cannot have {var_info_for_func.keys()} for args")
+                    set_sys_exit_error_msg(f"scanf cannot have {var_info_for_func.keys()} for args")
 
                 var_info_for_func = {
                     "format": [self.get_token_spelling(t) for t in children[1].get_tokens()][0]
@@ -2024,7 +2048,7 @@ class AST2Flowchart:
                 self.line_info_dict[self.scanning_func].set_stdin(self.get_cursor_line(cursor))
             elif func_name == "fopen":
                 if not var_info_for_func:
-                    sys.exit("fopen cannot be used not for varialbe value assignment")
+                    set_sys_exit_error_msg("fopen cannot be used not for varialbe value assignment")
                 
                 var_info_for_func = {
                     **var_info_for_func,
@@ -2046,7 +2070,7 @@ class AST2Flowchart:
                 )
             elif func_name == "fclose":
                 if var_info_for_func:
-                    sys.exit(f"fclose cannot have {var_info_for_func.keys()} for args")
+                    set_sys_exit_error_msg(f"fclose cannot have {var_info_for_func.keys()} for args")
                 var_info_for_func = {
                     "varname": arg_expr_description_list[0]
                 }
@@ -2066,7 +2090,7 @@ class AST2Flowchart:
                 )
             elif func_name == "malloc":
                 if not var_info_for_func:
-                    sys.exit("malloc cannot be used not for varialbe value assignment")
+                    set_sys_exit_error_msg("malloc cannot be used not for varialbe value assignment")
 
                 var_info_for_func = {
                     **var_info_for_func,
@@ -2088,7 +2112,7 @@ class AST2Flowchart:
                 )
             elif func_name == "realloc":
                 if not var_info_for_func:
-                    sys.exit("realloc cannot be used not for varialbe value assignment")
+                    set_sys_exit_error_msg("realloc cannot be used not for varialbe value assignment")
                 var_info_for_func = {
                     **var_info_for_func, 
                     "size": "".join([self.get_token_spelling(t) for t in children[2].get_tokens()]), 
@@ -2109,7 +2133,7 @@ class AST2Flowchart:
                 )
             elif func_name == "free":
                 if var_info_for_func:
-                    sys.exit(f"free cannot have {var_info_for_func.keys()} for args")
+                    set_sys_exit_error_msg(f"free cannot have {var_info_for_func.keys()} for args")
                 var_info_for_func = {
                     "varname": arg_expr_description_list[0]
                 }
@@ -2129,7 +2153,7 @@ class AST2Flowchart:
                 )
             elif func_name in ("setvbuf", "printf", "fprintf", "fgets", "fscanf"):
                 if var_info_for_func:
-                    sys.exit(f"{func_name} cannot have {var_info_for_func.keys()} for args")
+                    set_sys_exit_error_msg(f"{func_name} cannot have {var_info_for_func.keys()} for args")
 
                 comment = FunctionComment(
                     func_name=func_name, 
@@ -2145,7 +2169,7 @@ class AST2Flowchart:
                     expr = arg_expr_description_list
                 )
             else:
-                sys.exit(f"standard function \"{func_name}\" cannot be analyzed by our system")
+                set_sys_exit_error_msg(f"standard function \"{func_name}\" cannot be analyzed by our system")
 
             return expr_info.set_standard_func_reference(
                 func_name, 
@@ -2159,13 +2183,13 @@ class AST2Flowchart:
         callee: ci.Cursor | None = cursor.referenced
 
         if not isinstance(callee, ci.Cursor):
-            sys.exit("function reference is not found")
+            set_sys_exit_error_msg("function reference is not found")
 
         if callee.kind != ci.CursorKind.FUNCTION_DECL:
-            sys.exit("non function cursor was given to \"is_custom_function\"")
+            set_sys_exit_error_msg("non function cursor was given to \"is_custom_function\"")
 
         if (file := self.get_cursor_file(callee)) is None or not isinstance(file.name, str):
-            sys.exit("file name is not found")
+            set_sys_exit_error_msg("file name is not found")
 
         return file.name in self.c_files
 
@@ -2181,7 +2205,7 @@ class AST2Flowchart:
             print(f"    {self.get_expr_type_spelling(cr)} {self.get_cursor_spelling(cr)}")
             # type = self.get_cursor_type(cr)
             # if type.kind in (ci.TypeKind.INCOMPLETEARRAY, ci.TypeKind.VARIABLEARRAY):
-            #     sys.exit("our system cannot receive variable array member of a struct variable")
+            #     set_sys_exit_error_msg("our system cannot receive variable array member of a struct variable")
             
             # array_size: list[int] = []
             # if type.kind == ci.TypeKind.CONSTANTARRAY:
@@ -2189,7 +2213,7 @@ class AST2Flowchart:
             #         array_size.append(type.element_count)
             #         type = type.element_type
             #         if not isinstance(type, ci.Type):
-            #             sys.exit("type has to be ci.Type")
+            #             set_sys_exit_error_msg("type has to be ci.Type")
             #     print(f"    length = {array_size}")
             #     print(f"    type = {type.kind}")
             # else:
@@ -2266,14 +2290,14 @@ class AST2Flowchart:
         cond_cursor = children[0]
 
         if self.get_cursor_extent_start(cond_cursor).line != self.get_cursor_extent_end(cond_cursor).line:
-            sys.exit("condition expression has to be in one line")
+            set_sys_exit_error_msg("condition expression has to be in one line")
 
         cond_nodeID = self.get_expr(cond_cursor, shape='diamond', label='if')
 
         # ifの条件がtext単体でないことを確かめる (単体だとif()の()の行をスキップしてしまう)
-        # if文に定数条件を使うことは無い(あまり意味がない)のでこの場合はsys.exit()で除外する
+        # if文に定数条件を使うことは無い(あまり意味がない)のでこの場合はset_sys_exit_error_msg()で除外する
         if len(self.expr_node_info[f'"{cond_nodeID}"']["vars"]) == 0 and len(self.expr_node_info[f'"{cond_nodeID}"']["func"]) == 0:
-            sys.exit("static condition cannot be set to if condition")
+            set_sys_exit_error_msg("static condition cannot be set to if condition")
 
         self.create_edge(nodeID, cond_nodeID, edgeName)
 
@@ -2371,7 +2395,7 @@ class AST2Flowchart:
         cond_cursor = children[0]
 
         if self.get_cursor_extent_start(cond_cursor).line != self.get_cursor_extent_end(cond_cursor).line:
-            sys.exit("condition expression has to be in one line")
+            set_sys_exit_error_msg("condition expression has to be in one line")
 
         self.line_info_dict[self.scanning_func].set_loop_start_and_goal(self.get_cursor_extent_start(cursor).line, self.get_cursor_extent_end(cursor).line)
 
@@ -2438,11 +2462,11 @@ class AST2Flowchart:
         children = self.get_child_cursor_list(cursor, 2)
 
         if children[0].kind != ci.CursorKind.COMPOUND_STMT:
-            sys.exit("the first child cursor of do-while statement has to be compound statement")
+            set_sys_exit_error_msg("the first child cursor of do-while statement has to be compound statement")
 
         comp_stmt_cursor, cond_cursor = children
         if self.get_cursor_extent_start(cond_cursor).line != self.get_cursor_extent_end(cond_cursor).line:
-            sys.exit("condition expression has to be in one line")
+            set_sys_exit_error_msg("condition expression has to be in one line")
 
         self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_extent_start(cursor).line)
         self.register_execution_info(init_nodeID, create_do_while_execution_info(self.get_cursor_extent_start(cursor).line, None))
@@ -2485,7 +2509,7 @@ class AST2Flowchart:
         self.create_breaker_info_for_loop(
             condition_line = self.get_cursor_extent_start(cursor).line
         )
-        
+
         init_nodeID = None
         cond_nodeID = None
         change_nodeID = None
@@ -2497,10 +2521,10 @@ class AST2Flowchart:
         for_header_separators: list[ci.SourceLocation] = [token.location for token in list(cursor.get_tokens()) if self.get_token_spelling(token) == ';'][:2]
 
         if len(for_header_separators) != 2:
-            sys.exit("for header has to have 2 separators")
+            set_sys_exit_error_msg("for header has to have 2 separators")
 
         if for_header_separators[0].line != for_header_separators[1].line:
-            sys.exit("for header's 2 separators have to be in a line")
+            set_sys_exit_error_msg("for header's 2 separators have to be in a line")
 
         self.line_info_dict[self.scanning_func].set_loop_start_and_goal(self.get_cursor_extent_start(cursor).line, self.get_cursor_extent_end(cursor).line)
         for cr in expr_cursors:
@@ -2508,11 +2532,11 @@ class AST2Flowchart:
 
             if self.get_cursor_offset(cr) < for_header_separators[0].offset:
                 if self.get_cursor_extent_start(cr).line != for_header_separators[0].line:
-                    sys.exit("for initializer in the same line of the first semi colon")
+                    set_sys_exit_error_msg("for initializer in the same line of the first semi colon")
 
                 # もしかしたら変数の値の変更が2つ以上ある場合に対応できていない可能性がある。もしそうなら後で修正する
                 if cr.kind == ci.CursorKind.DECL_STMT:
-                    sys.exit("this game does not allow that variable initializers in for statement initializer now")
+                    set_sys_exit_error_msg("this game does not allow that variable initializers in for statement initializer now")
                     var_cr_list = self.get_child_cursor_list(cr) 
                     init_nodeID = self.create_node(str(self.get_cursor_line(cursor)), 'invhouse')
                     var_nodeID = init_nodeID
@@ -2534,14 +2558,14 @@ class AST2Flowchart:
                     edgeName = ""
             elif for_header_separators[1].offset < self.get_cursor_offset(cr):
                 if self.get_cursor_extent_end(cr).line != for_header_separators[1].line:
-                    sys.exit("for initializer in the same line of the first semi colon")
+                    set_sys_exit_error_msg("for initializer in the same line of the first semi colon")
 
                 change_expr_cursor = cr
             else:
-                sys.exit("error in analyzing contents inside parens of for statement")
+                set_sys_exit_error_msg("error in analyzing contents inside parens of for statement")
             
             if self.get_cursor_line(cursor) != self.get_cursor_extent_end(cr).line:
-                sys.exit("for statement initializer, condition, change expression have to be in one line")
+                set_sys_exit_error_msg("for statement initializer, condition, change expression have to be in one line")
 
         if cond_nodeID is None:
             cond_nodeID = self.create_node("for", 'pentagon')
@@ -2579,7 +2603,7 @@ class AST2Flowchart:
             change_nodeID = self.get_expr(change_expr_cursor, shape='parallelogram', label=str(self.get_cursor_line(cursor)))
             # 更新式に関数がある場合は処理が複雑になるので今は対応させない
             if len(self.expr_node_info[f'"{change_nodeID}"']["funcs"]):
-                sys.exit("functions are not allowed in a change expression of a for statement")
+                set_sys_exit_error_msg("functions are not allowed in a change expression of a for statement")
 
             self.register_execution_info(change_nodeID, create_for_change_execution_info(self.get_cursor_line(cursor)))
         else:
@@ -2608,7 +2632,7 @@ class AST2Flowchart:
         cond_cursor, comp_exec_cursor = children
 
         if self.get_cursor_extent_start(cond_cursor).line != self.get_cursor_extent_end(cond_cursor).line:
-            sys.exit("condition expression has to be in one line")
+            set_sys_exit_error_msg("condition expression has to be in one line")
 
         # switchもbreakで脱出する枠組みの対象となるのでその情報を登録しておく
         self.line_info_dict[self.scanning_func].set_loop_start_and_goal(
@@ -2617,7 +2641,7 @@ class AST2Flowchart:
         )
 
         if self.room_size_estimate is None:
-            sys.exit("room size estimate is not found")
+            set_sys_exit_error_msg("room size estimate is not found")
 
         switch_room_size_estimate = self.room_size_estimate
         self.room_size_estimate = None
@@ -2652,13 +2676,13 @@ class AST2Flowchart:
                     children = self.get_child_cursor_list(cr)
                     if cr.kind == ci.CursorKind.CASE_STMT:
                         if len(children) != 2:
-                            sys.exit("number of child cursors of case cursor has to be 2")
+                            set_sys_exit_error_msg("number of child cursors of case cursor has to be 2")
                         case_value_cursor, next_cr = children
                     else: # ci.CursorKind.DEFAULT_STMT
                         if len(children) != 1:
-                            sys.exit("number of child cursors of default cursor has to be 1")
+                            set_sys_exit_error_msg("number of child cursors of default cursor has to be 1")
                         if has_default:
-                            sys.exit("default label cannot be overlapped")
+                            set_sys_exit_error_msg("default label cannot be overlapped")
                         next_cr = children[0]
                         case_value_cursor = None
                         has_default = True
@@ -2696,7 +2720,7 @@ class AST2Flowchart:
 
                 for case_cursor, case_value_cursor in case_cursor_list:
                     if case_value_cursor and self.get_cursor_line(case_cursor) != self.get_cursor_extent_end(case_value_cursor).line:
-                        sys.exit("case expression has to be in one line")
+                        set_sys_exit_error_msg("case expression has to be in one line")
 
                     if case_value_cursor:
                         case_nodeID = self.get_expr(case_value_cursor, shape='invtriangle', label='case')
@@ -2708,7 +2732,7 @@ class AST2Flowchart:
                     prev_nodeID = case_nodeID
 
                 if case_nodeID is None:
-                    sys.exit("case cursor is not found")
+                    set_sys_exit_error_msg("case cursor is not found")
 
                 # breakなしで他のcaseに入る場合 (case_indexが0でない、かつnodeIDがNoneでない場合)
                 if case_index and nodeID:
@@ -2732,14 +2756,14 @@ class AST2Flowchart:
             children = self.get_child_cursor_list(comp_exec_cursor)
             if comp_exec_cursor.kind == ci.CursorKind.CASE_STMT:
                 if len(children) != 2:
-                    sys.exit("number of child cursors of case cursor has to be 2")
+                    set_sys_exit_error_msg("number of child cursors of case cursor has to be 2")
                 case_value_cursor, stmt_cursor = children
                 if self.get_cursor_extent_start(comp_exec_cursor).line != self.get_cursor_extent_end(case_value_cursor).line:
-                    sys.exit("case expression has to be in one line")
+                    set_sys_exit_error_msg("case expression has to be in one line")
                 case_nodeID = self.get_expr(case_value_cursor, shape='invtriangle')
             else: # ci.CursorKind.DEFAULT_STMT
                 if len(children) != 1:
-                    sys.exit("number of child cursors of case cursor has to be 2")
+                    set_sys_exit_error_msg("number of child cursors of case cursor has to be 2")
                 stmt_cursor = children[0]
                 case_value_cursor = None
                 case_nodeID = self.create_node('default', shape='invtriangle')
@@ -2759,7 +2783,7 @@ class AST2Flowchart:
             self.line_info_dict[self.scanning_func].set_execution_line(self.get_cursor_line(stmt_cursor))
             self.create_edge(nodeID, end_nodeID)
         else:
-            sys.exit("impossible ast of switch statement is found")
+            set_sys_exit_error_msg("impossible ast of switch statement is found")
 
         self.create_edge(nodeID, end_nodeID)
 
@@ -2777,7 +2801,7 @@ class AST2Flowchart:
     # ループ処理のノードをくっつけていく (switch文はbreakしか許されないので、switchはここに含めない)
     def create_edge_for_loop_breaker(self, breakTo_nodeID: str, continueTo_nodeID: str):
         if len(self.loop_breaker_list) == 0:
-            sys.exit("length of loop_breaker_list has to be 1 or more")
+            set_sys_exit_error_msg("length of loop_breaker_list has to be 1 or more")
         
         loop_breaker = self.loop_breaker_list.pop(-1)
         break_list = loop_breaker["break"]
@@ -2824,7 +2848,7 @@ class AST2Flowchart:
     #switchのcaseのbreakノードを追加する。
     def create_edge_for_switch_breaker(self, end_nodeID: str):
         if len(self.break_in_switch_list) == 0:
-            sys.exit("length of break_in_switch_list has to be 1 or more")
+            set_sys_exit_error_msg("length of break_in_switch_list has to be 1 or more")
 
         break_in_switch = self.break_in_switch_list.pop(-1)
         break_pos_list = break_in_switch["break"]
