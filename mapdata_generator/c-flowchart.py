@@ -1,6 +1,6 @@
 import argparse
-from parse import parseIndex, ASTtoFlowChart
-from generate_bit_map import GenBitMap
+from parse import AST2Flowchart
+from generate_bit_map import BitMapGenerator
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', required=True)
@@ -9,15 +9,26 @@ parser.add_argument('-u', action='store_true', help='Enable color universal desi
 parser.add_argument('-e', action='store_true', help='Enable english mode')
 
 args = parser.parse_args()
-translation_units = parseIndex(args.c)
 
-programname = args.p
+program_name: str = args.p
+c_files: list[str] = args.c
+is_english: bool = args.e
+is_universal: bool = args.u
 
-for cname, tu in translation_units.items():
-    fchart = ASTtoFlowChart(args.e)
-    fchart.write_ast(tu, programname)
+ast_to_flowchart = AST2Flowchart(program_name, c_files, is_english)
 
-genBitMap = GenBitMap(programname, fchart.func_info_dict, fchart.gvar_info, fchart.varNode_info, fchart.expNode_info, fchart.roomSize_info, fchart.gotoRoom_list, fchart.condition_move, args.e)
-genBitMap.startTracking()
+genBitMap = BitMapGenerator(
+    program_name, 
+    ast_to_flowchart.func_info_dict, 
+    ast_to_flowchart.gvar_info, 
+    ast_to_flowchart.var_info, 
+    ast_to_flowchart.expr_node_info, 
+    ast_to_flowchart.room_size_info, 
+    ast_to_flowchart.gotoRoom_list, 
+    ast_to_flowchart.execution_info,
+    ast_to_flowchart.line_info_dict,
+    is_english,
+    is_universal
+)
 
-genBitMap.setMapChip(programname, fchart.line_info_dict, args.u)
+genBitMap.start_tracking()

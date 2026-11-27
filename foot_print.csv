@@ -1,1 +1,4 @@
-start,103_loops,63, 93
+start,105_pointer,7, 58
+itemget, 105_pointer,9, 59,data
+itemget, 105_pointer,2, 51,p
+end, 105_pointer,2, 51
