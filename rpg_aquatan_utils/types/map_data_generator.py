@@ -1,4 +1,29 @@
 from rpg_aquatan_utils.types.expr_descriptions import *
+import sys
+
+def set_sys_exit_error_msg(msg: str):
+    result = []
+    max_chars = 100
+
+    while len(msg) > max_chars:
+        # 指定文字数以内で最後に出現する空白文字を探す
+        split_index = -1
+
+        for i in range(max_chars - 1, -1, -1):
+            if msg[i].isspace():
+                split_index = i
+                break
+
+        # 空白がなければ指定文字数で区切る
+        if split_index == -1:
+            split_index = max_chars
+
+        result.append(msg[:split_index].rstrip())
+        msg = msg[split_index:].lstrip()
+
+    result.append(msg)
+
+    sys.exit("\n".join(result))
 
 class GotoRoomInfo(TypedDict):
     to_nodeID: str

@@ -126,13 +126,13 @@ class ExecutionCommentHandler:
 
     def register_if_condition_comment(self, line: int, condition_line: int, condition_comment: list[Comment]):
         if line <= 0 or condition_line <= 0:
-            sys.exit("line or case line have to be 1 or bigger integer")
+            set_sys_exit_error_msg("line or case line have to be 1 or bigger integer")
 
         if line in self.if_condition_comments:
             if self.if_condition_comments[line]["type"] != "if":
-                sys.exit("type of if condition comments has to be \"if\"")
+                set_sys_exit_error_msg("type of if condition comments has to be \"if\"")
             if condition_line in self.if_condition_comments[line]["conditions"]:
-                sys.exit("different conditions of same if statement cannot be in same condition_line")
+                set_sys_exit_error_msg("different conditions of same if statement cannot be in same condition_line")
             self.if_condition_comments[line]["conditions"][condition_line] = condition_comment
         else:
             self.if_condition_comments[line] = TempIfConditionsComment(
@@ -144,11 +144,11 @@ class ExecutionCommentHandler:
     
     def register_while_condition_comment(self, line: int, condition_comment: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line in self.while_condition_comments:
             if self.while_condition_comments[line]["type"] != "while":
-                sys.exit("type of while condition comments has to be \"while\"")
+                set_sys_exit_error_msg("type of while condition comments has to be \"while\"")
         else:
             self.while_condition_comments[line] = WhileConditionComment(
                 type="while", 
@@ -157,11 +157,11 @@ class ExecutionCommentHandler:
 
     def register_do_while_condition_comment(self, line: int, condition_comment: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line in self.do_while_condition_comments:
             if self.do_while_condition_comments[line]["type"] != "do_while":
-                sys.exit("type of do-while condition comments has to be \"do-while\"")
+                set_sys_exit_error_msg("type of do-while condition comments has to be \"do-while\"")
         else:
             self.do_while_condition_comments[line] = DoWhileConditionComment(
                 type="do_while", 
@@ -172,10 +172,10 @@ class ExecutionCommentHandler:
     # こうすることで、execution_comments[line]はリストにする必要がなくなる
     def register_for_comment(self, line: int, comment_type: str, comment: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if comment_type not in ("initializer", "condition", "change"):
-            sys.exit(f"{comment_type} is not applicable to for statement comment type")
+            set_sys_exit_error_msg(f"{comment_type} is not applicable to for statement comment type")
 
         if line not in self.for_comments:
             self.for_comments[line] = ForComment(type="for")
@@ -183,19 +183,19 @@ class ExecutionCommentHandler:
         for_comment = self.for_comments[line]
 
         if for_comment["type"] != "for":
-            sys.exit('type of for comments has to be "for"')
+            set_sys_exit_error_msg('type of for comments has to be "for"')
 
         if comment_type in for_comment:
             return
 
         if comment_type == "initializer" and "var_initializer" in for_comment:
-            sys.exit(f"{comment_type} element cannot be mixed up with variable initializer")
+            set_sys_exit_error_msg(f"{comment_type} element cannot be mixed up with variable initializer")
 
         for_comment[comment_type] = comment
 
     def register_for_var_initializer_comment(self, line: int, comment: list[VarInfo]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line not in self.for_comments:
             self.for_comments[line] = ForComment(type="for")
@@ -203,23 +203,23 @@ class ExecutionCommentHandler:
         for_comment = self.for_comments[line]
 
         if for_comment["type"] != "for":
-            sys.exit('type of for comments has to be "for"')
+            set_sys_exit_error_msg('type of for comments has to be "for"')
 
         if "var_initializer" in for_comment:
-            sys.exit("variable initializer comments of for statement cannot be overlapped")
+            set_sys_exit_error_msg("variable initializer comments of for statement cannot be overlapped")
 
         if "initializer" in for_comment:
-            sys.exit(f"varialbe initializer element cannot be mixed up with for initializer")
+            set_sys_exit_error_msg(f"varialbe initializer element cannot be mixed up with for initializer")
 
         for_comment["var_initializer"] = comment
 
     def register_switch_condition_comment(self, line: int, condition_comment: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line in self.switch_condition_comments:
             if self.switch_condition_comments[line]["type"] != "switch":
-                sys.exit("type of switch condition comments has to be \"switch\"")
+                set_sys_exit_error_msg("type of switch condition comments has to be \"switch\"")
         else:
             self.switch_condition_comments[line] = SwitchConditionComment(
                 type="switch",
@@ -229,10 +229,10 @@ class ExecutionCommentHandler:
 
     def register_case_comment(self, line: int, case_expr_node_info_list: list[ExprNodeInfo]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if not line in self.switch_condition_comments or self.switch_condition_comments[line]["type"] != "switch":
-            sys.exit("switch condition comment has to be already registered")
+            set_sys_exit_error_msg("switch condition comment has to be already registered")
 
         self.switch_condition_comments[line]["case_exprs"].append(
             [
@@ -246,13 +246,13 @@ class ExecutionCommentHandler:
 
     def register_default_index(self, line: int, index: int):
         if line <= 0 or index <= -1:
-            sys.exit("line has to be 1 or bigger integer, and default index have to be 0 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer, and default index have to be 0 or bigger integer")
 
         if not line in self.switch_condition_comments or self.switch_condition_comments[line]["type"] != "switch":
-            sys.exit("switch condition comment has to be already registered")
+            set_sys_exit_error_msg("switch condition comment has to be already registered")
 
         if "default_index" in self.switch_condition_comments[line]:
-            sys.exit("default index of switch statement cannot be overlapped")
+            set_sys_exit_error_msg("default index of switch statement cannot be overlapped")
 
         self.switch_condition_comments[line]["default_index"] = index
 
@@ -262,9 +262,9 @@ class ExecutionCommentHandler:
         condition_line = execution_info["condition_line"]
 
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
         if line in self.control_flow_comments:
-            sys.exit("some comments are already registered in the line")
+            set_sys_exit_error_msg("some comments are already registered in the line")
 
         self.control_flow_comments[line] = ControlFlowComment(
             type = type,
@@ -273,10 +273,10 @@ class ExecutionCommentHandler:
 
     def register_expression_comment(self, line: int, expression: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line in self.expression_comments:
-            sys.exit("expression comment is already registered")
+            set_sys_exit_error_msg("expression comment is already registered")
 
         self.expression_comments[line] = ExpressionComment(
             type="expression",
@@ -285,10 +285,10 @@ class ExecutionCommentHandler:
 
     def register_return_comment(self, line: int, expression: list[Comment]):
         if line <= 0:
-            sys.exit("line has to be 1 or bigger integer")
+            set_sys_exit_error_msg("line has to be 1 or bigger integer")
 
         if line in self.expression_comments:
-            sys.exit("expression comment is already registered")
+            set_sys_exit_error_msg("expression comment is already registered")
 
         self.return_comments[line] = ReturnComment(
             type="return",
@@ -297,14 +297,14 @@ class ExecutionCommentHandler:
 
     def register_non_variable_comments(self, line: int, comment: NonVarComment, execution_comments: dict[int, NonVarComment]):
         if line in execution_comments:
-            sys.exit("two or more comments cannot be registered to execution_comments dictionary")
+            set_sys_exit_error_msg("two or more comments cannot be registered to execution_comments dictionary")
         execution_comments[line] = comment
 
     def create_non_varialble_execution_comments(self) -> dict[int, NonVarComment]:
         execution_comments: dict[int, NonVarComment] = {}
         for line, if_conditions_comment in self.if_condition_comments.items():
             if line in execution_comments:
-                sys.exit("two or more comments cannot be registered to execution_comments dictionary")
+                set_sys_exit_error_msg("two or more comments cannot be registered to execution_comments dictionary")
             execution_comments[line] = IfConditionsComment(
                 type = "if",
                 line = line,
@@ -738,7 +738,7 @@ class MapInfo:
             for i, v in enumerate(obj):
                 self.check_data_format_is_true(v, f"{path}[{i}]")
         elif isinstance(obj, set):
-            sys.exit(f"error in the set\nits detail is {obj}")
+            set_sys_exit_error_msg(f"error in the set\nits detail is {obj}")
 
     def write_map_init_file(self, gvar_str: str):
         config = configparser.ConfigParser()
@@ -1127,7 +1127,7 @@ class BitMapGenerator:
 
         self.func_name = "main"
         if (func_info := self.func_info_dict.pop(self.func_name, None)) is None:
-            sys.exit("function \"main\" is not found")
+            set_sys_exit_error_msg("function \"main\" is not found")
         
         self.track_function_entry(func_info)
 
@@ -1161,7 +1161,7 @@ class BitMapGenerator:
         
         for labelName, goto_room in self.goto_room_list[self.func_name].items():
             # gotoラベルの処理は後々考える
-            sys.exit("our game still cannot accept c programs which have goto labels")
+            set_sys_exit_error_msg("our game still cannot accept c programs which have goto labels")
 
             to_nodeID = goto_room["to_nodeID"]
             from_nodeID_list = goto_room["from_nodeID"]
@@ -1196,7 +1196,7 @@ class BitMapGenerator:
                 to_nodeID_info = self.pop_next_node_info(nodeID)
 
                 if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                    sys.exit(f"flowchart node of a if statement condition is not found")
+                    set_sys_exit_error_msg(f"flowchart node of a if statement condition is not found")
 
                 cond_line = expr_node_info["line"]
                 ### ここで、previous_lineとcond_lineをくっつける
@@ -1206,7 +1206,7 @@ class BitMapGenerator:
                     return
 
                 if len(to_nodeID_info) != 2:
-                    sys.exit("number of nodes connected from an if node has to be 2")
+                    set_sys_exit_error_msg("number of nodes connected from an if node has to be 2")
 
                 node_shapes = tuple([self.get_node_shape(to_nodeID) for to_nodeID, _ in to_nodeID_info])
                 # (circle, diamond), (circle, doublecircle), (circle, terminator)
@@ -1214,10 +1214,10 @@ class BitMapGenerator:
                     to_nodeID_info.reverse()
                     node_shapes = (node_shapes[1], node_shapes[0])
                 elif node_shapes[0] != "circle":
-                    sys.exit("a circle node has to be included")
+                    set_sys_exit_error_msg("a circle node has to be included")
 
                 if node_shapes[1] not in ("diamond", "doublecircle", "terminator"):
-                    sys.exit("a wrong node for false condition is included")
+                    set_sys_exit_error_msg("a wrong node for false condition is included")
                 
                 to_nodeID = to_nodeID_info[0][0]
                 self.create_room(to_nodeID, crnt_room_nodeID)
@@ -1267,7 +1267,7 @@ class BitMapGenerator:
                 self.create_room(to_nodeID, crnt_room_nodeID)
 
                 if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                    sys.exit("false node in if statement is not found")
+                    set_sys_exit_error_msg("false node in if statement is not found")
 
                 ### 偽の条件を次のprevious_lineに設定する
                 current_line = (cond_line, int(False))
@@ -1349,7 +1349,7 @@ class BitMapGenerator:
                 to_nodeID_info = self.pop_next_node_info(nodeID)
 
                 if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                    sys.exit(f"flowchart node of a do-while statement condition is not found")
+                    set_sys_exit_error_msg(f"flowchart node of a do-while statement condition is not found")
 
                 ### ここで設定する
                 self.set_next_line(previous_line, expr_node_info["line"])
@@ -1358,7 +1358,7 @@ class BitMapGenerator:
                     return
                 
                 if len(to_nodeID_info) != 2 or (self.get_node_shape(to_nodeID_info[0][0]), self.get_node_shape(to_nodeID_info[1][0])) not in (("circle", "doublecircle"), ("doublecircle", "circle")):
-                    sys.exit("wrong number or type nodes are connected from a do-while condition node")
+                    set_sys_exit_error_msg("wrong number or type nodes are connected from a do-while condition node")
 
                 crnt_room_nodeID = nodeID
                 
@@ -1421,7 +1421,7 @@ class BitMapGenerator:
                     )
             else: # switch
                 if (switch_expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                    sys.exit("flowchart node of a switch statement condition is not found")
+                    set_sys_exit_error_msg("flowchart node of a switch statement condition is not found")
                 
                 to_nodeID_info = self.pop_next_node_info(nodeID)
 
@@ -1432,7 +1432,7 @@ class BitMapGenerator:
                     return
 
                 if any(self.get_node_shape(to_nodeID) != "invtriangle" for to_nodeID, _ in to_nodeID_info):
-                    sys.exit("wrong type nodes are connected from a switch condition node")
+                    set_sys_exit_error_msg("wrong type nodes are connected from a switch condition node")
 
                 self.map_info.execution_comment_handler.register_switch_condition_comment(
                     switch_expr_node_info["line"],
@@ -1471,19 +1471,19 @@ class BitMapGenerator:
                         # defaultラベルノード
                         else:
                             if has_default:
-                                sys.exit("default label cannot be overlapped")
+                                set_sys_exit_error_msg("default label cannot be overlapped")
 
                             default_label = self.get_node_label(to_nodeID)
                             if len(default_label) < 4:
-                                sys.exit("default label for switch statement is not found")
+                                set_sys_exit_error_msg("default label for switch statement is not found")
                             split_label_str = default_label[1:-1].split(',')
 
                             if len(split_label_str) != 2 or split_label_str[0] != "default":
-                                sys.exit("unknown node is found for switch default label")
+                                set_sys_exit_error_msg("unknown node is found for switch default label")
                             try:
                                 default_line = int(split_label_str[1])
                             except:
-                                sys.exit("line of default label is not found")
+                                set_sys_exit_error_msg("line of default label is not found")
                             has_default = True
 
                         if self.get_node_shape(temp_nodeID) != 'invtriangle':
@@ -1492,12 +1492,12 @@ class BitMapGenerator:
                         to_nodeID = temp_nodeID
 
                     if to_nodeID not in self.map_info.execution_info:
-                        sys.exit("execution info for a case label is not found")
+                        set_sys_exit_error_msg("execution info for a case label is not found")
 
                     case_group_list.append((to_nodeID, case_expr_node_info_list, default_line))
 
                 if len(case_group_list) == 0:
-                    sys.exit("switch statement has to have one or more case labels")
+                    set_sys_exit_error_msg("switch statement has to have one or more case labels")
 
                 case_group_list.sort(
                     key=lambda case_group: self.map_info.execution_info[case_group[0]]["true_case_index"]
@@ -1505,7 +1505,7 @@ class BitMapGenerator:
 
                 for case_index, (to_nodeID, case_expr_node_info_list, default_line) in enumerate(case_group_list):
                     if case_index != self.map_info.execution_info[to_nodeID]["true_case_index"]:
-                        sys.exit("true case index does not match the order of case label groups")
+                        set_sys_exit_error_msg("true case index does not match the order of case label groups")
 
                     condition_detail_list = [
                         [f"switch condition of line {switch_expr_node_info["line"]}", "matches"]
@@ -1588,7 +1588,7 @@ class BitMapGenerator:
 
                     in_case_nodeID_info = self.pop_next_node_info(to_nodeID)
                     if len(in_case_nodeID_info) != 1:
-                        sys.exit("number of child nodes connected from case node has to be 1")
+                        set_sys_exit_error_msg("number of child nodes connected from case node has to be 1")
 
                     ### ここで、(switch_expr_node_info["line"], case_index)を渡す
                     self.track_function_body(
@@ -1622,7 +1622,7 @@ class BitMapGenerator:
 
                     in_case_nodeID_info = self.pop_next_node_info(end_nodeID)
                     if len(in_case_nodeID_info) != 1:
-                        sys.exit("number of child nodes connected from case node has to be 1")
+                        set_sys_exit_error_msg("number of child nodes connected from case node has to be 1")
 
                     ### ここで、(switch_expr_node_info["line"], -1)を渡す
                     self.track_function_body(
@@ -1635,7 +1635,7 @@ class BitMapGenerator:
             to_nodeID_info = self.pop_next_node_info(nodeID)
 
             if len(to_nodeID_info) != 1:
-                sys.exit("number of child nodes connected from a terminator node has to be 1")
+                set_sys_exit_error_msg("number of child nodes connected from a terminator node has to be 1")
 
             to_nodeID, _ = to_nodeID_info[0]
 
@@ -1643,10 +1643,10 @@ class BitMapGenerator:
             while True:
                 # ifの終点ノードは再び通ることが必要な場合が存在するので、ノード情報をポップしてしまうpop_next_node_infoメソッドは使わない
                 if (after_if_end_node_info := self.nextNodeInfo.get(to_nodeID, None)) is None:
-                    sys.exit("node info after if-end node is not found")
+                    set_sys_exit_error_msg("node info after if-end node is not found")
 
                 if len(after_if_end_node_info) != 1:
-                    sys.exit("number of nodes which are derived from a if-end node has to be 1")
+                    set_sys_exit_error_msg("number of nodes which are derived from a if-end node has to be 1")
 
                 next_nodeID, _ = after_if_end_node_info[0]
                 # if文の終点ではない = 次の処理のノードに到達
@@ -1656,9 +1656,9 @@ class BitMapGenerator:
 
                 # if-endノードの次は同じ階層のif-endノードをまとめるノードに繋がっている
                 if (if_end_node_info := self.nextNodeInfo.get(next_nodeID, None)) is None:
-                    sys.exit("node info which should be derived from a if-end node is not found")
+                    set_sys_exit_error_msg("node info which should be derived from a if-end node is not found")
                 if len(if_end_node_info) != 1:
-                    sys.exit("number of nodes which are derived from a if-end node has to be 1")
+                    set_sys_exit_error_msg("number of nodes which are derived from a if-end node has to be 1")
 
                 to_nodeID, _ = if_end_node_info[0]
 
@@ -1682,12 +1682,12 @@ class BitMapGenerator:
         elif self.get_node_shape(nodeID) == 'pentagon':
             condition_type = self.get_node_label(nodeID)
             if condition_type not in ("while", "for"):
-                sys.exit("label of a pentagon node is incorrect")
+                set_sys_exit_error_msg("label of a pentagon node is incorrect")
 
             # condition_typeがforの場合は、expr_node_infoがない場合もある? (今後考える必要あり?)
             # → conditionがなくてもline情報だけを持つexpr_node_infoを登録することにした
             if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                sys.exit(f"flowchart node of {condition_type} condition is not found")
+                set_sys_exit_error_msg(f"flowchart node of {condition_type} condition is not found")
 
             # 条件文以前の処理を同部屋に含めてはいけない
             self.create_room(nodeID, crnt_room_nodeID)
@@ -1708,7 +1708,7 @@ class BitMapGenerator:
                 return
             
             if len(to_nodeID_info) != 2 or (self.get_node_shape(to_nodeID_info[0][0]), self.get_node_shape(to_nodeID_info[1][0])) not in (("circle", "doublecircle"), ("doublecircle", "circle")):
-                sys.exit(f"wrong number or type nodes are connected from a {condition_type} condition node")
+                set_sys_exit_error_msg(f"wrong number or type nodes are connected from a {condition_type} condition node")
 
             func_reference_group = FuncReferenceGroup(
                 name = f"{condition_type} condition line of {expr_node_info["line"]}" if self.is_english else f"{expr_node_info["line"]}行目の{condition_type}条件",
@@ -1773,16 +1773,16 @@ class BitMapGenerator:
                 return
             
             if len(loopBack_nodeID_info) != 1:
-                sys.exit("number of nodes connected from a parallelogram node has to be 1")
+                set_sys_exit_error_msg("number of nodes connected from a parallelogram node has to be 1")
             
             loopBackID, _ = loopBack_nodeID_info[0]
 
             if self.get_node_shape(loopBackID) != "pentagon":
-                sys.exit("shape of loopBack node has to be pentagon")
+                set_sys_exit_error_msg("shape of loopBack node has to be pentagon")
             if (loopBack_expr_node_info := self.get_expr_node_info(loopBackID)) is None:
-                sys.exit(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
+                set_sys_exit_error_msg(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
             if int(self.get_node_label(nodeID)) != loop_back_line:
-                sys.exit("line of execution looped back is incorrect")
+                set_sys_exit_error_msg("line of execution looped back is incorrect")
 
             # for(A; B; C) について、Cがある場合　と　それ以外 (forでCがない場合と、whileの場合)で区別する
             if (change_expr_node_info := self.get_expr_node_info(nodeID)) is not None:
@@ -1824,11 +1824,11 @@ class BitMapGenerator:
         # 話しかけると関数の遷移元に戻るようにする
         elif self.get_node_shape(nodeID) == 'lpromoter':
             if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                sys.exit(f"flowchart node of change expression statement in return statement is not found")
+                set_sys_exit_error_msg(f"flowchart node of change expression statement in return statement is not found")
 
             # まだvoidができていない? 後でvoidのやり方を考える
             if expr_node_info["line"] is None:
-                sys.exit("our game does not accept void function yet")
+                set_sys_exit_error_msg("our game does not accept void function yet")
 
             comment_window_info = self.create_comment_window_info(
                 "end",
@@ -1863,7 +1863,7 @@ class BitMapGenerator:
         # 変数宣言ノードから遷移するノードの種類で変数のタイプを分ける
         elif self.get_node_shape(nodeID) == 'signature':
             if (var_info := self.var_info.get(nodeID)) is None:
-                sys.exit(f"var info of variable {self.get_node_label(nodeID)} is not found")
+                set_sys_exit_error_msg(f"var info of variable {self.get_node_label(nodeID)} is not found")
 
             ### ここでprevious_lineとvar_info["start"]を繋げる(ただし、同じなら繋げない)
             self.set_next_line(previous_line, var_info["start"])
@@ -1887,7 +1887,7 @@ class BitMapGenerator:
 
             next_nodeID_info = self.pop_next_node_info(nodeID)
             if len(next_nodeID_info) != 1:
-                sys.exit("only one node has to be connected from a variable-declaration node")
+                set_sys_exit_error_msg("only one node has to be connected from a variable-declaration node")
 
             ### ここでvar_info["start"]を渡す
             self.track_function_body(
@@ -1942,26 +1942,26 @@ class BitMapGenerator:
                 crnt_room_nodeID = nodeID
 
                 if len(to_nodeID_info) != 1:
-                    sys.exit("number of nodes which are connected from a for-initializer node has to be 1")
+                    set_sys_exit_error_msg("number of nodes which are connected from a for-initializer node has to be 1")
 
                 next_nodeID = to_nodeID_info[0][0]
                 if self.get_node_shape(next_nodeID) != 'pentagon':
-                    sys.exit("shape of nodes connected from a for-initializer node without var-initializer have to be 'pentagon")
+                    set_sys_exit_error_msg("shape of nodes connected from a for-initializer node without var-initializer have to be 'pentagon")
             # (変数宣言ではない)初期化式がない場合 → 変数宣言があるなら、その変数に当たる宝箱を作る。
             else:
                 var_decl_nodeID: str | None = None
                 for to_nodeID, _ in to_nodeID_info:
                     if self.get_node_shape(to_nodeID) == 'signature':
-                        sys.exit("this game does not allow variable initializers in for statement initializer")
+                        set_sys_exit_error_msg("this game does not allow variable initializers in for statement initializer")
                         if var_decl_nodeID is not None:
-                            sys.exit("number of signature nodes which are connected from a for-initializer node has to be 1")
+                            set_sys_exit_error_msg("number of signature nodes which are connected from a for-initializer node has to be 1")
                         var_decl_nodeID = to_nodeID
                     elif self.get_node_shape(to_nodeID) == 'pentagon':
                         if next_nodeID is not None:
-                            sys.exit("number of nodes which are connected from a for-initializer node execpt of a signature node has to be 1")
+                            set_sys_exit_error_msg("number of nodes which are connected from a for-initializer node execpt of a signature node has to be 1")
                         next_nodeID = to_nodeID
                     else:
-                        sys.exit("shape of nodes connected from a for-initializer node have to be 'signature' or 'pentagon")
+                        set_sys_exit_error_msg("shape of nodes connected from a for-initializer node have to be 'signature' or 'pentagon")
 
                 self.create_path(
                     crnt_room_nodeID, 
@@ -1977,9 +1977,9 @@ class BitMapGenerator:
                     var_info_list: list[VarInfo] = []
                     while True:
                         if (var_info := self.var_info.get(to_nodeID)) is None:
-                            sys.exit("var_info of a variable declaration of for initializer is not found")
+                            set_sys_exit_error_msg("var_info of a variable declaration of for initializer is not found")
                         if (var_expr_node_info := self.get_expr_node_info(to_nodeID)) is None:
-                            sys.exit("expr node info in scalar varialbe is not found")
+                            set_sys_exit_error_msg("expr node info in scalar varialbe is not found")
                         # ここに関数の呼び出しのコメントが含まれている場合を考える必要がある
                         self.map_info.set_treasure(crnt_room_nodeID, self.get_node_label(to_nodeID), var_info, self.func_name)
                         var_info_list.append(var_info)
@@ -1988,11 +1988,11 @@ class BitMapGenerator:
                         if len(var_nodeID_info) == 0:
                             break
                         if len(var_nodeID_info) != 1:
-                            sys.exit("error in number of nodes connected fron var node")
+                            set_sys_exit_error_msg("error in number of nodes connected fron var node")
 
                         to_nodeID, _ = var_nodeID_info[0]
                         if self.get_node_shape(to_nodeID) != 'signature':
-                            sys.exit("error in shape of node \"signature\"")
+                            set_sys_exit_error_msg("error in shape of node \"signature\"")
 
                     if len(var_info_list):
                         self.map_info.execution_comment_handler.register_for_var_initializer_comment(
@@ -2002,7 +2002,7 @@ class BitMapGenerator:
                 
             # for文の条件文に当たるノードが無いのはおかしい
             if next_nodeID is None or self.get_node_label(next_nodeID) != "for":
-                sys.exit("next node of a for initializer node is not found")
+                set_sys_exit_error_msg("next node of a for initializer node is not found")
 
             ### ここではprevious_lineを渡さない
             self.track_function_body(crnt_room_nodeID, next_nodeID)
@@ -2012,7 +2012,7 @@ class BitMapGenerator:
         elif self.get_node_shape(nodeID) == 'hexagon':
             # warp_nodeIDが必要なのでここで解析する
             if (execution_info := self.map_info.execution_info.get(nodeID)) is None:
-                sys.exit("an execution information of a line breaker is not found")
+                set_sys_exit_error_msg("an execution information of a line breaker is not found")
 
             self.create_room(nodeID, crnt_room_nodeID)
             self.map_info.set_move_event(
@@ -2032,7 +2032,7 @@ class BitMapGenerator:
                 return
 
             if len(next_nodeID_info) != 1:
-                sys.exit("only one node has to be connected from a hexagon node")
+                set_sys_exit_error_msg("only one node has to be connected from a hexagon node")
 
             next_nodeID, edgeLabel = next_nodeID_info[0]
 
@@ -2042,21 +2042,21 @@ class BitMapGenerator:
                     loopBack_nodeID_info = self.nextNodeInfo.get(next_nodeID)
 
                     if loopBack_nodeID_info is None:
-                        sys.exit("there is a loopBackID at a parallelogram node")
+                        set_sys_exit_error_msg("there is a loopBackID at a parallelogram node")
                     if len(loopBack_nodeID_info) != 1:
-                        sys.exit("number of nodes connected from a parallelogram node has to be 1")
+                        set_sys_exit_error_msg("number of nodes connected from a parallelogram node has to be 1")
                     
                     loopBackID, _ = loopBack_nodeID_info[0]
 
                     if self.get_node_shape(loopBackID) != "pentagon":
-                        sys.exit("shape of loopBack node has to be pentagon")
+                        set_sys_exit_error_msg("shape of loopBack node has to be pentagon")
                     if (expr_node_info := self.get_expr_node_info(loopBackID)) is None:
-                        sys.exit(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
+                        set_sys_exit_error_msg(f"flowchart node of change expression statement in {self.get_node_label(loopBackID)} is not found")
                     if int(self.get_node_label(next_nodeID)) != expr_node_info["line"]:
-                        sys.exit("line of execution looped back is incorrect")
+                        set_sys_exit_error_msg("line of execution looped back is incorrect")
 
                     if condition_comment_window_info is not None:
-                        sys.exit("there has not be comment_window_info here")
+                        set_sys_exit_error_msg("there has not be comment_window_info here")
 
                     self.map_info.set_move_event(
                         crnt_room_nodeID, 
@@ -2077,10 +2077,10 @@ class BitMapGenerator:
                 elif self.get_node_shape(next_nodeID) == 'diamond':
                     self.create_room(next_nodeID, crnt_room_nodeID)
                     if (expr_node_info := self.get_expr_node_info(next_nodeID)) is None:
-                        sys.exit(f"flowchart node of change expression statement in do-while statement is not found")
+                        set_sys_exit_error_msg(f"flowchart node of change expression statement in do-while statement is not found")
 
                     if condition_comment_window_info is not None:
-                        sys.exit("there has not be comment_window_info here")
+                        set_sys_exit_error_msg("there has not be comment_window_info here")
 
                     self.map_info.set_move_event(
                         crnt_room_nodeID, 
@@ -2096,7 +2096,7 @@ class BitMapGenerator:
                         self.func_name
                     )
                 else:
-                    sys.exit("impossible node is found")
+                    set_sys_exit_error_msg("impossible node is found")
 
                 self.map_info.execution_comment_handler.register_control_flow_comment(
                     execution_info
@@ -2126,7 +2126,7 @@ class BitMapGenerator:
                     execution_info
                 )
             else:
-                sys.exit("unknown node is found")
+                set_sys_exit_error_msg("unknown node is found")
 
             ### execution_info["line"]を渡す
             self.track_function_body(
@@ -2147,7 +2147,7 @@ class BitMapGenerator:
                 return
             
             if len(true_nodeID_info) != 1:
-                sys.exit("number of child nodes of do-while entry node has to be 1")
+                set_sys_exit_error_msg("number of child nodes of do-while entry node has to be 1")
             
             trueNodeID, _ = true_nodeID_info[0]
             
@@ -2175,7 +2175,7 @@ class BitMapGenerator:
 
             next_nodeID_info = self.pop_next_node_info(nodeID)
             if len(next_nodeID_info) != 1:
-                sys.exit("only one node has to be connected from a do-while-entry node")
+                set_sys_exit_error_msg("only one node has to be connected from a do-while-entry node")
 
             ### lineをprevious_lineとして渡す
             self.track_function_body(
@@ -2233,10 +2233,10 @@ class BitMapGenerator:
                 crnt_room_nodeID = nodeID
 
             if (execution_info := self.map_info.execution_info.get(nodeID)) is None:
-                sys.exit("execution_info is not found")
+                set_sys_exit_error_msg("execution_info is not found")
 
             if (expr_node_info := self.get_expr_node_info(nodeID)) is None:
-                sys.exit("expr_node_info is not found")
+                set_sys_exit_error_msg("expr_node_info is not found")
 
             expr_line = expr_node_info["line"]
 
@@ -2279,7 +2279,7 @@ class BitMapGenerator:
 
             next_nodeID_info = self.pop_next_node_info(nodeID)
             if len(next_nodeID_info) != 1:
-                sys.exit("only one node has to be connected from an expression node")
+                set_sys_exit_error_msg("only one node has to be connected from an expression node")
 
             ### expr_lineを登録する
             self.track_function_body(
@@ -2333,7 +2333,7 @@ class BitMapGenerator:
             return
 
         if not self.map_info.line_info_dict[self.func_name].set_next_line(previous_line, next_line):
-            sys.exit("failed in setting a next line")
+            set_sys_exit_error_msg("failed in setting a next line")
 
     def create_room(self, nodeID: str, prev_room_nodeID: str | None = None):
         if (size := self.room_size_info[self.func_name].pop(nodeID, None)) is None:
@@ -2676,9 +2676,9 @@ class BitMapGenerator:
 
                 if comment_window_info is not None:
                     if (execution_info := self.map_info.execution_info.get(goal_nodeID, None)) is None:
-                        sys.exit("execution info on path is not found")
+                        set_sys_exit_error_msg("execution info on path is not found")
                     if execution_info["type"] == "expression":
-                        sys.exit("a unit of door and condition-check character cannot be produced if type of execution info is \"expression\"")
+                        set_sys_exit_error_msg("a unit of door and condition-check character cannot be produced if type of execution info is \"expression\"")
                     self.map_info.set_door(path[0], dir, comment_window_info)     
                     door_direction = (path[i-1][0] - path[i][0], path[i-1][1] - path[i][1])
                     if door_direction == (1,0): # 下向き d (キャラクターが向いている方向)
@@ -2711,9 +2711,9 @@ class BitMapGenerator:
 
         # デバッグ用に要素の中身が正しいか確認する
         if any(len(c) == 0 for c in comment_window_info["detail"]):
-            sys.exit("each list in detail must have one or more elements")
+            set_sys_exit_error_msg("each list in detail must have one or more elements")
         
         if sum(len(c)-1 for c in comment_window_info["detail"]) != len(comment_window_info["hover"]):
-            sys.exit("number of elements in detail and ones in hover do not match")
+            set_sys_exit_error_msg("number of elements in detail and ones in hover do not match")
 
         return comment_window_info
