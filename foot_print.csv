@@ -1,4 +1,13 @@
-start,105_pointer,7, 58
-itemget, 105_pointer,9, 59,data
-itemget, 105_pointer,2, 51,p
-end, 105_pointer,2, 51
+start,103_loops,20, 96
+itemget, 103_loops,19, 95,base_calorie
+itemget, 103_loops,10, 90,total
+itemget, 103_loops,7, 85,days
+itemget, 103_loops,16, 78,i
+itemget, 103_loops,30, 66,goal
+itemget, 103_loops,41, 62,exercise
+itemget, 103_loops,33, 57,session
+itemget, 103_loops,50, 34,cooldown_days
+itemget, 103_loops,59, 33,cooldown_count
+jump, 103_loops,53, 23
+jump, 103_loops,51, 24
+finished

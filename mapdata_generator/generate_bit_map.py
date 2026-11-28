@@ -28,7 +28,7 @@ from rpg_aquatan_utils.types.map_data_generator import *
 
 # condition_line_trackerを修正する必要がある
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = BASE_DIR + '/mapdata_for_test'
+DATA_DIR = BASE_DIR + '/mapdata'
 
 class RoomInfo(TypedDict):
     room_size: tuple[int, int, int, int]
@@ -2657,7 +2657,8 @@ class BitMapGenerator:
             または
             候補が見つかったとしてもその通路を構成するマスの数が1以下 (通路のマスの数は一方通行扉と確認キャラを配置するために「2以上」であることが必要) かつ comment_window_infoがNoneではない (通路にすると、一方通行扉と確認キャラを配置する必要がある場合) 
             '''
-            if len(path) == 0 or (len(path) == 1 and comment_window_info is not None):
+            path_len = len(path)
+            if len(path) == 0 or (len(path) in (1, 2) and comment_window_info is not None):
                 self.map_info.set_move_event(
                     start_nodeID, 
                     goal_nodeID, 
@@ -2666,13 +2667,11 @@ class BitMapGenerator:
                 ) 
             else:
                 for i in range(len(path)):
+                    self.floor_map[path[i][0], path[i][1]] = 0
                     if ((to_y <= path[i][0] <= to_y+to_height-1 and (path[i][1] == to_x-1 or path[i][1] == to_x+to_width))
                         or (to_x <= path[i][1] <= to_x+to_width-1 and (path[i][0] == to_y-1 or path[i][0] == to_y+to_height))):
                         path = path[:i+1]
                         break
-
-                for i in range(len(path)):
-                    self.floor_map[path[i][0], path[i][1]] = 0
 
                 if comment_window_info is not None:
                     if (execution_info := self.map_info.execution_info.get(goal_nodeID, None)) is None:

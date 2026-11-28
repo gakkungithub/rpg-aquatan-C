@@ -20,7 +20,7 @@ from rpg_aquatan_utils.types.execution_info import *
 from rpg_aquatan_utils.types.map_data_generator import *
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = ROOT_DIR + '/mapdata_for_test'
+DATA_DIR = ROOT_DIR + '/mapdata'
 
 class BreakerPos(TypedDict):
     nodeID: str
