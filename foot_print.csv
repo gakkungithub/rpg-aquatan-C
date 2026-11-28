@@ -1,13 +1,11 @@
-start,103_loops,20, 96
-itemget, 103_loops,19, 95,base_calorie
-itemget, 103_loops,10, 90,total
-itemget, 103_loops,7, 85,days
-itemget, 103_loops,16, 78,i
-itemget, 103_loops,30, 66,goal
-itemget, 103_loops,41, 62,exercise
-itemget, 103_loops,33, 57,session
-itemget, 103_loops,50, 34,cooldown_days
-itemget, 103_loops,59, 33,cooldown_count
-jump, 103_loops,53, 23
-jump, 103_loops,51, 24
+start,101_variables_expression,10, 50
+itemget, 101_variables_expression,12, 48,day
+itemget, 101_variables_expression,3, 44,base_temp
+itemget, 101_variables_expression,16, 42,humidity
+itemget, 101_variables_expression,26, 39,pressure
+itemget, 101_variables_expression,34, 30,weather_code
+itemget, 101_variables_expression,41, 27,temp_variation
+itemget, 101_variables_expression,48, 23,temperature
+itemget, 101_variables_expression,60, 15,dew_point
+itemget, 101_variables_expression,73, 9,storm_factor
 finished

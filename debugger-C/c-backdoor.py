@@ -201,6 +201,7 @@ class DynamicCommentHandler:
                 if "func_name" in expr_description and expr_description["is_custom"]:
                     self.skipped_function_list.append(expr_description["func_name"])
 
+                self.expr_description_to_show_by_id[self.index_scanned_currently] = ""
                 self.index_scanned_currently += 1
                 continue
 
@@ -327,8 +328,8 @@ class DynamicCommentHandler:
                         str_to_show_list.append(f"<{str_to_show_base}>(={value})")
                     else: # expr_id
                         str_to_show_base = self.get_expr_to_show(expr_part["expr_id"])
-                        if (result := self.get_expr_result(expr_part["expr_id"])) is None:
-                            sys.exit(f"result of {str_to_show_base} is not found")
+
+                        result = self.get_expr_result(expr_part["expr_id"])
 
                         str_for_evaluation_list.append(result)
                         str_to_show_list.append(f"<{str_to_show_base}>(={result})")
@@ -340,7 +341,7 @@ class DynamicCommentHandler:
                 c ? a : b の時はaが未処理ならbの値, bが未処理ならaの値をstr_for_evaluationリストに登録する
                 未処理の計算式については、Noneをstr_for_evaluationに登録する
                 '''
-                description_to_show_list = []
+                description_to_show_list: list[str] = []
                 for expr_part in expr_description["description"]:
                     if "category" in expr_part:
                         reference_description_base, reference_description_to_show = self.get_reference_expr_comments(expr_part, frame)
@@ -360,7 +361,7 @@ class DynamicCommentHandler:
                     elif "addr_operator" in expr_part:
                         sys.exit("description parts cannot include address part")
                     else: # expr_id
-                        description_to_show_list.append(self.get_expr_result(expr_part["expr_id"]))
+                        description_to_show_list.append(self.get_expr_to_show(expr_part["expr_id"]))
 
                 description_to_show = " ".join(description_to_show_list)
                 if special_operator == "||":
@@ -555,7 +556,7 @@ class DynamicCommentHandler:
         if any(not isinstance(expr_description, str) for expr_description in self.expr_description_to_show_by_id):
             sys.exit("this expression is not completely analyzed yet")
         
-        return '\f'.join(self.expr_description_to_show_by_id)
+        return '\f'.join(expr for expr in self.expr_description_to_show_by_id if expr != "")
 
 
 # 変数の実行処理ハンドラ
@@ -1431,7 +1432,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
                 break
 
             self.dynamic_variable_info_by_line[line_number] = dynamic_variable_info_list
-  
+
         def transform_2_dynamic_var_node(self, var_node: VarNode, side_effect_values: dict[str, SideEffectValue]):
             return DynamicVarNode(
                 name = var_node["name"],
@@ -1884,11 +1885,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
             else:
                 value = previous_value.value if previous_value else None
 
-            comment = (
-                dynamic_comment_handler.get_str_after_analysis_completed()
-                if dynamic_comment_handler
-                else None
-            )
+            comment = dynamic_comment_handler.get_str_after_analysis_completed() if dynamic_comment_handler else None
 
             previous_value_children = previous_value.children if previous_value is not None else {}
 
